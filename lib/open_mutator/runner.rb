@@ -108,6 +108,13 @@ module OpenMutator
                end
       return unless helper && File.exist?(helper)
 
+      # Mirror what `bundle exec rspec` provides before a helper loads:
+      # rspec-core itself (helpers call RSpec.configure at the top level) and
+      # the default path (spec/) on $LOAD_PATH (rails_helper.rb relies on it
+      # for its bare `require "spec_helper"`).
+      require "rspec/core"
+      spec_dir = File.dirname(helper)
+      $LOAD_PATH.unshift(spec_dir) unless $LOAD_PATH.include?(spec_dir)
       require helper
       disarm_simplecov
     end

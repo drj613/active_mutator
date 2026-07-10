@@ -1673,7 +1673,7 @@ git add -A && git commit -m "docs: README and mutation-check skill"
 - Test: `spec/e2e/devloop_spec.rb` (`:e2e`)
 - Modify: `spec/e2e/tiny_project_spec.rb` (counts unchanged — verify only)
 
-- [ ] **Step 1: Write the E2E**
+- [x] **Step 1: Write the E2E**
 
 `spec/e2e/devloop_spec.rb`:
 ```ruby
@@ -1745,22 +1745,22 @@ end
 ```
 Note: `with_fixture_copy` requires the fixture's `spec_helper.rb` to load `lib/greeter.rb` — it doesn't; the spec file requires it itself (`require_relative`), which also makes it visible to the baseline instrumented run. The tiny_project `.rspec` (`--require spec_helper`) is untouched.
 
-- [ ] **Step 2: Run the E2E**
+- [x] **Step 2: Run the E2E**
 
 Run: `OPEN_MUTATOR_E2E=1 bundle exec rspec spec/e2e/devloop_spec.rb`
 Expected: PASS. Debug hints if not: acceptance test — fingerprint ordinal/relative-path mismatches show up as `accepted: 0` on run 3 (dump the ledger and compare against the JSON survivors' file/subject fields); `--changed` test — if Calculator subjects appear, `SinceFilter` ran against the wrong root or the fixture git repo didn't commit.
 
-- [ ] **Step 3: Verify existing E2Es still hold**
+- [x] **Step 3: Verify existing E2Es still hold**
 
 Run: `OPEN_MUTATOR_INTEGRATION=1 OPEN_MUTATOR_E2E=1 bundle exec rspec`
 Expected: all green — tiny_project E2E counts unchanged (2 survivors, eligible? all killed, untested_helper uncovered).
 
-- [ ] **Step 4: Rails E2E (opt-in, heavier)**
+- [x] **Step 4: Rails E2E (opt-in, heavier)**
 
 Run: `OPEN_MUTATOR_RAILS_E2E=1 bundle exec rspec spec/e2e/rails_app_spec.rb`
 Expected: PASS — the preload path now also loads the fixture app's `rails_helper` in the parent; if world-group leakage or SimpleCov assumptions break anything, this is where it shows.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add -A && git commit -m "test: dev-loop E2E — acceptance ledger and --changed scoping"
