@@ -485,7 +485,7 @@ git add -A && git commit -m "feat: Subject and Prism-based SubjectFinder"
 - Create: `spec/support/operator_helper.rb`
 - Test: `spec/open_mutator/operators/conditional_boundary_spec.rb`
 
-- [ ] **Step 1: Write the shared operator test helper**
+- [x] **Step 1: Write the shared operator test helper**
 
 `spec/support/operator_helper.rb`:
 ```ruby
@@ -510,7 +510,7 @@ end
 RSpec.configure { |c| c.include OperatorHelper }
 ```
 
-- [ ] **Step 2: Write the failing tests**
+- [x] **Step 2: Write the failing tests**
 
 `spec/open_mutator/operators/conditional_boundary_spec.rb`:
 ```ruby
@@ -538,12 +538,12 @@ RSpec.describe OpenMutator::Operators::ConditionalBoundary do
 end
 ```
 
-- [ ] **Step 3: Run tests to verify they fail**
+- [x] **Step 3: Run tests to verify they fail**
 
 Run: `bundle exec rspec spec/open_mutator/operators/conditional_boundary_spec.rb`
 Expected: FAIL with `uninitialized constant OpenMutator::Operators`
 
-- [ ] **Step 4: Implement**
+- [x] **Step 4: Implement**
 
 `lib/open_mutator/operators/base.rb`:
 ```ruby
@@ -600,12 +600,12 @@ require_relative "open_mutator/operators/base"
 require_relative "open_mutator/operators/conditional_boundary"
 ```
 
-- [ ] **Step 5: Run tests to verify they pass**
+- [x] **Step 5: Run tests to verify they pass**
 
 Run: `bundle exec rspec spec/open_mutator/operators/conditional_boundary_spec.rb`
 Expected: 4 examples, 0 failures
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add -A && git commit -m "feat: operator base/registry and ConditionalBoundary operator"
