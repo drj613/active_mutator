@@ -2977,7 +2977,7 @@ git add -A && git commit -m "test: end-to-end pipeline against tiny_project fixt
 **Files:**
 - Test: `spec/property/reparse_spec.rb`
 
-- [ ] **Step 1: Write the property test**
+- [x] **Step 1: Write the property test**
 
 Corpus = open_mutator's own `lib/`. Every operator, every node, every emitted edit: the mutated file must re-parse. This asserts operators produce position-valid replacements — the Engine's gate discards failures at runtime, but a failure here is an operator bug to fix, not to discard.
 
@@ -3012,12 +3012,12 @@ RSpec.describe "operator re-parse property" do
 end
 ```
 
-- [ ] **Step 2: Run it**
+- [x] **Step 2: Run it**
 
 Run: `bundle exec rspec spec/property/reparse_spec.rb`
 Expected: PASS. If an operator fails, tighten its `applies?`-style guards (the fix belongs in the operator, mirroring the heredoc/interpolation guards in `Literal`).
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add -A && git commit -m "test: property gate — all emitted mutants re-parse"
