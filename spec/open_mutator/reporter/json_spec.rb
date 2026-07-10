@@ -31,5 +31,11 @@ RSpec.describe OpenMutator::Reporter::Json do
       "file" => "lib/calculator.rb",
       "line" => 11
     )
+    expect(data["exit_reason"]).to eq("unaccepted_survivors")
+  end
+
+  it "reports exit_reason clean when nothing survives" do
+    reporter.summary([], invalid_count: 0)
+    expect(JSON.parse(out.string)["exit_reason"]).to eq("clean")
   end
 end

@@ -15,23 +15,33 @@ module OpenMutator
       mutations = analyses.flat_map(&:mutations)
       invalid_count = analyses.sum(&:invalid_count)
 
-      items, uncovered = plan_work(mutations, map)
-      uncovered.each { |r| @reporter.on_result(r) }
+      fingerprints = Fingerprint.for_mutations(mutations, root: @config.root)
+      ledger = AcceptedLedger.load(@config.root)
+      warn_stale(ledger, fingerprints.values)
+
+      items, pre_results = plan_work(mutations, map, ledger: ledger, fingerprints: fingerprints)
+      pre_results.each { |r| @reporter.on_result(r) }
       scheduler = Scheduler.new(jobs: @config.jobs, on_result: @reporter.method(:on_result))
-      results = scheduler.run(items) + uncovered
+      results = scheduler.run(items) + pre_results
+
+      accept_survivors!(ledger, results, fingerprints) if @config.accept_survivors
 
       @reporter.summary(results, invalid_count: invalid_count)
       exit_code(results)
     end
 
-    # Returns [work_items, uncovered_results]. Public for unit testing.
-    def plan_work(mutations, map)
+    # Returns [work_items, pre_results]. Public for unit testing.
+    def plan_work(mutations, map, ledger: nil, fingerprints: {})
       items = []
-      uncovered = []
+      pre_results = []
       mutations.each do |mutation|
+        if ledger&.accepted?(fingerprints[mutation])
+          pre_results << Result.new(mutation: mutation, status: :accepted, details: nil)
+          next
+        end
         example_ids = map.examples_for(mutation.subject.file, mutation.lines)
         if example_ids.empty?
-          uncovered << Result.new(mutation: mutation, status: :uncovered, details: nil)
+          pre_results << Result.new(mutation: mutation, status: :uncovered, details: nil)
         else
           lane = example_ids.any? { |id| serial_example?(id) } ? :serial : :parallel
           timeout = map.time_for(example_ids) * @config.timeout_factor + @config.timeout_floor
@@ -39,7 +49,7 @@ module OpenMutator
           items << WorkItem.new(mutation: mutation, example_ids: example_ids, timeout: timeout, lane: lane)
         end
       end
-      [items, uncovered]
+      [items, pre_results]
     end
 
     def exit_code(results)
@@ -108,6 +118,19 @@ module OpenMutator
     # bogus reason. Neutralize it.
     def disarm_simplecov
       SimpleCov.at_exit {} if defined?(SimpleCov)
+    end
+
+    def accept_survivors!(ledger, results, fingerprints)
+      survivors = results.select { |r| r.status == :survived }.map { |r| fingerprints[r.mutation] }
+      return if survivors.empty?
+
+      ledger.accept!(survivors, fingerprints.values)
+    end
+
+    def warn_stale(ledger, all_fingerprints)
+      ledger.stale_entries(all_fingerprints).each do |entry|
+        warn "open_mutator: stale accepted fingerprint (no matching mutant): #{entry.subject} — #{entry.description}"
+      end
     end
   end
 end

@@ -1,7 +1,7 @@
 module OpenMutator
   module Reporter
     class Terminal
-      CHARS = { killed: ".", survived: "S", timeout: "T", error: "E", uncovered: "U" }.freeze
+      CHARS = { killed: ".", survived: "S", timeout: "T", error: "E", uncovered: "U", accepted: "A" }.freeze
 
       def initialize(out: $stdout)
         @out = out

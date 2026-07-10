@@ -22,8 +22,8 @@ RSpec.describe OpenMutator::Reporter::Terminal do
   end
 
   it "prints one progress char per result" do
-    %i[killed survived timeout error uncovered].each { |s| reporter.on_result(result(s)) }
-    expect(out.string).to eq(".STEU")
+    %i[killed survived timeout error uncovered accepted].each { |s| reporter.on_result(result(s)) }
+    expect(out.string).to eq(".STEUA")
   end
 
   it "summarizes counts, score, and survivor diffs" do

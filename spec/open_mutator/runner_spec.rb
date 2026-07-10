@@ -95,4 +95,21 @@ RSpec.describe OpenMutator::Runner do
       expect(fake.at_exit_calls.size).to eq(1)
     end
   end
+
+  describe "acceptance integration" do
+    it "pre-classifies ledger-accepted mutants and never schedules them" do
+      m = mutation(line: 2)
+      map = instance_double(OpenMutator::CoverageMap)
+      allow(map).to receive(:examples_for).and_return(["e1"])
+      allow(map).to receive(:time_for).and_return(0.1)
+      fps = OpenMutator::Fingerprint.for_mutations([m], root: config.root)
+      ledger = instance_double(OpenMutator::AcceptedLedger)
+      allow(ledger).to receive(:accepted?).with(fps[m]).and_return(true)
+
+      runner = described_class.new(config)
+      items, pre_results = runner.plan_work([m], map, ledger: ledger, fingerprints: fps)
+      expect(items).to eq([])
+      expect(pre_results.map(&:status)).to eq([:accepted])
+    end
+  end
 end

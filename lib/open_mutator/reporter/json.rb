@@ -15,7 +15,8 @@ module OpenMutator
           "score" => Terminal.score(counts),
           "counts" => counts.transform_keys(&:to_s),
           "invalid" => invalid_count,
-          "results" => results.map { |r| serialize(r) }
+          "results" => results.map { |r| serialize(r) },
+          "exit_reason" => counts.fetch(:survived, 0).positive? ? "unaccepted_survivors" : "clean"
         )
       end
 
