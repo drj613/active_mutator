@@ -49,6 +49,9 @@ module OpenMutator
     end
 
     def preload!
+      # Workers run the test suite, so the app must boot in the test
+      # environment (the development database may not even exist).
+      ENV["RAILS_ENV"] ||= "test"
       @config.requires.each { |f| require File.expand_path(f, @config.root) }
       environment = File.join(@config.root, "config", "environment.rb")
       if @config.requires.empty? && File.exist?(environment)
