@@ -888,7 +888,7 @@ git add -A && git commit -m "feat: BaselineDelta — surgical vs full refresh de
 - Create: `spec/support/fixture_copy.rb`
 - Test: `spec/open_mutator/baseline_refresh_spec.rb` (`:integration`)
 
-- [ ] **Step 1: Write the fixture-copy helper**
+- [x] **Step 1: Write the fixture-copy helper**
 
 `spec/support/fixture_copy.rb`:
 ```ruby
@@ -924,7 +924,7 @@ end
 RSpec.configure { |c| c.include FixtureCopy }
 ```
 
-- [ ] **Step 2: Write the failing integration test**
+- [x] **Step 2: Write the failing integration test**
 
 `spec/open_mutator/baseline_refresh_spec.rb`:
 ```ruby
@@ -969,12 +969,12 @@ RSpec.describe "Baseline delta refresh", :integration do
 end
 ```
 
-- [ ] **Step 3: Run test to verify it fails**
+- [x] **Step 3: Run test to verify it fails**
 
 Run: `OPEN_MUTATOR_INTEGRATION=1 bundle exec rspec spec/open_mutator/baseline_refresh_spec.rb`
 Expected: FAIL with `NoMethodError: undefined method 'last_refresh'` — the `last_refresh` marker (`:cached`/`:partial`/`:full`) is the observable that distinguishes surgical refresh from the always-full v1 behavior (timing assertions would be flaky).
 
-- [ ] **Step 4: Implement**
+- [x] **Step 4: Implement**
 
 In `lib/open_mutator/baseline.rb`, replace `coverage_map` and add the partial machinery:
 ```ruby
@@ -1061,12 +1061,12 @@ Extract the env hash used by `run_baseline!` into `baseline_env(out_path)` and r
 (`run_baseline!` keeps its raise messages; it now calls `baseline_env(@out_path)`.)
 Add `require "fileutils"` if not already present (it is, from v1).
 
-- [ ] **Step 5: Run tests to verify they pass**
+- [x] **Step 5: Run tests to verify they pass**
 
 Run: `OPEN_MUTATOR_INTEGRATION=1 bundle exec rspec spec/open_mutator/baseline_refresh_spec.rb spec/open_mutator/baseline_spec.rb`
 Expected: PASS (refresh 2, baseline 4)
 
-- [ ] **Step 6: Full tagged suite, commit**
+- [x] **Step 6: Full tagged suite, commit**
 
 Run: `OPEN_MUTATOR_INTEGRATION=1 OPEN_MUTATOR_E2E=1 bundle exec rspec` — green.
 ```bash
