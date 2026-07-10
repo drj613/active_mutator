@@ -4,6 +4,16 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [Unreleased]
+
+### Fixed
+
+- Orphan watchdog: if the parent process is killed in a way it cannot trap
+  (SIGKILL, closed terminal, CI teardown), the scheduler now detects the
+  reparenting, kills all running workers, and aborts. Before this fix an
+  orphaned run kept forking through the whole mutant queue unsupervised,
+  which could exhaust the machine's CPU.
+
 ## [0.1.0] - 2026-07-10
 
 Initial release.

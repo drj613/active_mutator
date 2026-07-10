@@ -16,6 +16,18 @@ RSpec.describe ActiveMutator::Scheduler do
     expect(results.map(&:status)).to eq(%i[killed killed killed])
   end
 
+  it "aborts and kills workers when the parent is orphaned" do
+    checks = 0
+    orphaned = -> { (checks += 1) > 1 } # healthy on the first tick, orphaned after
+    worker = ->(_m, _e, _w) { sleep 30 }
+    sched = described_class.new(jobs: 2, worker: worker, orphaned: orphaned)
+    started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+    expect { sched.run([item, item, item]) }
+      .to raise_error(ActiveMutator::Scheduler::OrphanedError)
+    elapsed = Process.clock_gettime(Process::CLOCK_MONOTONIC) - started
+    expect(elapsed).to be < 5 # workers were killed, not waited out
+  end
+
   it "marks silent crashes as :error" do
     worker = ->(_m, _e, _w) { Process.exit!(1) }
     results = scheduler(worker: worker).run([item])

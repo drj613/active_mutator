@@ -5,10 +5,14 @@ module ActiveMutator
   # Parent enforces per-item deadlines with SIGKILL (worker-side timeouts
   # cannot interrupt all infinite loops).
   class Scheduler
-    def initialize(jobs:, worker: Worker.method(:run), on_result: nil)
+    OrphanedError = Class.new(Error)
+
+    def initialize(jobs:, worker: Worker.method(:run), on_result: nil,
+                   orphaned: -> { Process.ppid == 1 })
       @jobs = jobs
       @worker = worker
       @on_result = on_result
+      @orphaned = orphaned
     end
 
     def run(items)
@@ -32,11 +36,28 @@ module ActiveMutator
       queue = items.dup
       results = []
       until queue.empty? && running.empty?
+        abort_if_orphaned!(running)
         spawn(queue.shift, running) while running.size < width && !queue.empty?
         reap(running, results)
         sleep 0.02 unless running.empty?
       end
       results
+    end
+
+    # SIGKILL on the parent (or a closed terminal, or CI teardown) cannot be
+    # trapped, so a killed run would otherwise keep forking through the whole
+    # queue with nobody supervising it. Orphaned processes get reparented to
+    # init/launchd (ppid 1); when that happens, stop everything and bail.
+    def abort_if_orphaned!(running)
+      return unless @orphaned.call
+
+      running.each_key do |pid|
+        kill(pid)
+      rescue StandardError
+        nil
+      end
+      running.clear
+      raise OrphanedError, "parent process died; aborting mutation run"
     end
 
     def spawn(item, running)
