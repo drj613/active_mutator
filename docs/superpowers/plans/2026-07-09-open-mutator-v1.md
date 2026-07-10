@@ -2914,7 +2914,7 @@ git add -A && git commit -m "feat: Config, CLI, and Runner orchestration"
 
 **Prerequisite:** the fixture's bundle must be installed (done once in Task 12 Step 1). Fresh clones/CI must run `cd spec/fixtures/tiny_project && BUNDLE_GEMFILE=Gemfile bundle install` before the tagged suite.
 
-- [ ] **Step 1: Write the E2E test**
+- [x] **Step 1: Write the E2E test**
 
 `spec/e2e/tiny_project_spec.rb`:
 ```ruby
@@ -2958,7 +2958,7 @@ RSpec.describe "tiny_project end-to-end", :e2e do
 end
 ```
 
-- [ ] **Step 2: Run it**
+- [x] **Step 2: Run it**
 
 Run: `OPEN_MUTATOR_E2E=1 bundle exec rspec spec/e2e/tiny_project_spec.rb`
 Expected: PASS. This is the whole pipeline; debugging lands here. Common failure causes, in order: coverage map path/keying mismatches (absolute vs relative), def-span extraction, worker exit protocol.
@@ -2966,7 +2966,7 @@ Expected: PASS. This is the whole pipeline; debugging lands here. Common failure
 If a status assertion fails, debug with the terminal format inside the fixture:
 `cd spec/fixtures/tiny_project && BUNDLE_GEMFILE=Gemfile bundle exec open_mutator lib`
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add -A && git commit -m "test: end-to-end pipeline against tiny_project fixture"
