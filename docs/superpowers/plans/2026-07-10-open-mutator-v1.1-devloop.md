@@ -1505,7 +1505,7 @@ git add -A && git commit -m "feat: accepted status, --accept-survivors, exit_rea
 **Files:**
 - Create: `docs/skills/mutation-check.md`, `README.md`
 
-- [ ] **Step 1: Write the skill**
+- [x] **Step 1: Write the skill**
 
 `docs/skills/mutation-check.md`:
 ```markdown
@@ -1562,7 +1562,7 @@ open_mutator flags (`--subject` scoping, patterns) to make a run pass.
   before writing new tests.
 ```
 
-- [ ] **Step 2: Write the README**
+- [x] **Step 2: Write the README**
 
 `README.md`:
 ```markdown
@@ -1661,7 +1661,7 @@ skipped · incremental baseline can miss examples that only cover changed
 code after the change (nightly `--force-baseline` recovers).
 ```
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add -A && git commit -m "docs: README and mutation-check skill"
