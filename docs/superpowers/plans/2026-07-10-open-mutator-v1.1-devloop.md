@@ -722,7 +722,7 @@ git add -A && git commit -m "feat: atomic flock-guarded cache writes; digest Gem
 - Create: `lib/open_mutator/baseline_delta.rb`
 - Test: `spec/open_mutator/baseline_delta_spec.rb`
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 `spec/open_mutator/baseline_delta_spec.rb`:
 ```ruby
@@ -801,12 +801,12 @@ RSpec.describe OpenMutator::BaselineDelta do
 end
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `bundle exec rspec spec/open_mutator/baseline_delta_spec.rb`
 Expected: FAIL — uninitialized constant
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 `lib/open_mutator/baseline_delta.rb`:
 ```ruby
@@ -870,12 +870,12 @@ end
 ```
 Append `require_relative "open_mutator/baseline_delta"` to `lib/open_mutator.rb`.
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `bundle exec rspec spec/open_mutator/baseline_delta_spec.rb`
 Expected: 10 examples, 0 failures
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add -A && git commit -m "feat: BaselineDelta — surgical vs full refresh decision"
