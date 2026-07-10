@@ -1494,7 +1494,7 @@ git add -A && git commit -m "feat: baseline hooks for per-example coverage captu
 - Create: `lib/open_mutator/coverage_map.rb`
 - Test: `spec/open_mutator/coverage_map_spec.rb`
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 `spec/open_mutator/coverage_map_spec.rb`:
 ```ruby
@@ -1548,12 +1548,12 @@ end
 
 Add `require "tmpdir"` and `require "json"` at the top of this spec file.
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `bundle exec rspec spec/open_mutator/coverage_map_spec.rb`
 Expected: FAIL with `uninitialized constant OpenMutator::CoverageMap`
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 `lib/open_mutator/coverage_map.rb`:
 ```ruby
@@ -1589,12 +1589,12 @@ Append to `lib/open_mutator.rb`:
 require_relative "open_mutator/coverage_map"
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `bundle exec rspec spec/open_mutator/coverage_map_spec.rb`
 Expected: 6 examples, 0 failures
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add -A && git commit -m "feat: CoverageMap inverted-index wrapper"
