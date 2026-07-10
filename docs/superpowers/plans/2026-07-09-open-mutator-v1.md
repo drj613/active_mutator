@@ -2059,7 +2059,7 @@ git add -A && git commit -m "feat: Worker — load specs, insert mutation, in-pr
 - Create: `lib/open_mutator/result.rb`, `lib/open_mutator/work_item.rb`, `lib/open_mutator/scheduler.rb`
 - Test: `spec/open_mutator/scheduler_spec.rb`
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 The scheduler forks real processes; tests inject a fake worker lambda so no RSpec-in-RSpec runs. These tests fork and sleep — they stay in the default suite (sub-second) but must not run on platforms without fork.
 
@@ -2117,12 +2117,12 @@ RSpec.describe OpenMutator::Scheduler do
 end
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `bundle exec rspec spec/open_mutator/scheduler_spec.rb`
 Expected: FAIL with `uninitialized constant OpenMutator::Scheduler`
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 `lib/open_mutator/result.rb`:
 ```ruby
@@ -2265,17 +2265,17 @@ require_relative "open_mutator/work_item"
 require_relative "open_mutator/scheduler"
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `bundle exec rspec spec/open_mutator/scheduler_spec.rb`
 Expected: 5 examples, 0 failures
 
-- [ ] **Step 5: Run whole suite**
+- [x] **Step 5: Run whole suite**
 
 Run: `bundle exec rspec`
 Expected: all pass
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add -A && git commit -m "feat: fork-pool scheduler with parent-enforced deadlines"
