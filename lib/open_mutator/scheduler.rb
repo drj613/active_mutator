@@ -12,21 +12,32 @@ module OpenMutator
     end
 
     def run(items)
-      queue = items.dup
+      previous_traps = nil
       running = {}
-      results = []
       previous_traps = install_signal_handlers(running)
-      until queue.empty? && running.empty?
-        spawn(queue.shift, running) while running.size < @jobs && !queue.empty?
-        reap(running, results)
-        sleep 0.02 unless running.empty?
-      end
+      results = []
+      # Browser-covered mutants each boot Chrome + an app server; running them
+      # concurrently melts CPUs and manufactures false timeouts. Parallel lane
+      # first at full width, then the serial lane one at a time.
+      results.concat(run_pool(items.select { |i| i.lane == :parallel }, @jobs, running))
+      results.concat(run_pool(items.select { |i| i.lane == :serial }, 1, running))
       results
     ensure
       restore_traps(previous_traps) if previous_traps
     end
 
     private
+
+    def run_pool(items, width, running)
+      queue = items.dup
+      results = []
+      until queue.empty? && running.empty?
+        spawn(queue.shift, running) while running.size < width && !queue.empty?
+        reap(running, results)
+        sleep 0.02 unless running.empty?
+      end
+      results
+    end
 
     def spawn(item, running)
       reader, writer = IO.pipe

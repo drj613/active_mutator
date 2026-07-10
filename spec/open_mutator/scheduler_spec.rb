@@ -1,8 +1,9 @@
 require "json"
+require "tempfile"
 
 RSpec.describe OpenMutator::Scheduler do
-  def item(timeout: 5.0)
-    OpenMutator::WorkItem.new(mutation: nil, example_ids: [], timeout: timeout)
+  def item(timeout: 5.0, lane: :parallel)
+    OpenMutator::WorkItem.new(mutation: nil, example_ids: [], timeout: timeout, lane: lane)
   end
 
   def scheduler(worker:, jobs: 2, on_result: nil)
@@ -46,5 +47,22 @@ RSpec.describe OpenMutator::Scheduler do
     scheduler(worker: worker, jobs: 2).run([item, item, item, item])
     elapsed = Process.clock_gettime(Process::CLOCK_MONOTONIC) - started
     expect(elapsed).to be >= 0.3 # 4 items / 2 jobs => at least two waves
+  end
+
+  it "runs serial-lane items one at a time, after the parallel lane" do
+    # Workers run in forked child processes, so an in-memory Queue can't
+    # observe cross-process ordering (fork gives each child its own copy —
+    # pushes never reach the parent). Use a flock-guarded append log instead.
+    log_path = Tempfile.new("order").path
+    append = ->(line) { File.open(log_path, "a") { |f| f.flock(File::LOCK_EX); f.puts(line) } }
+    worker = lambda do |_m, _e, writer|
+      append.call("start")
+      sleep 0.1
+      append.call("finish")
+      writer.puts(JSON.generate("status" => "killed", "details" => nil))
+    end
+    scheduler(worker: worker, jobs: 2).run([item(lane: :serial), item(lane: :serial)])
+    events = File.readlines(log_path).map { |l| l.chomp.to_sym }
+    expect(events).to eq(%i[start finish start finish]) # never two concurrent starts
   end
 end

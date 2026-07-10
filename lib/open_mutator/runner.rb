@@ -33,8 +33,10 @@ module OpenMutator
         if example_ids.empty?
           uncovered << Result.new(mutation: mutation, status: :uncovered, details: nil)
         else
+          lane = example_ids.any? { |id| serial_example?(id) } ? :serial : :parallel
           timeout = map.time_for(example_ids) * @config.timeout_factor + @config.timeout_floor
-          items << WorkItem.new(mutation: mutation, example_ids: example_ids, timeout: timeout)
+          timeout += @config.browser_boot_seconds if lane == :serial
+          items << WorkItem.new(mutation: mutation, example_ids: example_ids, timeout: timeout, lane: lane)
         end
       end
       [items, uncovered]
@@ -77,6 +79,11 @@ module OpenMutator
 
     def default_paths
       %w[app lib].select { |p| Dir.exist?(File.join(@config.root, p)) }
+    end
+
+    def serial_example?(example_id)
+      path = example_id.sub(%r{\A\./}, "")
+      @config.serial_patterns.any? { |pattern| path.start_with?(pattern) }
     end
 
     def preload_spec_helper!
