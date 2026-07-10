@@ -1083,7 +1083,7 @@ git add -A && git commit -m "feat: incremental baseline — delta refresh with r
 - Modify: `lib/open_mutator/since_filter.rb`, `lib/open_mutator/cli.rb`
 - Test: `spec/open_mutator/since_filter_spec.rb`, `spec/open_mutator/cli_spec.rb`
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Append to `spec/open_mutator/since_filter_spec.rb`:
 ```ruby
@@ -1107,12 +1107,12 @@ Append to `spec/open_mutator/cli_spec.rb` `.parse` block:
     end
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `bundle exec rspec spec/open_mutator/since_filter_spec.rb spec/open_mutator/cli_spec.rb`
 Expected: FAIL — `cover?` returns false for `:all`; `--changed` is an invalid option
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 In `lib/open_mutator/since_filter.rb`:
 - `initialize` gains untracked detection after the diff parse:
@@ -1150,12 +1150,12 @@ In `lib/open_mutator/cli.rb`, add after `--since`:
         o.on("--changed", "Mutate uncommitted work (alias for --since HEAD, plus untracked files)") { options[:since] = "HEAD" }
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `bundle exec rspec spec/open_mutator/since_filter_spec.rb spec/open_mutator/cli_spec.rb`
 Expected: PASS (since_filter 4, cli 7)
 
-- [ ] **Step 5: Full suite, commit**
+- [x] **Step 5: Full suite, commit**
 
 ```bash
 git add -A && git commit -m "feat: --changed flag; untracked files count as fully changed"
@@ -1167,7 +1167,7 @@ git add -A && git commit -m "feat: --changed flag; untracked files count as full
 - Create: `lib/open_mutator/fingerprint.rb`, `lib/open_mutator/accepted_ledger.rb`
 - Test: `spec/open_mutator/fingerprint_spec.rb`, `spec/open_mutator/accepted_ledger_spec.rb`
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 `spec/open_mutator/fingerprint_spec.rb`:
 ```ruby
@@ -1248,12 +1248,12 @@ RSpec.describe OpenMutator::AcceptedLedger do
 end
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `bundle exec rspec spec/open_mutator/fingerprint_spec.rb spec/open_mutator/accepted_ledger_spec.rb`
 Expected: FAIL — uninitialized constants
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 `lib/open_mutator/fingerprint.rb`:
 ```ruby
@@ -1333,12 +1333,12 @@ require_relative "open_mutator/fingerprint"
 require_relative "open_mutator/accepted_ledger"
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `bundle exec rspec spec/open_mutator/fingerprint_spec.rb spec/open_mutator/accepted_ledger_spec.rb`
 Expected: PASS (fingerprint 1, ledger 4)
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add -A && git commit -m "feat: mutant fingerprints and committed acceptance ledger"
@@ -1350,7 +1350,7 @@ git add -A && git commit -m "feat: mutant fingerprints and committed acceptance 
 - Modify: `lib/open_mutator/runner.rb`, `lib/open_mutator/result.rb`, `lib/open_mutator/reporter/terminal.rb`, `lib/open_mutator/reporter/json.rb`
 - Test: `spec/open_mutator/runner_spec.rb`, `spec/open_mutator/reporter/terminal_spec.rb`, `spec/open_mutator/reporter/json_spec.rb`
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Append to `spec/open_mutator/runner_spec.rb`:
 ```ruby
@@ -1393,12 +1393,12 @@ and add a second example:
   end
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `bundle exec rspec spec/open_mutator/runner_spec.rb spec/open_mutator/reporter`
 Expected: FAIL (plan_work arity, missing `A` char, missing exit_reason)
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 `lib/open_mutator/result.rb` — update the comment only:
 ```ruby
@@ -1484,12 +1484,12 @@ Expected: FAIL (plan_work arity, missing `A` char, missing exit_reason)
 
 Note the uncovered-results rename: `#call` previously used a variable named `uncovered` — it is now `pre_results` throughout.
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `bundle exec rspec spec/open_mutator/runner_spec.rb spec/open_mutator/reporter spec/open_mutator/cli_spec.rb`
 Expected: PASS
 
-- [ ] **Step 5: Full suite, commit**
+- [x] **Step 5: Full suite, commit**
 
 Run: `bundle exec rspec` — green.
 ```bash
