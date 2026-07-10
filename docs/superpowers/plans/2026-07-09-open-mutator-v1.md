@@ -1915,7 +1915,7 @@ git add -A && git commit -m "feat: Inserter evals mutated defs into constant sco
 - Create: `lib/open_mutator/worker.rb`
 - Test: `spec/open_mutator/worker_spec.rb`
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 `spec/open_mutator/worker_spec.rb`:
 ```ruby
@@ -1977,12 +1977,12 @@ RSpec.describe OpenMutator::Worker do
 end
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `bundle exec rspec spec/open_mutator/worker_spec.rb`
 Expected: FAIL with `uninitialized constant OpenMutator::Worker`
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 `lib/open_mutator/worker.rb`:
 ```ruby
@@ -2042,12 +2042,12 @@ Append to `lib/open_mutator.rb`:
 require_relative "open_mutator/worker"
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `bundle exec rspec spec/open_mutator/worker_spec.rb`
 Expected: 4 examples, 0 failures
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add -A && git commit -m "feat: Worker — load specs, insert mutation, in-process kill run"
