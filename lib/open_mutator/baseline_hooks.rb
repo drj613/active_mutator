@@ -33,11 +33,7 @@ module OpenMutator
     end
 
     def self.build_payload(records, times)
-      map = Hash.new { |h, k| h[k] = [] }
-      records.each do |example_id, hits|
-        hits.each { |path, line| map["#{path}:#{line}"] << example_id }
-      end
-      { "map" => map, "times" => times }
+      { "version" => 2, "records" => records, "times" => times }
     end
   end
 end

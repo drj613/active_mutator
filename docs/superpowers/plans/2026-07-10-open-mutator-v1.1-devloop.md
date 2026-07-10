@@ -453,7 +453,7 @@ git add -A && git commit -m "feat: serial lane for browser-covered mutants"
 - Modify: `lib/open_mutator/baseline_hooks.rb`, `lib/open_mutator/coverage_map.rb`
 - Test: `spec/open_mutator/baseline_hooks_spec.rb`, `spec/open_mutator/coverage_map_spec.rb`
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 In `spec/open_mutator/baseline_hooks_spec.rb`, replace the `.build_payload` example:
 ```ruby
@@ -528,12 +528,12 @@ RSpec.describe OpenMutator::CoverageMap do
 end
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `bundle exec rspec spec/open_mutator/baseline_hooks_spec.rb spec/open_mutator/coverage_map_spec.rb`
 Expected: FAIL (payload shape, missing methods)
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 In `lib/open_mutator/baseline_hooks.rb`, replace `build_payload`:
 ```ruby
@@ -601,12 +601,12 @@ module OpenMutator
 end
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `bundle exec rspec spec/open_mutator/baseline_hooks_spec.rb spec/open_mutator/coverage_map_spec.rb`
 Expected: PASS (hooks 4, coverage_map 6)
 
-- [ ] **Step 5: Full suite, commit**
+- [x] **Step 5: Full suite, commit**
 
 `bundle exec rspec` — the Task 12 fixtures haven't run yet, but the baseline integration test (`:integration`) now regenerates a v2 cache; run `OPEN_MUTATOR_INTEGRATION=1 bundle exec rspec` too. All green.
 ```bash

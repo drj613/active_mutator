@@ -27,17 +27,14 @@ RSpec.describe OpenMutator::BaselineHooks do
   end
 
   describe ".build_payload" do
-    it "inverts per-example hits into a line index" do
-      records = {
-        "spec/a_spec.rb[1:1]" => [["/root/lib/a.rb", 3], ["/root/lib/a.rb", 4]],
-        "spec/a_spec.rb[1:2]" => [["/root/lib/a.rb", 3]]
-      }
-      times = { "spec/a_spec.rb[1:1]" => 0.5, "spec/a_spec.rb[1:2]" => 0.1 }
+    it "emits version-2 primary records" do
+      records = { "spec/a_spec.rb[1:1]" => [["/root/lib/a.rb", 3]] }
+      times = { "spec/a_spec.rb[1:1]" => 0.5 }
       payload = described_class.build_payload(records, times)
-      expect(payload["map"]["/root/lib/a.rb:3"])
-        .to contain_exactly("spec/a_spec.rb[1:1]", "spec/a_spec.rb[1:2]")
-      expect(payload["map"]["/root/lib/a.rb:4"]).to eq(["spec/a_spec.rb[1:1]"])
+      expect(payload["version"]).to eq(2)
+      expect(payload["records"]).to eq(records)
       expect(payload["times"]).to eq(times)
+      expect(payload).not_to have_key("map")
     end
   end
 end
