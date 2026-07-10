@@ -1,0 +1,66 @@
+# Loaded standalone via RUBYOPT=-ropen_mutator/baseline_hooks in the host
+# project's suite — before rspec boots, so Coverage instruments everything
+# the suite loads (including code loaded by spec_helper). Records per-example
+# coverage diffs and writes the inverted map to OPEN_MUTATOR_BASELINE_OUT.
+require "json"
+
+module OpenMutator
+  module BaselineHooks
+    RECORDS = {}
+    TIMES = {}
+
+    def self.diff_coverage(before, after, root)
+      hits = []
+      after.each do |path, data|
+        next unless path.start_with?(root)
+        next if path.include?("/spec/")
+
+        before_lines = before.dig(path, :lines)
+        data[:lines].each_with_index do |count, idx|
+          next if count.nil?
+
+          previous = before_lines ? before_lines[idx].to_i : 0
+          hits << [path, idx + 1] if count > previous
+        end
+      end
+      hits
+    end
+
+    def self.build_payload(records, times)
+      map = Hash.new { |h, k| h[k] = [] }
+      records.each do |example_id, hits|
+        hits.each { |path, line| map["#{path}:#{line}"] << example_id }
+      end
+      { "map" => map, "times" => times }
+    end
+  end
+end
+
+if ENV["OPEN_MUTATOR_BASELINE_OUT"]
+  require "coverage"
+  Coverage.start(lines: true)
+  require "rspec/core" # loaded via RUBYOPT, so rspec isn't up yet
+
+  RSpec.configure do |config|
+    config.around(:each) do |example|
+      before = Coverage.peek_result
+      started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+      example.run
+      elapsed = Process.clock_gettime(Process::CLOCK_MONOTONIC) - started
+      after = Coverage.peek_result
+      root = ENV.fetch("OPEN_MUTATOR_ROOT")
+      OpenMutator::BaselineHooks::RECORDS[example.id] =
+        OpenMutator::BaselineHooks.diff_coverage(before, after, root)
+      # NOT example.execution_result.run_time — that is nil until after
+      # around hooks complete.
+      OpenMutator::BaselineHooks::TIMES[example.id] = elapsed
+    end
+
+    config.after(:suite) do
+      payload = OpenMutator::BaselineHooks.build_payload(
+        OpenMutator::BaselineHooks::RECORDS, OpenMutator::BaselineHooks::TIMES
+      )
+      File.write(ENV.fetch("OPEN_MUTATOR_BASELINE_OUT"), JSON.generate(payload))
+    end
+  end
+end

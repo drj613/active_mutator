@@ -1351,7 +1351,7 @@ It must never be required by `lib/open_mutator.rb` — it starts `Coverage` at l
 
 Timing note: `example.execution_result.run_time` is nil inside `around(:each)` hooks (RSpec sets it after around hooks complete), so the hook measures elapsed time itself with a monotonic clock.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 `spec/open_mutator/baseline_hooks_spec.rb`:
 ```ruby
@@ -1400,12 +1400,12 @@ RSpec.describe OpenMutator::BaselineHooks do
 end
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `bundle exec rspec spec/open_mutator/baseline_hooks_spec.rb`
 Expected: FAIL (cannot load such file or uninitialized constant)
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 `lib/open_mutator/baseline_hooks.rb`:
 ```ruby
@@ -1477,12 +1477,12 @@ if ENV["OPEN_MUTATOR_BASELINE_OUT"]
 end
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `bundle exec rspec spec/open_mutator/baseline_hooks_spec.rb`
 Expected: 4 examples, 0 failures
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add -A && git commit -m "feat: baseline hooks for per-example coverage capture"
