@@ -2641,7 +2641,7 @@ git add -A && git commit -m "feat: SinceFilter for git-diff-scoped runs"
 - Create: `lib/open_mutator/config.rb`, `lib/open_mutator/cli.rb`, `lib/open_mutator/runner.rb`
 - Test: `spec/open_mutator/cli_spec.rb`, `spec/open_mutator/runner_spec.rb`
 
-- [ ] **Step 1: Write the failing CLI tests**
+- [x] **Step 1: Write the failing CLI tests**
 
 `spec/open_mutator/cli_spec.rb`:
 ```ruby
@@ -2687,7 +2687,7 @@ RSpec.describe OpenMutator::CLI do
 end
 ```
 
-- [ ] **Step 2: Write the failing Runner tests**
+- [x] **Step 2: Write the failing Runner tests**
 
 Runner orchestration is unit-tested with all collaborators injected/stubbed; full-stack behavior is covered by the Task 19 E2E.
 
@@ -2744,12 +2744,12 @@ RSpec.describe OpenMutator::Runner do
 end
 ```
 
-- [ ] **Step 3: Run tests to verify they fail**
+- [x] **Step 3: Run tests to verify they fail**
 
 Run: `bundle exec rspec spec/open_mutator/cli_spec.rb spec/open_mutator/runner_spec.rb`
 Expected: FAIL with uninitialized constant errors
 
-- [ ] **Step 4: Implement**
+- [x] **Step 4: Implement**
 
 `lib/open_mutator/config.rb`:
 ```ruby
@@ -2887,17 +2887,17 @@ require_relative "open_mutator/runner"
 require_relative "open_mutator/cli"
 ```
 
-- [ ] **Step 5: Run tests to verify they pass**
+- [x] **Step 5: Run tests to verify they pass**
 
 Run: `bundle exec rspec spec/open_mutator/cli_spec.rb spec/open_mutator/runner_spec.rb`
 Expected: 5 examples, 0 failures
 
-- [ ] **Step 6: Run whole suite**
+- [x] **Step 6: Run whole suite**
 
 Run: `bundle exec rspec`
 Expected: all pass
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add -A && git commit -m "feat: Config, CLI, and Runner orchestration"
