@@ -241,4 +241,4 @@ you'd want it run on any other codebase.
 
 ## License
 
-[WTFPL](LICENSE).
+[MIT](LICENSE).

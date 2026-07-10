@@ -10,7 +10,7 @@ Gem::Specification.new do |spec|
                       "for CI, with an incremental coverage baseline and a committed acceptance " \
                       "ledger for equivalent mutants."
   spec.authors = ["Daniel John"]
-  spec.license = "WTFPL"
+  spec.license = "MIT"
   spec.homepage = "https://github.com/drj613/active_mutator"
   spec.required_ruby_version = ">= 3.2"
   spec.files = Dir["lib/**/*.rb", "exe/*", "LICENSE*", "README*"]
