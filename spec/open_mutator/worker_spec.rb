@@ -53,4 +53,16 @@ RSpec.describe OpenMutator::Worker do
     expect(emitted["status"]).to eq("error")
     expect(emitted["details"]).to include("SyntaxError", "boom")
   end
+
+  it "runs only groups belonging to covering spec files (drops helper-leaked groups)" do
+    covering = class_double(RSpec::Core::ExampleGroup,
+                            metadata: { absolute_file_path: File.expand_path("spec/x_spec.rb") })
+    leaked = class_double(RSpec::Core::ExampleGroup,
+                          metadata: { absolute_file_path: File.expand_path("spec/support/leaky.rb") })
+    allow(RSpec.world).to receive(:ordered_example_groups).and_return([leaked, covering])
+    ran_groups = nil
+    allow(rspec_runner).to receive(:run_specs) { |groups| ran_groups = groups; 0 }
+    run_worker
+    expect(ran_groups).to eq([covering])
+  end
 end

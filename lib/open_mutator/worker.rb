@@ -1,4 +1,5 @@
 require "json"
+require "set"
 
 module OpenMutator
   # Runs INSIDE a fork. Order is critical: RSpec's setup phase loads the spec
@@ -25,7 +26,7 @@ module OpenMutator
       runner.setup(devnull, devnull)   # loads spec files -> loads the app
       Inserter.new.insert(@mutation)   # now the target constant exists
       after_fork_hygiene
-      code = runner.run_specs(RSpec.world.ordered_example_groups)
+      code = runner.run_specs(covering_groups)
       emit(code.zero? ? "survived" : "killed")
     rescue StandardError, ScriptError => e
       emit("error", details: "#{e.class}: #{e.message}")
@@ -44,6 +45,20 @@ module OpenMutator
     def emit(status, details: nil)
       @writer.puts(JSON.generate("status" => status, "details" => details))
       @writer.flush if @writer.respond_to?(:flush)
+    end
+
+    # RSpec.world holds every group registered in the process — including any
+    # top-level groups evaluated while the PARENT preloaded the spec helper
+    # (spec/support files with RSpec.describe at load time are common). Those
+    # leak into the fork; running them would report their failures as false
+    # kills. Run only groups that belong to the covering spec files.
+    def covering_groups
+      covering = @example_ids
+                 .map { |id| File.expand_path(id[/\A(.+?)\[/, 1]) }
+                 .to_set
+      RSpec.world.ordered_example_groups.select do |group|
+        covering.include?(group.metadata[:absolute_file_path])
+      end
     end
   end
 end
