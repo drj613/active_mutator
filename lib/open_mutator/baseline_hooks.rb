@@ -13,7 +13,13 @@ module OpenMutator
       hits = []
       after.each do |path, data|
         next unless path.start_with?(root)
-        next if path.include?("/spec/")
+
+        # Relative to root, not a global substring check: `root` itself may
+        # contain "/spec/" (e.g. a fixture nested under this gem's own
+        # spec/fixtures/ tree), which would otherwise falsely exclude every
+        # file under it.
+        relative = path.delete_prefix(root)
+        next if relative.start_with?("/spec/")
 
         before_lines = before.dig(path, :lines)
         data[:lines].each_with_index do |count, idx|

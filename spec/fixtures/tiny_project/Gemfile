@@ -1,0 +1,4 @@
+source "https://rubygems.org"
+
+gem "open_mutator", path: "../../.."
+gem "rspec", "~> 3.13"

@@ -1607,7 +1607,7 @@ git add -A && git commit -m "feat: CoverageMap inverted-index wrapper"
 - Create: `spec/fixtures/tiny_project/` (Gemfile, .rspec, lib/calculator.rb, spec/spec_helper.rb, spec/calculator_spec.rb)
 - Test: `spec/open_mutator/baseline_spec.rb` (tagged `:integration`)
 
-- [ ] **Step 1: Create the fixture project**
+- [x] **Step 1: Create the fixture project**
 
 This fixture is shared by the baseline integration test (here) and the E2E test (Task 19). Its planted mutants are deliberate:
 - `Calculator#eligible?` — fully tested; all its mutants must be **killed**.
@@ -1677,7 +1677,7 @@ end
 Run: `cd spec/fixtures/tiny_project && BUNDLE_GEMFILE=Gemfile bundle install && BUNDLE_GEMFILE=Gemfile bundle exec rspec && cd -`
 Expected: 5 examples, 0 failures
 
-- [ ] **Step 2: Write the failing integration test**
+- [x] **Step 2: Write the failing integration test**
 
 `spec/open_mutator/baseline_spec.rb`:
 ```ruby
@@ -1728,12 +1728,12 @@ RSpec.describe OpenMutator::Baseline, :integration do
 end
 ```
 
-- [ ] **Step 3: Run test to verify it fails**
+- [x] **Step 3: Run test to verify it fails**
 
 Run: `OPEN_MUTATOR_INTEGRATION=1 bundle exec rspec spec/open_mutator/baseline_spec.rb`
 Expected: FAIL with `uninitialized constant OpenMutator::Baseline`
 
-- [ ] **Step 4: Implement**
+- [x] **Step 4: Implement**
 
 `lib/open_mutator/baseline.rb`:
 ```ruby
@@ -1802,12 +1802,12 @@ Append to `lib/open_mutator.rb`:
 require_relative "open_mutator/baseline"
 ```
 
-- [ ] **Step 5: Run tests to verify they pass**
+- [x] **Step 5: Run tests to verify they pass**
 
 Run: `OPEN_MUTATOR_INTEGRATION=1 bundle exec rspec spec/open_mutator/baseline_spec.rb`
 Expected: 3 examples, 0 failures
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add -A && git commit -m "feat: baseline runner with digest-keyed cache; tiny_project fixture"
