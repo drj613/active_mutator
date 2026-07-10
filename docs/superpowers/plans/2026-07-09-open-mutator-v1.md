@@ -2291,7 +2291,7 @@ git add -A && git commit -m "feat: fork-pool scheduler with parent-enforced dead
 - Create: `lib/open_mutator/reporter/terminal.rb`, `lib/open_mutator/reporter/json.rb`
 - Test: `spec/open_mutator/reporter/terminal_spec.rb`, `spec/open_mutator/reporter/json_spec.rb`
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 `spec/open_mutator/reporter/terminal_spec.rb`:
 ```ruby
@@ -2380,12 +2380,12 @@ RSpec.describe OpenMutator::Reporter::Json do
 end
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `bundle exec rspec spec/open_mutator/reporter`
 Expected: FAIL with uninitialized constant errors
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 `lib/open_mutator/reporter/terminal.rb`:
 ```ruby
@@ -2490,12 +2490,12 @@ require_relative "open_mutator/reporter/terminal"
 require_relative "open_mutator/reporter/json"
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `bundle exec rspec spec/open_mutator/reporter`
 Expected: 4 examples, 0 failures
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add -A && git commit -m "feat: terminal and JSON reporters"
