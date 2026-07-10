@@ -3031,7 +3031,7 @@ git add -A && git commit -m "test: property gate — all emitted mutants re-pars
 
 Proves the Rails-specific claims: environment preload, fork-safe ActiveRecord reconnect, DB-touching specs killing mutants.
 
-- [ ] **Step 1: Generate the fixture app**
+- [x] **Step 1: Generate the fixture app**
 
 ```bash
 cd spec/fixtures
@@ -3056,7 +3056,7 @@ bundle exec rails generate model User age:integer
 bundle exec rails db:migrate
 ```
 
-- [ ] **Step 2: Add the mutable model method and spec**
+- [x] **Step 2: Add the mutable model method and spec**
 
 Edit `spec/fixtures/rails_app/app/models/user.rb` to:
 ```ruby
@@ -3094,7 +3094,7 @@ end
 Verify fixture suite: `cd spec/fixtures/rails_app && bundle exec rspec`
 Expected: 3 examples, 0 failures. Then `cd -`.
 
-- [ ] **Step 3: Write the E2E test**
+- [x] **Step 3: Write the E2E test**
 
 `spec/e2e/rails_app_spec.rb`:
 ```ruby
@@ -3129,17 +3129,17 @@ RSpec.describe "rails_app end-to-end", :rails_e2e do
 end
 ```
 
-- [ ] **Step 4: Run it**
+- [x] **Step 4: Run it**
 
 Run: `OPEN_MUTATOR_RAILS_E2E=1 bundle exec rspec spec/e2e/rails_app_spec.rb`
 Expected: PASS. If `error` statuses appear, debug `Worker#after_fork_hygiene` (AR connection handling API differs across Rails versions — adjust to the generated app's Rails version).
 
-- [ ] **Step 5: Full suite, all tags**
+- [x] **Step 5: Full suite, all tags**
 
 Run: `OPEN_MUTATOR_INTEGRATION=1 OPEN_MUTATOR_E2E=1 OPEN_MUTATOR_RAILS_E2E=1 bundle exec rspec`
 Expected: all pass
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add -A && git commit -m "test: Rails fixture end-to-end — preload, fork hygiene, DB kill path"
