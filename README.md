@@ -1,7 +1,10 @@
 # active_mutator
 
+[![Gem Version](https://badge.fury.io/rb/active_mutator.svg)](https://rubygems.org/gems/active_mutator)
+
 Mutation testing for Ruby, built on [Prism](https://github.com/ruby/prism).
-Open source, RSpec-integrated, Rails-first.
+Open source, RSpec-integrated, Rails-first. Available on
+[RubyGems](https://rubygems.org/gems/active_mutator).
 
 active_mutator mutates your code one small change at a time (`>` → `>=`,
 `&&` → `||`, delete a statement, force a condition…), runs exactly the
