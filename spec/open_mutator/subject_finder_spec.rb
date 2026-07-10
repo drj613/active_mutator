@@ -1,6 +1,6 @@
 require "tmpdir"
 
-RSpec.describe OpenMutator::SubjectFinder do
+RSpec.describe ActiveMutator::SubjectFinder do
   def subjects_of(source)
     Dir.mktmpdir do |dir|
       file = File.join(dir, "code.rb")

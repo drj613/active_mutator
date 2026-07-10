@@ -1,9 +1,9 @@
 require "json"
 require "tempfile"
 
-RSpec.describe OpenMutator::Scheduler do
+RSpec.describe ActiveMutator::Scheduler do
   def item(timeout: 5.0, lane: :parallel)
-    OpenMutator::WorkItem.new(mutation: nil, example_ids: [], timeout: timeout, lane: lane)
+    ActiveMutator::WorkItem.new(mutation: nil, example_ids: [], timeout: timeout, lane: lane)
   end
 
   def scheduler(worker:, jobs: 2, on_result: nil)

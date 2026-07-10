@@ -1,9 +1,9 @@
 require "tmpdir"
 require "fileutils"
 
-RSpec.describe OpenMutator::Runner do
+RSpec.describe ActiveMutator::Runner do
   let(:config) do
-    OpenMutator::Config.new(
+    ActiveMutator::Config.new(
       paths: ["lib"], since: nil, subject_filter: nil, jobs: 2, format: :terminal,
       requires: [], timeout_factor: 4.0, timeout_floor: 2.0, force_baseline: false,
       root: "/project", preload_helper: nil, serial_patterns: ["spec/system/", "spec/features/"],
@@ -12,15 +12,15 @@ RSpec.describe OpenMutator::Runner do
   end
 
   let(:subject_) do
-    OpenMutator::Subject.new(name: "A#x", file: "/project/lib/a.rb",
+    ActiveMutator::Subject.new(name: "A#x", file: "/project/lib/a.rb",
                              byte_range: 0...10, line_range: 1..3,
                              constant_scope: "A", kind: :instance)
   end
 
   def mutation(line: 2)
-    OpenMutator::Mutation.new(
+    ActiveMutator::Mutation.new(
       subject: subject_,
-      edit: OpenMutator::Edit.new(range: 5...6, replacement: ">=", description: "d"),
+      edit: ActiveMutator::Edit.new(range: 5...6, replacement: ">=", description: "d"),
       original_snippet: ">", line: line,
       mutated_file_source: "", mutated_def_source: "def x = 1", mutated_def_line: 1
     )
@@ -29,7 +29,7 @@ RSpec.describe OpenMutator::Runner do
   it "builds work items with lanes and reports uncovered ones" do
     covered = mutation(line: 2)
     uncovered = mutation(line: 3)
-    map = instance_double(OpenMutator::CoverageMap)
+    map = instance_double(ActiveMutator::CoverageMap)
     allow(map).to receive(:examples_for).with("/project/lib/a.rb", 2..2).and_return(["./spec/a_spec.rb[1:1]"])
     allow(map).to receive(:examples_for).with("/project/lib/a.rb", 3..3).and_return([])
     allow(map).to receive(:time_for).and_return(0.5)
@@ -44,7 +44,7 @@ RSpec.describe OpenMutator::Runner do
 
   it "assigns the serial lane and budget bump to browser-covered mutants" do
     m = mutation(line: 2)
-    map = instance_double(OpenMutator::CoverageMap)
+    map = instance_double(ActiveMutator::CoverageMap)
     allow(map).to receive(:examples_for)
       .and_return(["./spec/system/extractions_spec.rb[1:1]", "./spec/a_spec.rb[1:1]"])
     allow(map).to receive(:time_for).and_return(1.0)
@@ -55,8 +55,8 @@ RSpec.describe OpenMutator::Runner do
   end
 
   it "exits 1 when mutants survive, 0 otherwise" do
-    survived = OpenMutator::Result.new(mutation: mutation, status: :survived, details: nil)
-    killed = OpenMutator::Result.new(mutation: mutation, status: :killed, details: nil)
+    survived = ActiveMutator::Result.new(mutation: mutation, status: :survived, details: nil)
+    killed = ActiveMutator::Result.new(mutation: mutation, status: :killed, details: nil)
     expect(described_class.new(config).exit_code([killed, survived])).to eq(1)
     expect(described_class.new(config).exit_code([killed])).to eq(0)
   end
@@ -99,11 +99,11 @@ RSpec.describe OpenMutator::Runner do
   describe "acceptance integration" do
     it "pre-classifies ledger-accepted mutants and never schedules them" do
       m = mutation(line: 2)
-      map = instance_double(OpenMutator::CoverageMap)
+      map = instance_double(ActiveMutator::CoverageMap)
       allow(map).to receive(:examples_for).and_return(["e1"])
       allow(map).to receive(:time_for).and_return(0.1)
-      fps = OpenMutator::Fingerprint.for_mutations([m], root: config.root)
-      ledger = instance_double(OpenMutator::AcceptedLedger)
+      fps = ActiveMutator::Fingerprint.for_mutations([m], root: config.root)
+      ledger = instance_double(ActiveMutator::AcceptedLedger)
       allow(ledger).to receive(:accepted?).with(fps[m]).and_return(true)
 
       runner = described_class.new(config)

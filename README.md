@@ -1,9 +1,9 @@
-# open_mutator
+# active_mutator
 
 Mutation testing for Ruby, built on [Prism](https://github.com/ruby/prism).
 Open source, RSpec-integrated, Rails-first.
 
-open_mutator mutates your code one small change at a time (`>` → `>=`,
+active_mutator mutates your code one small change at a time (`>` → `>=`,
 `&&` → `||`, delete a statement, force a condition…), runs exactly the
 examples that cover the mutated line, and reports every mutant your suite
 fails to kill. A surviving mutant is a behavior change no test notices —
@@ -14,7 +14,7 @@ a precise, machine-verified test gap.
 ```ruby
 # Gemfile
 group :development, :test do
-  gem "open_mutator"
+  gem "active_mutator"
 end
 ```
 
@@ -23,15 +23,15 @@ Requires Ruby ≥ 3.2, RSpec, and a green suite. Linux/macOS (MRI fork).
 ## Usage
 
 ```bash
-open_mutator                          # mutate app/ and lib/, full run
-open_mutator app/models               # scope by path
-open_mutator --changed                # uncommitted work only (dev loop)
-open_mutator --since origin/main      # PR scope (CI)
-open_mutator --subject 'Foo::Bar#baz' # one method
+active_mutator                          # mutate app/ and lib/, full run
+active_mutator app/models               # scope by path
+active_mutator --changed                # uncommitted work only (dev loop)
+active_mutator --since origin/main      # PR scope (CI)
+active_mutator --subject 'Foo::Bar#baz' # one method
 ```
 
 First run performs an instrumented baseline of your suite to build the
-coverage map (cached in `.open_mutator/`, refreshed incrementally). Then
+coverage map (cached in `.active_mutator/`, refreshed incrementally). Then
 each mutant runs in its own fork against only its covering examples.
 
 Statuses: `killed` (test failed — good), `survived` (test gap), `timeout`
@@ -46,14 +46,14 @@ Score = (killed + timeout) / (killed + timeout + survived).
 TDD until green, then verify the tests constrain the behavior:
 
 ```bash
-bundle exec open_mutator --changed --format json
+bundle exec active_mutator --changed --format json
 ```
 
 Kill survivors by writing the missing tests. For genuine equivalent mutants:
 
 ```bash
-bundle exec open_mutator --changed --accept-survivors   # records to ledger
-git add .open_mutator_accepted.json                     # committed state
+bundle exec active_mutator --changed --accept-survivors   # records to ledger
+git add .active_mutator_accepted.json                     # committed state
 ```
 
 Acceptance takes effect on the NEXT run (the accepting run still exits 1).
@@ -61,8 +61,8 @@ Agent workflow: see `docs/skills/mutation-check.md`.
 
 ## CI recipe
 
-- Per-PR: `open_mutator --since origin/main` (minutes)
-- Nightly: `open_mutator --force-baseline` (full run; also recovers the
+- Per-PR: `active_mutator --since origin/main` (minutes)
+- Nightly: `active_mutator --force-baseline` (full run; also recovers the
   incremental baseline's newly-covering-example blind spot)
 
 ## Flags
@@ -82,7 +82,7 @@ Agent workflow: see `docs/skills/mutation-check.md`.
 | `--timeout-factor F` / `--timeout-floor S` | 8 / 10 | mutation timeout budget |
 | `--require FILE` | — | preload files (repeatable) |
 
-Every open_mutator process sets `ENV["OPEN_MUTATOR"] = "1"` — use it to
+Every active_mutator process sets `ENV["ACTIVE_MUTATOR"] = "1"` — use it to
 guard SimpleCov or other tooling in your spec helper.
 
 ## Known limits (v1.1)

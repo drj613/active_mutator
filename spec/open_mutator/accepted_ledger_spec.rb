@@ -1,9 +1,9 @@
 require "tmpdir"
 require "json"
 
-RSpec.describe OpenMutator::AcceptedLedger do
+RSpec.describe ActiveMutator::AcceptedLedger do
   def fp(ordinal: 0, file: "lib/calc.rb", subject: "Calc#go")
-    OpenMutator::Fingerprint.new(file: file, subject: subject,
+    ActiveMutator::Fingerprint.new(file: file, subject: subject,
                                  description: "replace `>` with `>=`",
                                  original_snippet: ">", ordinal: ordinal)
   end
@@ -21,7 +21,7 @@ RSpec.describe OpenMutator::AcceptedLedger do
       reloaded = described_class.load(root)
       expect(reloaded.accepted?(fp)).to be(true)
       expect(reloaded.accepted?(fp(ordinal: 1))).to be(false)
-      expect(File.exist?(File.join(root, ".open_mutator_accepted.json"))).to be(true)
+      expect(File.exist?(File.join(root, ".active_mutator_accepted.json"))).to be(true)
     end
   end
 

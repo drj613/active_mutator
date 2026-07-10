@@ -1,6 +1,6 @@
-require "open_mutator/baseline_hooks"
+require "active_mutator/baseline_hooks"
 
-RSpec.describe OpenMutator::BaselineHooks do
+RSpec.describe ActiveMutator::BaselineHooks do
   describe ".diff_coverage" do
     it "returns [path, line] pairs whose hit count increased" do
       before = { "/root/lib/a.rb" => { lines: [1, 0, nil, 2] } }

@@ -3,7 +3,7 @@ require "json"
 RSpec.describe "Baseline delta refresh", :integration do
   it "refreshes surgically when a spec file changes, keeping unrelated records" do
     with_fixture_copy do |root|
-      baseline = OpenMutator::Baseline.new(root: root)
+      baseline = ActiveMutator::Baseline.new(root: root)
       map1 = baseline.coverage_map
       calculator = File.join(root, "lib/calculator.rb")
       original_examples = map1.examples_for(calculator, 3..3)
@@ -27,13 +27,13 @@ RSpec.describe "Baseline delta refresh", :integration do
 
   it "falls back to full re-run when a support file appears" do
     with_fixture_copy do |root|
-      baseline = OpenMutator::Baseline.new(root: root)
+      baseline = ActiveMutator::Baseline.new(root: root)
       baseline.coverage_map
       FileUtils.mkdir_p(File.join(root, "spec", "support"))
       File.write(File.join(root, "spec", "support", "noise.rb"), "# support change\n")
       baseline.coverage_map
       expect(baseline.last_refresh).to eq(:full)
-      expect(OpenMutator::CoverageMap.load(File.join(root, ".open_mutator", "coverage.json")).version).to eq(2)
+      expect(ActiveMutator::CoverageMap.load(File.join(root, ".active_mutator", "coverage.json")).version).to eq(2)
     end
   end
 end

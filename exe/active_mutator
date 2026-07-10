@@ -1,0 +1,4 @@
+#!/usr/bin/env ruby
+require "active_mutator"
+
+exit ActiveMutator::CLI.run(ARGV)

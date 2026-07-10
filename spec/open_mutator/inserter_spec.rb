@@ -1,12 +1,12 @@
-RSpec.describe OpenMutator::Inserter do
+RSpec.describe ActiveMutator::Inserter do
   subject(:inserter) { described_class.new }
 
   def mutation_stub(scope:, def_source:, kind: :instance)
-    subject_ = OpenMutator::Subject.new(
+    subject_ = ActiveMutator::Subject.new(
       name: "test", file: "(test)", byte_range: 0...1, line_range: 1..1,
       constant_scope: scope, kind: kind
     )
-    instance_double(OpenMutator::Mutation,
+    instance_double(ActiveMutator::Mutation,
                     subject: subject_, mutated_def_source: def_source, mutated_def_line: 1)
   end
 

@@ -5,13 +5,13 @@ require "fileutils"
 RSpec.describe "tiny_project end-to-end", :e2e do
   let(:root) { File.expand_path("../fixtures/tiny_project", __dir__) }
 
-  after { FileUtils.rm_rf(File.join(root, ".open_mutator")) }
+  after { FileUtils.rm_rf(File.join(root, ".active_mutator")) }
 
   it "kills tested mutants, surfaces the planted survivor and uncovered method" do
     stdout, stderr, status = Bundler.with_unbundled_env do
       Open3.capture3(
         { "BUNDLE_GEMFILE" => File.join(root, "Gemfile") },
-        "bundle", "exec", "open_mutator", "lib", "--format", "json", "--jobs", "2",
+        "bundle", "exec", "active_mutator", "lib", "--format", "json", "--jobs", "2",
         chdir: root
       )
     end

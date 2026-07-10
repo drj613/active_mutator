@@ -1,8 +1,8 @@
-# open_mutator v1 Implementation Plan
+# active_mutator v1 Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Build open_mutator v1 — a pure-Ruby, Prism-based mutation testing tool with RSpec integration, source-span mutations, coverage-based test selection, and a fork-pool kill pipeline.
+**Goal:** Build active_mutator v1 — a pure-Ruby, Prism-based mutation testing tool with RSpec integration, source-span mutations, coverage-based test selection, and a fork-pool kill pipeline.
 
 **Architecture:** Six components in a one-directional pipeline: CLI/Config → Subject Finder → Mutation Engine → Scheduler/Workers → Reporter, fed by a cached Coverage Map from an instrumented baseline run. Mutations are text edits `(byte_range, replacement)` spliced into the original source — no AST unparsing anywhere. Workers are forks of a preloaded parent; a mutated `def` is re-eval'd in its constant scope, covering examples run in-process, and exit status decides kill.
 
@@ -15,45 +15,45 @@
 ## File structure
 
 ```
-open_mutator.gemspec
+active_mutator.gemspec
 Gemfile
 .rspec
-exe/open_mutator                        # binstub → CLI
-lib/open_mutator.rb                     # requires + module root
-lib/open_mutator/version.rb
-lib/open_mutator/edit.rb                # Edit value object
-lib/open_mutator/splicer.rb             # byte-range splicing
-lib/open_mutator/subject.rb             # Subject value object
-lib/open_mutator/subject_finder.rb      # Prism visitor → [Subject]
-lib/open_mutator/mutation.rb            # Mutation value object
-lib/open_mutator/analysis.rb            # Analysis value object (mutations + invalid count)
-lib/open_mutator/operators/base.rb      # operator superclass + registry
-lib/open_mutator/operators/conditional_boundary.rb
-lib/open_mutator/operators/condition_forcing.rb
-lib/open_mutator/operators/logical_operator.rb
-lib/open_mutator/operators/literal.rb
-lib/open_mutator/operators/statement_deletion.rb
-lib/open_mutator/operators/early_return.rb
-lib/open_mutator/operators/call_swap.rb
-lib/open_mutator/operators/negation_removal.rb
-lib/open_mutator/engine.rb              # subject → Analysis (validity gate here)
-lib/open_mutator/baseline_hooks.rb      # loaded STANDALONE via RUBYOPT=-r…; never required by lib/open_mutator.rb (it starts Coverage)
-lib/open_mutator/coverage_map.rb        # inverted index wrapper
-lib/open_mutator/baseline.rb            # baseline subprocess runner + cache
-lib/open_mutator/inserter.rb            # eval mutated def into constant scope
-lib/open_mutator/worker.rb              # runs inside fork
-lib/open_mutator/work_item.rb           # WorkItem value object
-lib/open_mutator/result.rb              # Result value object
-lib/open_mutator/scheduler.rb           # fork pool + deadlines
-lib/open_mutator/reporter/terminal.rb
-lib/open_mutator/reporter/json.rb
-lib/open_mutator/since_filter.rb        # git diff → changed lines
-lib/open_mutator/config.rb
-lib/open_mutator/runner.rb              # orchestration
-lib/open_mutator/cli.rb                 # optparse → Config → Runner
+exe/active_mutator                        # binstub → CLI
+lib/active_mutator.rb                     # requires + module root
+lib/active_mutator/version.rb
+lib/active_mutator/edit.rb                # Edit value object
+lib/active_mutator/splicer.rb             # byte-range splicing
+lib/active_mutator/subject.rb             # Subject value object
+lib/active_mutator/subject_finder.rb      # Prism visitor → [Subject]
+lib/active_mutator/mutation.rb            # Mutation value object
+lib/active_mutator/analysis.rb            # Analysis value object (mutations + invalid count)
+lib/active_mutator/operators/base.rb      # operator superclass + registry
+lib/active_mutator/operators/conditional_boundary.rb
+lib/active_mutator/operators/condition_forcing.rb
+lib/active_mutator/operators/logical_operator.rb
+lib/active_mutator/operators/literal.rb
+lib/active_mutator/operators/statement_deletion.rb
+lib/active_mutator/operators/early_return.rb
+lib/active_mutator/operators/call_swap.rb
+lib/active_mutator/operators/negation_removal.rb
+lib/active_mutator/engine.rb              # subject → Analysis (validity gate here)
+lib/active_mutator/baseline_hooks.rb      # loaded STANDALONE via RUBYOPT=-r…; never required by lib/active_mutator.rb (it starts Coverage)
+lib/active_mutator/coverage_map.rb        # inverted index wrapper
+lib/active_mutator/baseline.rb            # baseline subprocess runner + cache
+lib/active_mutator/inserter.rb            # eval mutated def into constant scope
+lib/active_mutator/worker.rb              # runs inside fork
+lib/active_mutator/work_item.rb           # WorkItem value object
+lib/active_mutator/result.rb              # Result value object
+lib/active_mutator/scheduler.rb           # fork pool + deadlines
+lib/active_mutator/reporter/terminal.rb
+lib/active_mutator/reporter/json.rb
+lib/active_mutator/since_filter.rb        # git diff → changed lines
+lib/active_mutator/config.rb
+lib/active_mutator/runner.rb              # orchestration
+lib/active_mutator/cli.rb                 # optparse → Config → Runner
 spec/spec_helper.rb
 spec/support/operator_helper.rb
-spec/open_mutator/**/*_spec.rb          # one spec file per lib file
+spec/active_mutator/**/*_spec.rb          # one spec file per lib file
 spec/fixtures/tiny_project/             # plain-Ruby fixture (baseline + E2E)
 spec/fixtures/rails_app/                # minimal Rails fixture (Phase 6)
 spec/property/reparse_spec.rb           # property gate
@@ -94,17 +94,17 @@ Runner.new(config, reporter: nil); #call         → Integer exit code
 ## Task 1: Gem scaffold
 
 **Files:**
-- Create: `open_mutator.gemspec`, `Gemfile`, `.rspec`, `.gitignore`, `lib/open_mutator.rb`, `lib/open_mutator/version.rb`, `exe/open_mutator`, `spec/spec_helper.rb`
+- Create: `active_mutator.gemspec`, `Gemfile`, `.rspec`, `.gitignore`, `lib/active_mutator.rb`, `lib/active_mutator/version.rb`, `exe/active_mutator`, `spec/spec_helper.rb`
 
 - [x] **Step 1: Write scaffold files**
 
-`open_mutator.gemspec`:
+`active_mutator.gemspec`:
 ```ruby
-require_relative "lib/open_mutator/version"
+require_relative "lib/active_mutator/version"
 
 Gem::Specification.new do |spec|
-  spec.name = "open_mutator"
-  spec.version = OpenMutator::VERSION
+  spec.name = "active_mutator"
+  spec.version = ActiveMutator::VERSION
   spec.summary = "Mutation testing for Ruby, built on Prism"
   spec.description = "Open-source mutation testing with source-span mutations, coverage-based test selection, and a fork-pool kill pipeline. Rails-first."
   spec.authors = ["Daniel John"]
@@ -112,7 +112,7 @@ Gem::Specification.new do |spec|
   spec.required_ruby_version = ">= 3.2"
   spec.files = Dir["lib/**/*.rb", "exe/*", "LICENSE*", "README*"]
   spec.bindir = "exe"
-  spec.executables = ["open_mutator"]
+  spec.executables = ["active_mutator"]
   spec.add_dependency "prism", ">= 0.30"
   spec.add_dependency "rspec-core", ">= 3.12" # worker + baseline_hooks require it at runtime
   spec.add_development_dependency "rspec", "~> 3.13"
@@ -133,43 +133,43 @@ gemspec
 
 `.gitignore`:
 ```
-.open_mutator/
+.active_mutator/
 spec/fixtures/*/Gemfile.lock
-spec/fixtures/*/.open_mutator/
+spec/fixtures/*/.active_mutator/
 Gemfile.lock
 *.gem
 ```
 
-`lib/open_mutator/version.rb`:
+`lib/active_mutator/version.rb`:
 ```ruby
-module OpenMutator
+module ActiveMutator
   VERSION = "0.1.0"
 end
 ```
 
-`lib/open_mutator.rb` (requires grow as files are created; each later task appends its lines here):
+`lib/active_mutator.rb` (requires grow as files are created; each later task appends its lines here):
 ```ruby
 require "prism"
 
-require_relative "open_mutator/version"
+require_relative "active_mutator/version"
 
-module OpenMutator
+module ActiveMutator
   Error = Class.new(StandardError)
   BaselineFailed = Class.new(Error)
 end
 ```
 
-`exe/open_mutator`:
+`exe/active_mutator`:
 ```ruby
 #!/usr/bin/env ruby
-require "open_mutator"
+require "active_mutator"
 
-exit OpenMutator::CLI.run(ARGV)
+exit ActiveMutator::CLI.run(ARGV)
 ```
 
 `spec/spec_helper.rb`:
 ```ruby
-require "open_mutator"
+require "active_mutator"
 
 Dir[File.join(__dir__, "support", "**", "*.rb")].sort.each { |f| require f }
 
@@ -177,15 +177,15 @@ RSpec.configure do |config|
   config.disable_monkey_patching!
   config.order = :random
   # Slow suites are opt-in:
-  config.filter_run_excluding :integration unless ENV["OPEN_MUTATOR_INTEGRATION"]
-  config.filter_run_excluding :e2e unless ENV["OPEN_MUTATOR_E2E"]
-  config.filter_run_excluding :rails_e2e unless ENV["OPEN_MUTATOR_RAILS_E2E"]
+  config.filter_run_excluding :integration unless ENV["ACTIVE_MUTATOR_INTEGRATION"]
+  config.filter_run_excluding :e2e unless ENV["ACTIVE_MUTATOR_E2E"]
+  config.filter_run_excluding :rails_e2e unless ENV["ACTIVE_MUTATOR_RAILS_E2E"]
 end
 ```
 
 - [x] **Step 2: Install and verify**
 
-Run: `cd /Users/djdjo/Documents/enovis/open_mutator && chmod +x exe/open_mutator && bundle install && bundle exec rspec`
+Run: `cd /Users/djdjo/Documents/enovis/active_mutator && chmod +x exe/active_mutator && bundle install && bundle exec rspec`
 Expected: `0 examples, 0 failures`
 
 - [x] **Step 3: Commit**
@@ -197,16 +197,16 @@ git add -A && git commit -m "chore: gem scaffold"
 ## Task 2: Edit + Splicer
 
 **Files:**
-- Create: `lib/open_mutator/edit.rb`, `lib/open_mutator/splicer.rb`
-- Test: `spec/open_mutator/splicer_spec.rb`
+- Create: `lib/active_mutator/edit.rb`, `lib/active_mutator/splicer.rb`
+- Test: `spec/active_mutator/splicer_spec.rb`
 
 - [x] **Step 1: Write the failing tests**
 
-`spec/open_mutator/splicer_spec.rb`:
+`spec/active_mutator/splicer_spec.rb`:
 ```ruby
-RSpec.describe OpenMutator::Splicer do
+RSpec.describe ActiveMutator::Splicer do
   def edit(range, replacement)
-    OpenMutator::Edit.new(range: range, replacement: replacement, description: "test")
+    ActiveMutator::Edit.new(range: range, replacement: replacement, description: "test")
   end
 
   it "replaces a byte range" do
@@ -240,23 +240,23 @@ end
 
 - [x] **Step 2: Run tests to verify they fail**
 
-Run: `bundle exec rspec spec/open_mutator/splicer_spec.rb`
-Expected: FAIL with `uninitialized constant OpenMutator::Splicer`
+Run: `bundle exec rspec spec/active_mutator/splicer_spec.rb`
+Expected: FAIL with `uninitialized constant ActiveMutator::Splicer`
 
 - [x] **Step 3: Implement**
 
-`lib/open_mutator/edit.rb`:
+`lib/active_mutator/edit.rb`:
 ```ruby
-module OpenMutator
+module ActiveMutator
   # A single mutation as a text edit: replace `range` (exclusive byte Range)
   # in the original source with `replacement`.
   Edit = Data.define(:range, :replacement, :description)
 end
 ```
 
-`lib/open_mutator/splicer.rb`:
+`lib/active_mutator/splicer.rb`:
 ```ruby
-module OpenMutator
+module ActiveMutator
   module Splicer
     # Applies edits to source by byte offset. Edits are applied back-to-front
     # so earlier offsets never drift.
@@ -271,15 +271,15 @@ module OpenMutator
 end
 ```
 
-Append to `lib/open_mutator.rb` after the module block:
+Append to `lib/active_mutator.rb` after the module block:
 ```ruby
-require_relative "open_mutator/edit"
-require_relative "open_mutator/splicer"
+require_relative "active_mutator/edit"
+require_relative "active_mutator/splicer"
 ```
 
 - [x] **Step 4: Run tests to verify they pass**
 
-Run: `bundle exec rspec spec/open_mutator/splicer_spec.rb`
+Run: `bundle exec rspec spec/active_mutator/splicer_spec.rb`
 Expected: 5 examples, 0 failures
 
 - [x] **Step 5: Commit**
@@ -291,16 +291,16 @@ git add -A && git commit -m "feat: Edit value object and byte-range splicer"
 ## Task 3: Subject + SubjectFinder
 
 **Files:**
-- Create: `lib/open_mutator/subject.rb`, `lib/open_mutator/subject_finder.rb`
-- Test: `spec/open_mutator/subject_finder_spec.rb`
+- Create: `lib/active_mutator/subject.rb`, `lib/active_mutator/subject_finder.rb`
+- Test: `spec/active_mutator/subject_finder_spec.rb`
 
 - [x] **Step 1: Write the failing tests**
 
-`spec/open_mutator/subject_finder_spec.rb`:
+`spec/active_mutator/subject_finder_spec.rb`:
 ```ruby
 require "tmpdir"
 
-RSpec.describe OpenMutator::SubjectFinder do
+RSpec.describe ActiveMutator::SubjectFinder do
   def subjects_of(source)
     Dir.mktmpdir do |dir|
       file = File.join(dir, "code.rb")
@@ -381,14 +381,14 @@ end
 
 - [x] **Step 2: Run tests to verify they fail**
 
-Run: `bundle exec rspec spec/open_mutator/subject_finder_spec.rb`
-Expected: FAIL with `uninitialized constant OpenMutator::SubjectFinder`
+Run: `bundle exec rspec spec/active_mutator/subject_finder_spec.rb`
+Expected: FAIL with `uninitialized constant ActiveMutator::SubjectFinder`
 
 - [x] **Step 3: Implement**
 
-`lib/open_mutator/subject.rb`:
+`lib/active_mutator/subject.rb`:
 ```ruby
-module OpenMutator
+module ActiveMutator
   # A mutable unit: one method definition.
   # byte_range/line_range cover the whole `def ... end`.
   Subject = Data.define(:name, :file, :byte_range, :line_range, :constant_scope, :kind) do
@@ -397,9 +397,9 @@ module OpenMutator
 end
 ```
 
-`lib/open_mutator/subject_finder.rb`:
+`lib/active_mutator/subject_finder.rb`:
 ```ruby
-module OpenMutator
+module ActiveMutator
   class SubjectFinder < Prism::Visitor
     def self.call(file)
       result = Prism.parse(File.read(file))
@@ -457,15 +457,15 @@ module OpenMutator
 end
 ```
 
-Append to `lib/open_mutator.rb`:
+Append to `lib/active_mutator.rb`:
 ```ruby
-require_relative "open_mutator/subject"
-require_relative "open_mutator/subject_finder"
+require_relative "active_mutator/subject"
+require_relative "active_mutator/subject_finder"
 ```
 
 - [x] **Step 4: Run tests to verify they pass**
 
-Run: `bundle exec rspec spec/open_mutator/subject_finder_spec.rb`
+Run: `bundle exec rspec spec/active_mutator/subject_finder_spec.rb`
 Expected: 7 examples, 0 failures
 
 - [x] **Step 5: Commit**
@@ -481,9 +481,9 @@ git add -A && git commit -m "feat: Subject and Prism-based SubjectFinder"
 ## Task 4: Operator base, registry, and ConditionalBoundary
 
 **Files:**
-- Create: `lib/open_mutator/operators/base.rb`, `lib/open_mutator/operators/conditional_boundary.rb`
+- Create: `lib/active_mutator/operators/base.rb`, `lib/active_mutator/operators/conditional_boundary.rb`
 - Create: `spec/support/operator_helper.rb`
-- Test: `spec/open_mutator/operators/conditional_boundary_spec.rb`
+- Test: `spec/active_mutator/operators/conditional_boundary_spec.rb`
 
 - [x] **Step 1: Write the shared operator test helper**
 
@@ -498,7 +498,7 @@ module OperatorHelper
 
     edits = []
     each_node(result.value) { |node| edits.concat(operator.edits(node)) }
-    edits.map { |e| OpenMutator::Splicer.apply(source, [e]) }
+    edits.map { |e| ActiveMutator::Splicer.apply(source, [e]) }
   end
 
   def each_node(node, &blk)
@@ -512,9 +512,9 @@ RSpec.configure { |c| c.include OperatorHelper }
 
 - [x] **Step 2: Write the failing tests**
 
-`spec/open_mutator/operators/conditional_boundary_spec.rb`:
+`spec/active_mutator/operators/conditional_boundary_spec.rb`:
 ```ruby
-RSpec.describe OpenMutator::Operators::ConditionalBoundary do
+RSpec.describe ActiveMutator::Operators::ConditionalBoundary do
   subject(:operator) { described_class.new }
 
   it "widens and narrows comparison operators" do
@@ -533,21 +533,21 @@ RSpec.describe OpenMutator::Operators::ConditionalBoundary do
   end
 
   it "registers itself" do
-    expect(OpenMutator::Operators::Base.all.map(&:class)).to include(described_class)
+    expect(ActiveMutator::Operators::Base.all.map(&:class)).to include(described_class)
   end
 end
 ```
 
 - [x] **Step 3: Run tests to verify they fail**
 
-Run: `bundle exec rspec spec/open_mutator/operators/conditional_boundary_spec.rb`
-Expected: FAIL with `uninitialized constant OpenMutator::Operators`
+Run: `bundle exec rspec spec/active_mutator/operators/conditional_boundary_spec.rb`
+Expected: FAIL with `uninitialized constant ActiveMutator::Operators`
 
 - [x] **Step 4: Implement**
 
-`lib/open_mutator/operators/base.rb`:
+`lib/active_mutator/operators/base.rb`:
 ```ruby
-module OpenMutator
+module ActiveMutator
   module Operators
     class Base
       REGISTRY = []
@@ -574,9 +574,9 @@ module OpenMutator
 end
 ```
 
-`lib/open_mutator/operators/conditional_boundary.rb`:
+`lib/active_mutator/operators/conditional_boundary.rb`:
 ```ruby
-module OpenMutator
+module ActiveMutator
   module Operators
     class ConditionalBoundary < Base
       MAP = { :> => ">=", :>= => ">", :< => "<=", :<= => "<" }.freeze
@@ -594,15 +594,15 @@ module OpenMutator
 end
 ```
 
-Append to `lib/open_mutator.rb`:
+Append to `lib/active_mutator.rb`:
 ```ruby
-require_relative "open_mutator/operators/base"
-require_relative "open_mutator/operators/conditional_boundary"
+require_relative "active_mutator/operators/base"
+require_relative "active_mutator/operators/conditional_boundary"
 ```
 
 - [x] **Step 5: Run tests to verify they pass**
 
-Run: `bundle exec rspec spec/open_mutator/operators/conditional_boundary_spec.rb`
+Run: `bundle exec rspec spec/active_mutator/operators/conditional_boundary_spec.rb`
 Expected: 4 examples, 0 failures
 
 - [x] **Step 6: Commit**
@@ -614,14 +614,14 @@ git add -A && git commit -m "feat: operator base/registry and ConditionalBoundar
 ## Task 5: ConditionForcing + LogicalOperator
 
 **Files:**
-- Create: `lib/open_mutator/operators/condition_forcing.rb`, `lib/open_mutator/operators/logical_operator.rb`
-- Test: `spec/open_mutator/operators/condition_forcing_spec.rb`, `spec/open_mutator/operators/logical_operator_spec.rb`
+- Create: `lib/active_mutator/operators/condition_forcing.rb`, `lib/active_mutator/operators/logical_operator.rb`
+- Test: `spec/active_mutator/operators/condition_forcing_spec.rb`, `spec/active_mutator/operators/logical_operator_spec.rb`
 
 - [x] **Step 1: Write the failing tests**
 
-`spec/open_mutator/operators/condition_forcing_spec.rb`:
+`spec/active_mutator/operators/condition_forcing_spec.rb`:
 ```ruby
-RSpec.describe OpenMutator::Operators::ConditionForcing do
+RSpec.describe ActiveMutator::Operators::ConditionForcing do
   subject(:operator) { described_class.new }
 
   it "forces if predicates to true and false" do
@@ -649,9 +649,9 @@ RSpec.describe OpenMutator::Operators::ConditionForcing do
 end
 ```
 
-`spec/open_mutator/operators/logical_operator_spec.rb`:
+`spec/active_mutator/operators/logical_operator_spec.rb`:
 ```ruby
-RSpec.describe OpenMutator::Operators::LogicalOperator do
+RSpec.describe ActiveMutator::Operators::LogicalOperator do
   subject(:operator) { described_class.new }
 
   it "swaps && with || and drops each operand" do
@@ -672,14 +672,14 @@ end
 
 - [x] **Step 2: Run tests to verify they fail**
 
-Run: `bundle exec rspec spec/open_mutator/operators/condition_forcing_spec.rb spec/open_mutator/operators/logical_operator_spec.rb`
+Run: `bundle exec rspec spec/active_mutator/operators/condition_forcing_spec.rb spec/active_mutator/operators/logical_operator_spec.rb`
 Expected: FAIL with uninitialized constant errors
 
 - [x] **Step 3: Implement**
 
-`lib/open_mutator/operators/condition_forcing.rb`:
+`lib/active_mutator/operators/condition_forcing.rb`:
 ```ruby
-module OpenMutator
+module ActiveMutator
   module Operators
     class ConditionForcing < Base
       def edits(node)
@@ -698,9 +698,9 @@ module OpenMutator
 end
 ```
 
-`lib/open_mutator/operators/logical_operator.rb`:
+`lib/active_mutator/operators/logical_operator.rb`:
 ```ruby
-module OpenMutator
+module ActiveMutator
   module Operators
     class LogicalOperator < Base
       def edits(node)
@@ -726,15 +726,15 @@ module OpenMutator
 end
 ```
 
-Append to `lib/open_mutator.rb`:
+Append to `lib/active_mutator.rb`:
 ```ruby
-require_relative "open_mutator/operators/condition_forcing"
-require_relative "open_mutator/operators/logical_operator"
+require_relative "active_mutator/operators/condition_forcing"
+require_relative "active_mutator/operators/logical_operator"
 ```
 
 - [x] **Step 4: Run tests to verify they pass**
 
-Run: `bundle exec rspec spec/open_mutator/operators`
+Run: `bundle exec rspec spec/active_mutator/operators`
 Expected: all pass
 
 - [x] **Step 5: Commit**
@@ -746,14 +746,14 @@ git add -A && git commit -m "feat: ConditionForcing and LogicalOperator operator
 ## Task 6: Literal operator
 
 **Files:**
-- Create: `lib/open_mutator/operators/literal.rb`
-- Test: `spec/open_mutator/operators/literal_spec.rb`
+- Create: `lib/active_mutator/operators/literal.rb`
+- Test: `spec/active_mutator/operators/literal_spec.rb`
 
 - [x] **Step 1: Write the failing tests**
 
-`spec/open_mutator/operators/literal_spec.rb`:
+`spec/active_mutator/operators/literal_spec.rb`:
 ```ruby
-RSpec.describe OpenMutator::Operators::Literal do
+RSpec.describe ActiveMutator::Operators::Literal do
   subject(:operator) { described_class.new }
 
   it "mutates nonzero integers to 0 and n+1" do
@@ -769,7 +769,7 @@ RSpec.describe OpenMutator::Operators::Literal do
   end
 
   it "fills empty strings" do
-    expect(mutations_of(%(x = ""), operator)).to eq([%(x = "open_mutator")])
+    expect(mutations_of(%(x = ""), operator)).to eq([%(x = "active_mutator")])
   end
 
   it "flips boolean literals" do
@@ -792,14 +792,14 @@ end
 
 - [x] **Step 2: Run tests to verify they fail**
 
-Run: `bundle exec rspec spec/open_mutator/operators/literal_spec.rb`
-Expected: FAIL with `uninitialized constant OpenMutator::Operators::Literal`
+Run: `bundle exec rspec spec/active_mutator/operators/literal_spec.rb`
+Expected: FAIL with `uninitialized constant ActiveMutator::Operators::Literal`
 
 - [x] **Step 3: Implement**
 
-`lib/open_mutator/operators/literal.rb`:
+`lib/active_mutator/operators/literal.rb`:
 ```ruby
-module OpenMutator
+module ActiveMutator
   module Operators
     class Literal < Base
       def edits(node)
@@ -828,7 +828,7 @@ module OpenMutator
         return [] if opening.start_with?("<<")    # heredocs: v1 limit
 
         if node.unescaped.empty?
-          [edit(loc_range(node.location), %("open_mutator"), %(replace "" with "open_mutator"))]
+          [edit(loc_range(node.location), %("active_mutator"), %(replace "" with "active_mutator"))]
         else
           [edit(loc_range(node.location), %(""), %(replace string with ""))]
         end
@@ -838,14 +838,14 @@ module OpenMutator
 end
 ```
 
-Append to `lib/open_mutator.rb`:
+Append to `lib/active_mutator.rb`:
 ```ruby
-require_relative "open_mutator/operators/literal"
+require_relative "active_mutator/operators/literal"
 ```
 
 - [x] **Step 4: Run tests to verify they pass**
 
-Run: `bundle exec rspec spec/open_mutator/operators/literal_spec.rb`
+Run: `bundle exec rspec spec/active_mutator/operators/literal_spec.rb`
 Expected: 7 examples, 0 failures
 
 - [x] **Step 5: Commit**
@@ -857,14 +857,14 @@ git add -A && git commit -m "feat: Literal operator (integers, strings, booleans
 ## Task 7: StatementDeletion + EarlyReturn
 
 **Files:**
-- Create: `lib/open_mutator/operators/statement_deletion.rb`, `lib/open_mutator/operators/early_return.rb`
-- Test: `spec/open_mutator/operators/statement_deletion_spec.rb`, `spec/open_mutator/operators/early_return_spec.rb`
+- Create: `lib/active_mutator/operators/statement_deletion.rb`, `lib/active_mutator/operators/early_return.rb`
+- Test: `spec/active_mutator/operators/statement_deletion_spec.rb`, `spec/active_mutator/operators/early_return_spec.rb`
 
 - [x] **Step 1: Write the failing tests**
 
-`spec/open_mutator/operators/statement_deletion_spec.rb`:
+`spec/active_mutator/operators/statement_deletion_spec.rb`:
 ```ruby
-RSpec.describe OpenMutator::Operators::StatementDeletion do
+RSpec.describe ActiveMutator::Operators::StatementDeletion do
   subject(:operator) { described_class.new }
 
   it "deletes each statement in a multi-statement body" do
@@ -878,9 +878,9 @@ RSpec.describe OpenMutator::Operators::StatementDeletion do
 end
 ```
 
-`spec/open_mutator/operators/early_return_spec.rb`:
+`spec/active_mutator/operators/early_return_spec.rb`:
 ```ruby
-RSpec.describe OpenMutator::Operators::EarlyReturn do
+RSpec.describe ActiveMutator::Operators::EarlyReturn do
   subject(:operator) { described_class.new }
 
   it "unwraps return and substitutes return nil" do
@@ -905,14 +905,14 @@ end
 
 - [x] **Step 2: Run tests to verify they fail**
 
-Run: `bundle exec rspec spec/open_mutator/operators/statement_deletion_spec.rb spec/open_mutator/operators/early_return_spec.rb`
+Run: `bundle exec rspec spec/active_mutator/operators/statement_deletion_spec.rb spec/active_mutator/operators/early_return_spec.rb`
 Expected: FAIL with uninitialized constant errors
 
 - [x] **Step 3: Implement**
 
-`lib/open_mutator/operators/statement_deletion.rb`:
+`lib/active_mutator/operators/statement_deletion.rb`:
 ```ruby
-module OpenMutator
+module ActiveMutator
   module Operators
     class StatementDeletion < Base
       def edits(node)
@@ -929,9 +929,9 @@ module OpenMutator
 end
 ```
 
-`lib/open_mutator/operators/early_return.rb`:
+`lib/active_mutator/operators/early_return.rb`:
 ```ruby
-module OpenMutator
+module ActiveMutator
   module Operators
     class EarlyReturn < Base
       def edits(node)
@@ -949,15 +949,15 @@ module OpenMutator
 end
 ```
 
-Append to `lib/open_mutator.rb`:
+Append to `lib/active_mutator.rb`:
 ```ruby
-require_relative "open_mutator/operators/statement_deletion"
-require_relative "open_mutator/operators/early_return"
+require_relative "active_mutator/operators/statement_deletion"
+require_relative "active_mutator/operators/early_return"
 ```
 
 - [x] **Step 4: Run tests to verify they pass**
 
-Run: `bundle exec rspec spec/open_mutator/operators`
+Run: `bundle exec rspec spec/active_mutator/operators`
 Expected: all pass
 
 - [x] **Step 5: Commit**
@@ -969,14 +969,14 @@ git add -A && git commit -m "feat: StatementDeletion and EarlyReturn operators"
 ## Task 8: CallSwap (with Rails pack) + NegationRemoval
 
 **Files:**
-- Create: `lib/open_mutator/operators/call_swap.rb`, `lib/open_mutator/operators/negation_removal.rb`
-- Test: `spec/open_mutator/operators/call_swap_spec.rb`, `spec/open_mutator/operators/negation_removal_spec.rb`
+- Create: `lib/active_mutator/operators/call_swap.rb`, `lib/active_mutator/operators/negation_removal.rb`
+- Test: `spec/active_mutator/operators/call_swap_spec.rb`, `spec/active_mutator/operators/negation_removal_spec.rb`
 
 - [x] **Step 1: Write the failing tests**
 
-`spec/open_mutator/operators/call_swap_spec.rb`:
+`spec/active_mutator/operators/call_swap_spec.rb`:
 ```ruby
-RSpec.describe OpenMutator::Operators::CallSwap do
+RSpec.describe ActiveMutator::Operators::CallSwap do
   subject(:operator) { described_class.new }
 
   {
@@ -1005,9 +1005,9 @@ RSpec.describe OpenMutator::Operators::CallSwap do
 end
 ```
 
-`spec/open_mutator/operators/negation_removal_spec.rb`:
+`spec/active_mutator/operators/negation_removal_spec.rb`:
 ```ruby
-RSpec.describe OpenMutator::Operators::NegationRemoval do
+RSpec.describe ActiveMutator::Operators::NegationRemoval do
   subject(:operator) { described_class.new }
 
   it "removes unary bang" do
@@ -1026,14 +1026,14 @@ end
 
 - [x] **Step 2: Run tests to verify they fail**
 
-Run: `bundle exec rspec spec/open_mutator/operators/call_swap_spec.rb spec/open_mutator/operators/negation_removal_spec.rb`
+Run: `bundle exec rspec spec/active_mutator/operators/call_swap_spec.rb spec/active_mutator/operators/negation_removal_spec.rb`
 Expected: FAIL with uninitialized constant errors
 
 - [x] **Step 3: Implement**
 
-`lib/open_mutator/operators/call_swap.rb`:
+`lib/active_mutator/operators/call_swap.rb`:
 ```ruby
-module OpenMutator
+module ActiveMutator
   module Operators
     class CallSwap < Base
       # One-directional where the reverse is usually an equivalent mutant
@@ -1063,9 +1063,9 @@ module OpenMutator
 end
 ```
 
-`lib/open_mutator/operators/negation_removal.rb`:
+`lib/active_mutator/operators/negation_removal.rb`:
 ```ruby
-module OpenMutator
+module ActiveMutator
   module Operators
     class NegationRemoval < Base
       def edits(node)
@@ -1078,15 +1078,15 @@ module OpenMutator
 end
 ```
 
-Append to `lib/open_mutator.rb`:
+Append to `lib/active_mutator.rb`:
 ```ruby
-require_relative "open_mutator/operators/call_swap"
-require_relative "open_mutator/operators/negation_removal"
+require_relative "active_mutator/operators/call_swap"
+require_relative "active_mutator/operators/negation_removal"
 ```
 
 - [x] **Step 4: Run tests to verify they pass**
 
-Run: `bundle exec rspec spec/open_mutator/operators`
+Run: `bundle exec rspec spec/active_mutator/operators`
 Expected: all pass
 
 - [x] **Step 5: Commit**
@@ -1098,23 +1098,23 @@ git add -A && git commit -m "feat: CallSwap (with Rails pack) and NegationRemova
 ## Task 9: Mutation, Analysis, and Engine (validity gate)
 
 **Files:**
-- Create: `lib/open_mutator/mutation.rb`, `lib/open_mutator/analysis.rb`, `lib/open_mutator/engine.rb`
-- Test: `spec/open_mutator/engine_spec.rb`
+- Create: `lib/active_mutator/mutation.rb`, `lib/active_mutator/analysis.rb`, `lib/active_mutator/engine.rb`
+- Test: `spec/active_mutator/engine_spec.rb`
 
 - [x] **Step 1: Write the failing tests**
 
-`spec/open_mutator/engine_spec.rb`:
+`spec/active_mutator/engine_spec.rb`:
 ```ruby
 require "tmpdir"
 
-RSpec.describe OpenMutator::Engine do
+RSpec.describe ActiveMutator::Engine do
   subject(:engine) { described_class.new }
 
   def analyze(source)
     Dir.mktmpdir do |dir|
       file = File.join(dir, "code.rb")
       File.write(file, source)
-      subject_ = OpenMutator::SubjectFinder.call(file).first
+      subject_ = ActiveMutator::SubjectFinder.call(file).first
       engine.analyze(subject_)
     end
   end
@@ -1185,7 +1185,7 @@ RSpec.describe OpenMutator::Engine do
     bad_operator = Class.new do
       def edits(node)
         return [] unless node.is_a?(Prism::IntegerNode)
-        [OpenMutator::Edit.new(range: node.location.start_offset...node.location.end_offset,
+        [ActiveMutator::Edit.new(range: node.location.start_offset...node.location.end_offset,
                                replacement: "(((", description: "break syntax")]
       end
     end
@@ -1193,7 +1193,7 @@ RSpec.describe OpenMutator::Engine do
     Dir.mktmpdir do |dir|
       file = File.join(dir, "code.rb")
       File.write(file, source)
-      subject_ = OpenMutator::SubjectFinder.call(file).first
+      subject_ = ActiveMutator::SubjectFinder.call(file).first
       analysis = engine.analyze(subject_)
       expect(analysis.mutations).to be_empty
       expect(analysis.invalid_count).to eq(1)
@@ -1206,14 +1206,14 @@ Note: never subclass `Operators::Base` in tests — `inherited` registers the cl
 
 - [x] **Step 2: Run tests to verify they fail**
 
-Run: `bundle exec rspec spec/open_mutator/engine_spec.rb`
-Expected: FAIL with `uninitialized constant OpenMutator::Engine`
+Run: `bundle exec rspec spec/active_mutator/engine_spec.rb`
+Expected: FAIL with `uninitialized constant ActiveMutator::Engine`
 
 - [x] **Step 3: Implement**
 
-`lib/open_mutator/mutation.rb`:
+`lib/active_mutator/mutation.rb`:
 ```ruby
-module OpenMutator
+module ActiveMutator
   # One concrete mutant. `line` is the 1-based line of the edit in the
   # ORIGINAL file (used for coverage lookup and reporting).
   Mutation = Data.define(:subject, :edit, :original_snippet, :line,
@@ -1226,16 +1226,16 @@ module OpenMutator
 end
 ```
 
-`lib/open_mutator/analysis.rb`:
+`lib/active_mutator/analysis.rb`:
 ```ruby
-module OpenMutator
+module ActiveMutator
   Analysis = Data.define(:mutations, :invalid_count)
 end
 ```
 
-`lib/open_mutator/engine.rb`:
+`lib/active_mutator/engine.rb`:
 ```ruby
-module OpenMutator
+module ActiveMutator
   class Engine
     def initialize(operators: Operators::Base.all)
       @operators = operators
@@ -1312,16 +1312,16 @@ module OpenMutator
 end
 ```
 
-Append to `lib/open_mutator.rb`:
+Append to `lib/active_mutator.rb`:
 ```ruby
-require_relative "open_mutator/mutation"
-require_relative "open_mutator/analysis"
-require_relative "open_mutator/engine"
+require_relative "active_mutator/mutation"
+require_relative "active_mutator/analysis"
+require_relative "active_mutator/engine"
 ```
 
 - [x] **Step 4: Run tests to verify they pass**
 
-Run: `bundle exec rspec spec/open_mutator/engine_spec.rb`
+Run: `bundle exec rspec spec/active_mutator/engine_spec.rb`
 Expected: 5 examples, 0 failures
 
 - [x] **Step 5: Run the whole suite**
@@ -1342,22 +1342,22 @@ git add -A && git commit -m "feat: Mutation engine with re-parse validity gate"
 ## Task 10: Baseline hooks (instrumented RSpec run)
 
 **Files:**
-- Create: `lib/open_mutator/baseline_hooks.rb`
-- Test: `spec/open_mutator/baseline_hooks_spec.rb`
+- Create: `lib/active_mutator/baseline_hooks.rb`
+- Test: `spec/active_mutator/baseline_hooks_spec.rb`
 
-**Important:** this file is loaded standalone in the HOST project's suite via `RUBYOPT=-ropen_mutator/baseline_hooks` — NOT via `rspec --require`. RSpec merges project-file `.rspec` requires before command-line requires, so `rspec --require` would fire AFTER the host's `--require spec_helper` has already loaded the app, and `Coverage` only instruments files loaded after `Coverage.start` — the map would be empty. `RUBYOPT`'s `-r` fires before rspec boots (under `bundle exec`, Bundler puts the gem's lib dir on the load path first). Consequence: at load time rspec-core may not be loaded yet, so this file must `require "rspec/core"` itself before `RSpec.configure`.
+**Important:** this file is loaded standalone in the HOST project's suite via `RUBYOPT=-ractive_mutator/baseline_hooks` — NOT via `rspec --require`. RSpec merges project-file `.rspec` requires before command-line requires, so `rspec --require` would fire AFTER the host's `--require spec_helper` has already loaded the app, and `Coverage` only instruments files loaded after `Coverage.start` — the map would be empty. `RUBYOPT`'s `-r` fires before rspec boots (under `bundle exec`, Bundler puts the gem's lib dir on the load path first). Consequence: at load time rspec-core may not be loaded yet, so this file must `require "rspec/core"` itself before `RSpec.configure`.
 
-It must never be required by `lib/open_mutator.rb` — it starts `Coverage` at load time. Its pure functions live in `OpenMutator::BaselineHooks` so they are unit-testable without triggering instrumentation (`Coverage.start` and the RSpec hooks are guarded behind `ENV["OPEN_MUTATOR_BASELINE_OUT"]`).
+It must never be required by `lib/active_mutator.rb` — it starts `Coverage` at load time. Its pure functions live in `ActiveMutator::BaselineHooks` so they are unit-testable without triggering instrumentation (`Coverage.start` and the RSpec hooks are guarded behind `ENV["ACTIVE_MUTATOR_BASELINE_OUT"]`).
 
 Timing note: `example.execution_result.run_time` is nil inside `around(:each)` hooks (RSpec sets it after around hooks complete), so the hook measures elapsed time itself with a monotonic clock.
 
 - [x] **Step 1: Write the failing tests**
 
-`spec/open_mutator/baseline_hooks_spec.rb`:
+`spec/active_mutator/baseline_hooks_spec.rb`:
 ```ruby
-require "open_mutator/baseline_hooks"
+require "active_mutator/baseline_hooks"
 
-RSpec.describe OpenMutator::BaselineHooks do
+RSpec.describe ActiveMutator::BaselineHooks do
   describe ".diff_coverage" do
     it "returns [path, line] pairs whose hit count increased" do
       before = { "/root/lib/a.rb" => { lines: [1, 0, nil, 2] } }
@@ -1402,20 +1402,20 @@ end
 
 - [x] **Step 2: Run tests to verify they fail**
 
-Run: `bundle exec rspec spec/open_mutator/baseline_hooks_spec.rb`
+Run: `bundle exec rspec spec/active_mutator/baseline_hooks_spec.rb`
 Expected: FAIL (cannot load such file or uninitialized constant)
 
 - [x] **Step 3: Implement**
 
-`lib/open_mutator/baseline_hooks.rb`:
+`lib/active_mutator/baseline_hooks.rb`:
 ```ruby
-# Loaded standalone via RUBYOPT=-ropen_mutator/baseline_hooks in the host
+# Loaded standalone via RUBYOPT=-ractive_mutator/baseline_hooks in the host
 # project's suite — before rspec boots, so Coverage instruments everything
 # the suite loads (including code loaded by spec_helper). Records per-example
-# coverage diffs and writes the inverted map to OPEN_MUTATOR_BASELINE_OUT.
+# coverage diffs and writes the inverted map to ACTIVE_MUTATOR_BASELINE_OUT.
 require "json"
 
-module OpenMutator
+module ActiveMutator
   module BaselineHooks
     RECORDS = {}
     TIMES = {}
@@ -1447,7 +1447,7 @@ module OpenMutator
   end
 end
 
-if ENV["OPEN_MUTATOR_BASELINE_OUT"]
+if ENV["ACTIVE_MUTATOR_BASELINE_OUT"]
   require "coverage"
   Coverage.start(lines: true)
   require "rspec/core" # loaded via RUBYOPT, so rspec isn't up yet
@@ -1459,19 +1459,19 @@ if ENV["OPEN_MUTATOR_BASELINE_OUT"]
       example.run
       elapsed = Process.clock_gettime(Process::CLOCK_MONOTONIC) - started
       after = Coverage.peek_result
-      root = ENV.fetch("OPEN_MUTATOR_ROOT")
-      OpenMutator::BaselineHooks::RECORDS[example.id] =
-        OpenMutator::BaselineHooks.diff_coverage(before, after, root)
+      root = ENV.fetch("ACTIVE_MUTATOR_ROOT")
+      ActiveMutator::BaselineHooks::RECORDS[example.id] =
+        ActiveMutator::BaselineHooks.diff_coverage(before, after, root)
       # NOT example.execution_result.run_time — that is nil until after
       # around hooks complete.
-      OpenMutator::BaselineHooks::TIMES[example.id] = elapsed
+      ActiveMutator::BaselineHooks::TIMES[example.id] = elapsed
     end
 
     config.after(:suite) do
-      payload = OpenMutator::BaselineHooks.build_payload(
-        OpenMutator::BaselineHooks::RECORDS, OpenMutator::BaselineHooks::TIMES
+      payload = ActiveMutator::BaselineHooks.build_payload(
+        ActiveMutator::BaselineHooks::RECORDS, ActiveMutator::BaselineHooks::TIMES
       )
-      File.write(ENV.fetch("OPEN_MUTATOR_BASELINE_OUT"), JSON.generate(payload))
+      File.write(ENV.fetch("ACTIVE_MUTATOR_BASELINE_OUT"), JSON.generate(payload))
     end
   end
 end
@@ -1479,7 +1479,7 @@ end
 
 - [x] **Step 4: Run tests to verify they pass**
 
-Run: `bundle exec rspec spec/open_mutator/baseline_hooks_spec.rb`
+Run: `bundle exec rspec spec/active_mutator/baseline_hooks_spec.rb`
 Expected: 4 examples, 0 failures
 
 - [x] **Step 5: Commit**
@@ -1491,14 +1491,14 @@ git add -A && git commit -m "feat: baseline hooks for per-example coverage captu
 ## Task 11: CoverageMap
 
 **Files:**
-- Create: `lib/open_mutator/coverage_map.rb`
-- Test: `spec/open_mutator/coverage_map_spec.rb`
+- Create: `lib/active_mutator/coverage_map.rb`
+- Test: `spec/active_mutator/coverage_map_spec.rb`
 
 - [x] **Step 1: Write the failing tests**
 
-`spec/open_mutator/coverage_map_spec.rb`:
+`spec/active_mutator/coverage_map_spec.rb`:
 ```ruby
-RSpec.describe OpenMutator::CoverageMap do
+RSpec.describe ActiveMutator::CoverageMap do
   subject(:map) do
     described_class.new(
       "map" => {
@@ -1550,16 +1550,16 @@ Add `require "tmpdir"` and `require "json"` at the top of this spec file.
 
 - [x] **Step 2: Run tests to verify they fail**
 
-Run: `bundle exec rspec spec/open_mutator/coverage_map_spec.rb`
-Expected: FAIL with `uninitialized constant OpenMutator::CoverageMap`
+Run: `bundle exec rspec spec/active_mutator/coverage_map_spec.rb`
+Expected: FAIL with `uninitialized constant ActiveMutator::CoverageMap`
 
 - [x] **Step 3: Implement**
 
-`lib/open_mutator/coverage_map.rb`:
+`lib/active_mutator/coverage_map.rb`:
 ```ruby
 require "json"
 
-module OpenMutator
+module ActiveMutator
   class CoverageMap
     def self.load(path) = new(JSON.parse(File.read(path)))
 
@@ -1584,14 +1584,14 @@ module OpenMutator
 end
 ```
 
-Append to `lib/open_mutator.rb`:
+Append to `lib/active_mutator.rb`:
 ```ruby
-require_relative "open_mutator/coverage_map"
+require_relative "active_mutator/coverage_map"
 ```
 
 - [x] **Step 4: Run tests to verify they pass**
 
-Run: `bundle exec rspec spec/open_mutator/coverage_map_spec.rb`
+Run: `bundle exec rspec spec/active_mutator/coverage_map_spec.rb`
 Expected: 6 examples, 0 failures
 
 - [x] **Step 5: Commit**
@@ -1603,9 +1603,9 @@ git add -A && git commit -m "feat: CoverageMap inverted-index wrapper"
 ## Task 12: Baseline runner + tiny_project fixture
 
 **Files:**
-- Create: `lib/open_mutator/baseline.rb`
+- Create: `lib/active_mutator/baseline.rb`
 - Create: `spec/fixtures/tiny_project/` (Gemfile, .rspec, lib/calculator.rb, spec/spec_helper.rb, spec/calculator_spec.rb)
-- Test: `spec/open_mutator/baseline_spec.rb` (tagged `:integration`)
+- Test: `spec/active_mutator/baseline_spec.rb` (tagged `:integration`)
 
 - [x] **Step 1: Create the fixture project**
 
@@ -1618,7 +1618,7 @@ This fixture is shared by the baseline integration test (here) and the E2E test 
 ```ruby
 source "https://rubygems.org"
 
-gem "open_mutator", path: "../../.."
+gem "active_mutator", path: "../../.."
 gem "rspec", "~> 3.13"
 ```
 
@@ -1679,13 +1679,13 @@ Expected: 5 examples, 0 failures
 
 - [x] **Step 2: Write the failing integration test**
 
-`spec/open_mutator/baseline_spec.rb`:
+`spec/active_mutator/baseline_spec.rb`:
 ```ruby
 require "fileutils"
 
-RSpec.describe OpenMutator::Baseline, :integration do
+RSpec.describe ActiveMutator::Baseline, :integration do
   let(:root) { File.expand_path("../fixtures/tiny_project", __dir__) }
-  let(:cache_dir) { File.join(root, ".open_mutator") }
+  let(:cache_dir) { File.join(root, ".active_mutator") }
 
   after { FileUtils.rm_rf(cache_dir) }
 
@@ -1720,7 +1720,7 @@ RSpec.describe OpenMutator::Baseline, :integration do
     File.write(broken_spec, "RSpec.describe('x') { it { expect(1).to eq(2) } }\n")
     begin
       expect { run_in_fixture { described_class.new(root: root).coverage_map } }
-        .to raise_error(OpenMutator::BaselineFailed)
+        .to raise_error(ActiveMutator::BaselineFailed)
     ensure
       File.delete(broken_spec)
     end
@@ -1730,23 +1730,23 @@ end
 
 - [x] **Step 3: Run test to verify it fails**
 
-Run: `OPEN_MUTATOR_INTEGRATION=1 bundle exec rspec spec/open_mutator/baseline_spec.rb`
-Expected: FAIL with `uninitialized constant OpenMutator::Baseline`
+Run: `ACTIVE_MUTATOR_INTEGRATION=1 bundle exec rspec spec/active_mutator/baseline_spec.rb`
+Expected: FAIL with `uninitialized constant ActiveMutator::Baseline`
 
 - [x] **Step 4: Implement**
 
-`lib/open_mutator/baseline.rb`:
+`lib/active_mutator/baseline.rb`:
 ```ruby
 require "digest"
 require "fileutils"
 require "json"
 
-module OpenMutator
+module ActiveMutator
   # Runs the host suite once, instrumented, in a subprocess. Produces and
   # caches the CoverageMap. Invalidation is coarse: any digest change in
   # {app,lib,spec}/**/*.rb triggers a full re-run.
   class Baseline
-    def initialize(root:, cache_dir: File.join(root, ".open_mutator"))
+    def initialize(root:, cache_dir: File.join(root, ".active_mutator"))
       @root = root
       @cache_dir = cache_dir
       @out_path = File.join(cache_dir, "coverage.json")
@@ -1768,12 +1768,12 @@ module OpenMutator
     def run_baseline!
       FileUtils.mkdir_p(@cache_dir)
       env = {
-        "OPEN_MUTATOR_ROOT" => @root,
-        "OPEN_MUTATOR_BASELINE_OUT" => @out_path,
+        "ACTIVE_MUTATOR_ROOT" => @root,
+        "ACTIVE_MUTATOR_BASELINE_OUT" => @out_path,
         # RUBYOPT, not `rspec --require`: project .rspec requires (spec_helper
         # → app code) run before command-line requires, and Coverage misses
         # everything loaded before Coverage.start. -r fires before rspec boots.
-        "RUBYOPT" => "-ropen_mutator/baseline_hooks"
+        "RUBYOPT" => "-ractive_mutator/baseline_hooks"
       }
       # out: :err — the subprocess suite's progress output must not pollute
       # our stdout (breaks `--format json` consumers).
@@ -1797,14 +1797,14 @@ module OpenMutator
 end
 ```
 
-Append to `lib/open_mutator.rb`:
+Append to `lib/active_mutator.rb`:
 ```ruby
-require_relative "open_mutator/baseline"
+require_relative "active_mutator/baseline"
 ```
 
 - [x] **Step 5: Run tests to verify they pass**
 
-Run: `OPEN_MUTATOR_INTEGRATION=1 bundle exec rspec spec/open_mutator/baseline_spec.rb`
+Run: `ACTIVE_MUTATOR_INTEGRATION=1 bundle exec rspec spec/active_mutator/baseline_spec.rb`
 Expected: 3 examples, 0 failures
 
 - [x] **Step 6: Commit**
@@ -1820,22 +1820,22 @@ git add -A && git commit -m "feat: baseline runner with digest-keyed cache; tiny
 ## Task 13: Inserter
 
 **Files:**
-- Create: `lib/open_mutator/inserter.rb`
-- Test: `spec/open_mutator/inserter_spec.rb`
+- Create: `lib/active_mutator/inserter.rb`
+- Test: `spec/active_mutator/inserter_spec.rb`
 
 - [x] **Step 1: Write the failing tests**
 
-`spec/open_mutator/inserter_spec.rb`:
+`spec/active_mutator/inserter_spec.rb`:
 ```ruby
-RSpec.describe OpenMutator::Inserter do
+RSpec.describe ActiveMutator::Inserter do
   subject(:inserter) { described_class.new }
 
   def mutation_stub(scope:, def_source:, kind: :instance)
-    subject_ = OpenMutator::Subject.new(
+    subject_ = ActiveMutator::Subject.new(
       name: "test", file: "(test)", byte_range: 0...1, line_range: 1..1,
       constant_scope: scope, kind: kind
     )
-    instance_double(OpenMutator::Mutation,
+    instance_double(ActiveMutator::Mutation,
                     subject: subject_, mutated_def_source: def_source, mutated_def_line: 1)
   end
 
@@ -1866,14 +1866,14 @@ end
 
 - [x] **Step 2: Run tests to verify they fail**
 
-Run: `bundle exec rspec spec/open_mutator/inserter_spec.rb`
-Expected: FAIL with `uninitialized constant OpenMutator::Inserter`
+Run: `bundle exec rspec spec/active_mutator/inserter_spec.rb`
+Expected: FAIL with `uninitialized constant ActiveMutator::Inserter`
 
 - [x] **Step 3: Implement**
 
-`lib/open_mutator/inserter.rb`:
+`lib/active_mutator/inserter.rb`:
 ```ruby
-module OpenMutator
+module ActiveMutator
   # Redefines the subject's method with its mutated source. `class_eval` of a
   # `def` handles instance methods; a `def self.x` source string defines the
   # singleton method the same way. Top-level subjects eval at main scope.
@@ -1893,14 +1893,14 @@ module OpenMutator
 end
 ```
 
-Append to `lib/open_mutator.rb`:
+Append to `lib/active_mutator.rb`:
 ```ruby
-require_relative "open_mutator/inserter"
+require_relative "active_mutator/inserter"
 ```
 
 - [x] **Step 4: Run tests to verify they pass**
 
-Run: `bundle exec rspec spec/open_mutator/inserter_spec.rb`
+Run: `bundle exec rspec spec/active_mutator/inserter_spec.rb`
 Expected: 3 examples, 0 failures
 
 - [x] **Step 5: Commit**
@@ -1912,19 +1912,19 @@ git add -A && git commit -m "feat: Inserter evals mutated defs into constant sco
 ## Task 14: Worker
 
 **Files:**
-- Create: `lib/open_mutator/worker.rb`
-- Test: `spec/open_mutator/worker_spec.rb`
+- Create: `lib/active_mutator/worker.rb`
+- Test: `spec/active_mutator/worker_spec.rb`
 
 - [x] **Step 1: Write the failing tests**
 
-`spec/open_mutator/worker_spec.rb`:
+`spec/active_mutator/worker_spec.rb`:
 ```ruby
 require "json"
 require "stringio"
 
-RSpec.describe OpenMutator::Worker do
+RSpec.describe ActiveMutator::Worker do
   let(:writer) { StringIO.new }
-  let(:mutation) { instance_double(OpenMutator::Mutation) }
+  let(:mutation) { instance_double(ActiveMutator::Mutation) }
   let(:rspec_runner) { instance_double(RSpec::Core::Runner) }
 
   def emitted
@@ -1939,7 +1939,7 @@ RSpec.describe OpenMutator::Worker do
     allow(RSpec::Core::Runner).to receive(:new).and_return(rspec_runner)
     allow(rspec_runner).to receive(:setup)
     allow(RSpec.world).to receive(:ordered_example_groups).and_return([])
-    allow_any_instance_of(OpenMutator::Inserter).to receive(:insert)
+    allow_any_instance_of(ActiveMutator::Inserter).to receive(:insert)
   end
 
   it "emits killed when examples fail" do
@@ -1957,7 +1957,7 @@ RSpec.describe OpenMutator::Worker do
   it "loads specs BEFORE inserting the mutation" do
     calls = []
     allow(rspec_runner).to receive(:setup) { calls << :setup }
-    allow_any_instance_of(OpenMutator::Inserter).to receive(:insert) { calls << :insert }
+    allow_any_instance_of(ActiveMutator::Inserter).to receive(:insert) { calls << :insert }
     allow(rspec_runner).to receive(:run_specs) do
       calls << :run_specs
       0
@@ -1968,7 +1968,7 @@ RSpec.describe OpenMutator::Worker do
 
   it "emits error when insertion raises" do
     allow(rspec_runner).to receive(:run_specs).and_return(0)
-    allow_any_instance_of(OpenMutator::Inserter)
+    allow_any_instance_of(ActiveMutator::Inserter)
       .to receive(:insert).and_raise(SyntaxError, "boom")
     run_worker
     expect(emitted["status"]).to eq("error")
@@ -1979,16 +1979,16 @@ end
 
 - [x] **Step 2: Run tests to verify they fail**
 
-Run: `bundle exec rspec spec/open_mutator/worker_spec.rb`
-Expected: FAIL with `uninitialized constant OpenMutator::Worker`
+Run: `bundle exec rspec spec/active_mutator/worker_spec.rb`
+Expected: FAIL with `uninitialized constant ActiveMutator::Worker`
 
 - [x] **Step 3: Implement**
 
-`lib/open_mutator/worker.rb`:
+`lib/active_mutator/worker.rb`:
 ```ruby
 require "json"
 
-module OpenMutator
+module ActiveMutator
   # Runs INSIDE a fork. Order is critical: RSpec's setup phase loads the spec
   # files, whose spec_helper/rails_helper loads the application — only THEN
   # can the mutation be inserted over the loaded original. Insert-first would
@@ -2037,14 +2037,14 @@ module OpenMutator
 end
 ```
 
-Append to `lib/open_mutator.rb`:
+Append to `lib/active_mutator.rb`:
 ```ruby
-require_relative "open_mutator/worker"
+require_relative "active_mutator/worker"
 ```
 
 - [x] **Step 4: Run tests to verify they pass**
 
-Run: `bundle exec rspec spec/open_mutator/worker_spec.rb`
+Run: `bundle exec rspec spec/active_mutator/worker_spec.rb`
 Expected: 4 examples, 0 failures
 
 - [x] **Step 5: Commit**
@@ -2056,20 +2056,20 @@ git add -A && git commit -m "feat: Worker — load specs, insert mutation, in-pr
 ## Task 15: Result, WorkItem, Scheduler (fork pool + deadlines)
 
 **Files:**
-- Create: `lib/open_mutator/result.rb`, `lib/open_mutator/work_item.rb`, `lib/open_mutator/scheduler.rb`
-- Test: `spec/open_mutator/scheduler_spec.rb`
+- Create: `lib/active_mutator/result.rb`, `lib/active_mutator/work_item.rb`, `lib/active_mutator/scheduler.rb`
+- Test: `spec/active_mutator/scheduler_spec.rb`
 
 - [x] **Step 1: Write the failing tests**
 
 The scheduler forks real processes; tests inject a fake worker lambda so no RSpec-in-RSpec runs. These tests fork and sleep — they stay in the default suite (sub-second) but must not run on platforms without fork.
 
-`spec/open_mutator/scheduler_spec.rb`:
+`spec/active_mutator/scheduler_spec.rb`:
 ```ruby
 require "json"
 
-RSpec.describe OpenMutator::Scheduler do
+RSpec.describe ActiveMutator::Scheduler do
   def item(timeout: 5.0)
-    OpenMutator::WorkItem.new(mutation: nil, example_ids: [], timeout: timeout)
+    ActiveMutator::WorkItem.new(mutation: nil, example_ids: [], timeout: timeout)
   end
 
   def scheduler(worker:, jobs: 2, on_result: nil)
@@ -2119,14 +2119,14 @@ end
 
 - [x] **Step 2: Run tests to verify they fail**
 
-Run: `bundle exec rspec spec/open_mutator/scheduler_spec.rb`
-Expected: FAIL with `uninitialized constant OpenMutator::Scheduler`
+Run: `bundle exec rspec spec/active_mutator/scheduler_spec.rb`
+Expected: FAIL with `uninitialized constant ActiveMutator::Scheduler`
 
 - [x] **Step 3: Implement**
 
-`lib/open_mutator/result.rb`:
+`lib/active_mutator/result.rb`:
 ```ruby
-module OpenMutator
+module ActiveMutator
   # status: :killed | :survived | :timeout | :error | :uncovered
   Result = Data.define(:mutation, :status, :details) do
     def detected? = %i[killed timeout].include?(status)
@@ -2134,18 +2134,18 @@ module OpenMutator
 end
 ```
 
-`lib/open_mutator/work_item.rb`:
+`lib/active_mutator/work_item.rb`:
 ```ruby
-module OpenMutator
+module ActiveMutator
   WorkItem = Data.define(:mutation, :example_ids, :timeout)
 end
 ```
 
-`lib/open_mutator/scheduler.rb`:
+`lib/active_mutator/scheduler.rb`:
 ```ruby
 require "json"
 
-module OpenMutator
+module ActiveMutator
   # Fork pool: one fork per WorkItem, capped at `jobs` concurrent forks.
   # Parent enforces per-item deadlines with SIGKILL (worker-side timeouts
   # cannot interrupt all infinite loops).
@@ -2258,16 +2258,16 @@ module OpenMutator
 end
 ```
 
-Append to `lib/open_mutator.rb`:
+Append to `lib/active_mutator.rb`:
 ```ruby
-require_relative "open_mutator/result"
-require_relative "open_mutator/work_item"
-require_relative "open_mutator/scheduler"
+require_relative "active_mutator/result"
+require_relative "active_mutator/work_item"
+require_relative "active_mutator/scheduler"
 ```
 
 - [x] **Step 4: Run tests to verify they pass**
 
-Run: `bundle exec rspec spec/open_mutator/scheduler_spec.rb`
+Run: `bundle exec rspec spec/active_mutator/scheduler_spec.rb`
 Expected: 5 examples, 0 failures
 
 - [x] **Step 5: Run whole suite**
@@ -2288,34 +2288,34 @@ git add -A && git commit -m "feat: fork-pool scheduler with parent-enforced dead
 ## Task 16: Terminal and JSON reporters
 
 **Files:**
-- Create: `lib/open_mutator/reporter/terminal.rb`, `lib/open_mutator/reporter/json.rb`
-- Test: `spec/open_mutator/reporter/terminal_spec.rb`, `spec/open_mutator/reporter/json_spec.rb`
+- Create: `lib/active_mutator/reporter/terminal.rb`, `lib/active_mutator/reporter/json.rb`
+- Test: `spec/active_mutator/reporter/terminal_spec.rb`, `spec/active_mutator/reporter/json_spec.rb`
 
 - [x] **Step 1: Write the failing tests**
 
-`spec/open_mutator/reporter/terminal_spec.rb`:
+`spec/active_mutator/reporter/terminal_spec.rb`:
 ```ruby
 require "stringio"
 
-RSpec.describe OpenMutator::Reporter::Terminal do
+RSpec.describe ActiveMutator::Reporter::Terminal do
   let(:out) { StringIO.new }
   subject(:reporter) { described_class.new(out: out) }
 
   def mutation(description: "replace `<` with `<=`")
-    subject_ = OpenMutator::Subject.new(
+    subject_ = ActiveMutator::Subject.new(
       name: "Calculator#discount", file: "lib/calculator.rb",
       byte_range: 0...1, line_range: 10..13, constant_scope: "Calculator", kind: :instance
     )
-    OpenMutator::Mutation.new(
+    ActiveMutator::Mutation.new(
       subject: subject_,
-      edit: OpenMutator::Edit.new(range: 5...6, replacement: "<=", description: description),
+      edit: ActiveMutator::Edit.new(range: 5...6, replacement: "<=", description: description),
       original_snippet: "<", line: 11,
       mutated_file_source: "", mutated_def_source: "", mutated_def_line: 10
     )
   end
 
   def result(status)
-    OpenMutator::Result.new(mutation: mutation, status: status, details: nil)
+    ActiveMutator::Result.new(mutation: mutation, status: status, details: nil)
   end
 
   it "prints one progress char per result" do
@@ -2341,27 +2341,27 @@ RSpec.describe OpenMutator::Reporter::Terminal do
 end
 ```
 
-`spec/open_mutator/reporter/json_spec.rb`:
+`spec/active_mutator/reporter/json_spec.rb`:
 ```ruby
 require "json"
 require "stringio"
 
-RSpec.describe OpenMutator::Reporter::Json do
+RSpec.describe ActiveMutator::Reporter::Json do
   let(:out) { StringIO.new }
   subject(:reporter) { described_class.new(out: out) }
 
   it "emits machine-readable results" do
-    subject_ = OpenMutator::Subject.new(
+    subject_ = ActiveMutator::Subject.new(
       name: "Calculator#discount", file: "lib/calculator.rb",
       byte_range: 0...1, line_range: 10..13, constant_scope: "Calculator", kind: :instance
     )
-    mutation = OpenMutator::Mutation.new(
+    mutation = ActiveMutator::Mutation.new(
       subject: subject_,
-      edit: OpenMutator::Edit.new(range: 5...6, replacement: "<=", description: "replace `<` with `<=`"),
+      edit: ActiveMutator::Edit.new(range: 5...6, replacement: "<=", description: "replace `<` with `<=`"),
       original_snippet: "<", line: 11,
       mutated_file_source: "", mutated_def_source: "", mutated_def_line: 10
     )
-    result = OpenMutator::Result.new(mutation: mutation, status: :survived, details: nil)
+    result = ActiveMutator::Result.new(mutation: mutation, status: :survived, details: nil)
     reporter.on_result(result) # must be a no-op, not crash
     reporter.summary([result], invalid_count: 1)
 
@@ -2382,14 +2382,14 @@ end
 
 - [x] **Step 2: Run tests to verify they fail**
 
-Run: `bundle exec rspec spec/open_mutator/reporter`
+Run: `bundle exec rspec spec/active_mutator/reporter`
 Expected: FAIL with uninitialized constant errors
 
 - [x] **Step 3: Implement**
 
-`lib/open_mutator/reporter/terminal.rb`:
+`lib/active_mutator/reporter/terminal.rb`:
 ```ruby
-module OpenMutator
+module ActiveMutator
   module Reporter
     class Terminal
       CHARS = { killed: ".", survived: "S", timeout: "T", error: "E", uncovered: "U" }.freeze
@@ -2441,11 +2441,11 @@ module OpenMutator
 end
 ```
 
-`lib/open_mutator/reporter/json.rb`:
+`lib/active_mutator/reporter/json.rb`:
 ```ruby
 require "json"
 
-module OpenMutator
+module ActiveMutator
   module Reporter
     class Json
       def initialize(out: $stdout)
@@ -2484,15 +2484,15 @@ module OpenMutator
 end
 ```
 
-Append to `lib/open_mutator.rb`:
+Append to `lib/active_mutator.rb`:
 ```ruby
-require_relative "open_mutator/reporter/terminal"
-require_relative "open_mutator/reporter/json"
+require_relative "active_mutator/reporter/terminal"
+require_relative "active_mutator/reporter/json"
 ```
 
 - [x] **Step 4: Run tests to verify they pass**
 
-Run: `bundle exec rspec spec/open_mutator/reporter`
+Run: `bundle exec rspec spec/active_mutator/reporter`
 Expected: 4 examples, 0 failures
 
 - [x] **Step 5: Commit**
@@ -2504,14 +2504,14 @@ git add -A && git commit -m "feat: terminal and JSON reporters"
 ## Task 17: SinceFilter
 
 **Files:**
-- Create: `lib/open_mutator/since_filter.rb`
-- Test: `spec/open_mutator/since_filter_spec.rb`
+- Create: `lib/active_mutator/since_filter.rb`
+- Test: `spec/active_mutator/since_filter_spec.rb`
 
 - [x] **Step 1: Write the failing tests**
 
-`spec/open_mutator/since_filter_spec.rb`:
+`spec/active_mutator/since_filter_spec.rb`:
 ```ruby
-RSpec.describe OpenMutator::SinceFilter do
+RSpec.describe ActiveMutator::SinceFilter do
   describe ".parse" do
     it "extracts added/changed line numbers per file from unified=0 diffs" do
       diff = <<~DIFF
@@ -2554,7 +2554,7 @@ RSpec.describe OpenMutator::SinceFilter do
       filter.instance_variable_set(:@root, "/root")
       filter.instance_variable_set(:@changed, "lib/a.rb" => [11, 12])
 
-      hit = OpenMutator::Subject.new(name: "A#x", file: "/root/lib/a.rb",
+      hit = ActiveMutator::Subject.new(name: "A#x", file: "/root/lib/a.rb",
                                      byte_range: 0...1, line_range: 10..14,
                                      constant_scope: "A", kind: :instance)
       miss = hit.with(line_range: 20..24)
@@ -2570,14 +2570,14 @@ end
 
 - [x] **Step 2: Run tests to verify they fail**
 
-Run: `bundle exec rspec spec/open_mutator/since_filter_spec.rb`
-Expected: FAIL with `uninitialized constant OpenMutator::SinceFilter`
+Run: `bundle exec rspec spec/active_mutator/since_filter_spec.rb`
+Expected: FAIL with `uninitialized constant ActiveMutator::SinceFilter`
 
 - [x] **Step 3: Implement**
 
-`lib/open_mutator/since_filter.rb`:
+`lib/active_mutator/since_filter.rb`:
 ```ruby
-module OpenMutator
+module ActiveMutator
   # Restricts subjects to methods overlapping lines changed since a git ref.
   # Known v1 limit: `git diff <ref>` omits untracked files, so brand-new
   # uncommitted files are skipped.
@@ -2619,14 +2619,14 @@ module OpenMutator
 end
 ```
 
-Append to `lib/open_mutator.rb`:
+Append to `lib/active_mutator.rb`:
 ```ruby
-require_relative "open_mutator/since_filter"
+require_relative "active_mutator/since_filter"
 ```
 
 - [x] **Step 4: Run tests to verify they pass**
 
-Run: `bundle exec rspec spec/open_mutator/since_filter_spec.rb`
+Run: `bundle exec rspec spec/active_mutator/since_filter_spec.rb`
 Expected: 3 examples, 0 failures
 
 - [x] **Step 5: Commit**
@@ -2638,14 +2638,14 @@ git add -A && git commit -m "feat: SinceFilter for git-diff-scoped runs"
 ## Task 18: Config, CLI, Runner
 
 **Files:**
-- Create: `lib/open_mutator/config.rb`, `lib/open_mutator/cli.rb`, `lib/open_mutator/runner.rb`
-- Test: `spec/open_mutator/cli_spec.rb`, `spec/open_mutator/runner_spec.rb`
+- Create: `lib/active_mutator/config.rb`, `lib/active_mutator/cli.rb`, `lib/active_mutator/runner.rb`
+- Test: `spec/active_mutator/cli_spec.rb`, `spec/active_mutator/runner_spec.rb`
 
 - [x] **Step 1: Write the failing CLI tests**
 
-`spec/open_mutator/cli_spec.rb`:
+`spec/active_mutator/cli_spec.rb`:
 ```ruby
-RSpec.describe OpenMutator::CLI do
+RSpec.describe ActiveMutator::CLI do
   describe ".parse" do
     it "builds a default config" do
       config = described_class.parse([])
@@ -2691,11 +2691,11 @@ end
 
 Runner orchestration is unit-tested with all collaborators injected/stubbed; full-stack behavior is covered by the Task 19 E2E.
 
-`spec/open_mutator/runner_spec.rb`:
+`spec/active_mutator/runner_spec.rb`:
 ```ruby
-RSpec.describe OpenMutator::Runner do
+RSpec.describe ActiveMutator::Runner do
   let(:config) do
-    OpenMutator::Config.new(
+    ActiveMutator::Config.new(
       paths: ["lib"], since: nil, subject_filter: nil, jobs: 2, format: :terminal,
       requires: [], timeout_factor: 4.0, timeout_floor: 2.0, force_baseline: false,
       root: "/project"
@@ -2703,15 +2703,15 @@ RSpec.describe OpenMutator::Runner do
   end
 
   let(:subject_) do
-    OpenMutator::Subject.new(name: "A#x", file: "/project/lib/a.rb",
+    ActiveMutator::Subject.new(name: "A#x", file: "/project/lib/a.rb",
                              byte_range: 0...10, line_range: 1..3,
                              constant_scope: "A", kind: :instance)
   end
 
   def mutation(line: 2)
-    OpenMutator::Mutation.new(
+    ActiveMutator::Mutation.new(
       subject: subject_,
-      edit: OpenMutator::Edit.new(range: 5...6, replacement: ">=", description: "d"),
+      edit: ActiveMutator::Edit.new(range: 5...6, replacement: ">=", description: "d"),
       original_snippet: ">", line: line,
       mutated_file_source: "", mutated_def_source: "def x = 1", mutated_def_line: 1
     )
@@ -2720,7 +2720,7 @@ RSpec.describe OpenMutator::Runner do
   it "builds work items from covered mutations and reports uncovered ones" do
     covered = mutation(line: 2)
     uncovered = mutation(line: 3)
-    map = instance_double(OpenMutator::CoverageMap)
+    map = instance_double(ActiveMutator::CoverageMap)
     allow(map).to receive(:examples_for).with("/project/lib/a.rb", 2..2).and_return(["e1"])
     allow(map).to receive(:examples_for).with("/project/lib/a.rb", 3..3).and_return([])
     allow(map).to receive(:time_for).with(["e1"]).and_return(0.5)
@@ -2736,8 +2736,8 @@ RSpec.describe OpenMutator::Runner do
   end
 
   it "exits 1 when mutants survive, 0 otherwise" do
-    survived = OpenMutator::Result.new(mutation: mutation, status: :survived, details: nil)
-    killed = OpenMutator::Result.new(mutation: mutation, status: :killed, details: nil)
+    survived = ActiveMutator::Result.new(mutation: mutation, status: :survived, details: nil)
+    killed = ActiveMutator::Result.new(mutation: mutation, status: :killed, details: nil)
     expect(described_class.new(config).exit_code([killed, survived])).to eq(1)
     expect(described_class.new(config).exit_code([killed])).to eq(0)
   end
@@ -2746,31 +2746,31 @@ end
 
 - [x] **Step 3: Run tests to verify they fail**
 
-Run: `bundle exec rspec spec/open_mutator/cli_spec.rb spec/open_mutator/runner_spec.rb`
+Run: `bundle exec rspec spec/active_mutator/cli_spec.rb spec/active_mutator/runner_spec.rb`
 Expected: FAIL with uninitialized constant errors
 
 - [x] **Step 4: Implement**
 
-`lib/open_mutator/config.rb`:
+`lib/active_mutator/config.rb`:
 ```ruby
 require "etc"
 
-module OpenMutator
+module ActiveMutator
   Config = Data.define(:paths, :since, :subject_filter, :jobs, :format, :requires,
                        :timeout_factor, :timeout_floor, :force_baseline, :root)
 end
 ```
 
-`lib/open_mutator/cli.rb`:
+`lib/active_mutator/cli.rb`:
 ```ruby
 require "optparse"
 
-module OpenMutator
+module ActiveMutator
   module CLI
     def self.run(argv)
       Runner.new(parse(argv)).call
     rescue OptionParser::ParseError, Error => e
-      warn "open_mutator: #{e.message}"
+      warn "active_mutator: #{e.message}"
       2
     end
 
@@ -2782,7 +2782,7 @@ module OpenMutator
         requires: [], timeout_factor: 4.0, timeout_floor: 10.0, force_baseline: false
       }
       paths = OptionParser.new do |o|
-        o.banner = "Usage: open_mutator [paths] [options]"
+        o.banner = "Usage: active_mutator [paths] [options]"
         o.on("--since REF", "Mutate only methods changed since git REF") { |v| options[:since] = v }
         o.on("--subject NAME", "Mutate only the named subject, e.g. Foo::Bar#baz") { |v| options[:subject_filter] = v }
         o.on("--jobs N", Integer, "Concurrent workers (default: CPU count)") { |v| options[:jobs] = v }
@@ -2799,9 +2799,9 @@ module OpenMutator
 end
 ```
 
-`lib/open_mutator/runner.rb`:
+`lib/active_mutator/runner.rb`:
 ```ruby
-module OpenMutator
+module ActiveMutator
   class Runner
     def initialize(config, reporter: nil)
       @config = config
@@ -2880,16 +2880,16 @@ module OpenMutator
 end
 ```
 
-Append to `lib/open_mutator.rb` (final require list):
+Append to `lib/active_mutator.rb` (final require list):
 ```ruby
-require_relative "open_mutator/config"
-require_relative "open_mutator/runner"
-require_relative "open_mutator/cli"
+require_relative "active_mutator/config"
+require_relative "active_mutator/runner"
+require_relative "active_mutator/cli"
 ```
 
 - [x] **Step 5: Run tests to verify they pass**
 
-Run: `bundle exec rspec spec/open_mutator/cli_spec.rb spec/open_mutator/runner_spec.rb`
+Run: `bundle exec rspec spec/active_mutator/cli_spec.rb spec/active_mutator/runner_spec.rb`
 Expected: 5 examples, 0 failures
 
 - [x] **Step 6: Run whole suite**
@@ -2925,13 +2925,13 @@ require "fileutils"
 RSpec.describe "tiny_project end-to-end", :e2e do
   let(:root) { File.expand_path("../fixtures/tiny_project", __dir__) }
 
-  after { FileUtils.rm_rf(File.join(root, ".open_mutator")) }
+  after { FileUtils.rm_rf(File.join(root, ".active_mutator")) }
 
   it "kills tested mutants, surfaces the planted survivor and uncovered method" do
     stdout, stderr, status = Bundler.with_unbundled_env do
       Open3.capture3(
         { "BUNDLE_GEMFILE" => File.join(root, "Gemfile") },
-        "bundle", "exec", "open_mutator", "lib", "--format", "json", "--jobs", "2",
+        "bundle", "exec", "active_mutator", "lib", "--format", "json", "--jobs", "2",
         chdir: root
       )
     end
@@ -2960,11 +2960,11 @@ end
 
 - [x] **Step 2: Run it**
 
-Run: `OPEN_MUTATOR_E2E=1 bundle exec rspec spec/e2e/tiny_project_spec.rb`
+Run: `ACTIVE_MUTATOR_E2E=1 bundle exec rspec spec/e2e/tiny_project_spec.rb`
 Expected: PASS. This is the whole pipeline; debugging lands here. Common failure causes, in order: coverage map path/keying mismatches (absolute vs relative), def-span extraction, worker exit protocol.
 
 If a status assertion fails, debug with the terminal format inside the fixture:
-`cd spec/fixtures/tiny_project && BUNDLE_GEMFILE=Gemfile bundle exec open_mutator lib`
+`cd spec/fixtures/tiny_project && BUNDLE_GEMFILE=Gemfile bundle exec active_mutator lib`
 
 - [x] **Step 3: Commit**
 
@@ -2979,7 +2979,7 @@ git add -A && git commit -m "test: end-to-end pipeline against tiny_project fixt
 
 - [x] **Step 1: Write the property test**
 
-Corpus = open_mutator's own `lib/`. Every operator, every node, every emitted edit: the mutated file must re-parse. This asserts operators produce position-valid replacements — the Engine's gate discards failures at runtime, but a failure here is an operator bug to fix, not to discard.
+Corpus = active_mutator's own `lib/`. Every operator, every node, every emitted edit: the mutated file must re-parse. This asserts operators produce position-valid replacements — the Engine's gate discards failures at runtime, but a failure here is an operator bug to fix, not to discard.
 
 `spec/property/reparse_spec.rb`:
 ```ruby
@@ -2997,9 +2997,9 @@ RSpec.describe "operator re-parse property" do
 
       failures = []
       each_node(result.value) do |node|
-        OpenMutator::Operators::Base.all.each do |operator|
+        ActiveMutator::Operators::Base.all.each do |operator|
           operator.edits(node).each do |edit|
-            mutated = OpenMutator::Splicer.apply(source, [edit])
+            mutated = ActiveMutator::Splicer.apply(source, [edit])
             unless Prism.parse(mutated).success?
               failures << "#{operator.class}: #{edit.description} @ bytes #{edit.range}"
             end
@@ -3046,7 +3046,7 @@ Notes:
 Append to `spec/fixtures/rails_app/Gemfile`:
 ```ruby
 gem "rspec-rails", group: %i[development test]
-gem "open_mutator", path: "../../.."
+gem "active_mutator", path: "../../.."
 ```
 
 ```bash
@@ -3105,13 +3105,13 @@ require "fileutils"
 RSpec.describe "rails_app end-to-end", :rails_e2e do
   let(:root) { File.expand_path("../fixtures/rails_app", __dir__) }
 
-  after { FileUtils.rm_rf(File.join(root, ".open_mutator")) }
+  after { FileUtils.rm_rf(File.join(root, ".active_mutator")) }
 
   it "mutates an ActiveRecord model with DB-touching specs" do
     stdout, stderr, status = Bundler.with_unbundled_env do
       Open3.capture3(
         { "BUNDLE_GEMFILE" => File.join(root, "Gemfile"), "RAILS_ENV" => "test" },
-        "bundle", "exec", "open_mutator", "app", "--format", "json", "--jobs", "1",
+        "bundle", "exec", "active_mutator", "app", "--format", "json", "--jobs", "1",
         chdir: root
       )
     end
@@ -3131,12 +3131,12 @@ end
 
 - [x] **Step 4: Run it**
 
-Run: `OPEN_MUTATOR_RAILS_E2E=1 bundle exec rspec spec/e2e/rails_app_spec.rb`
+Run: `ACTIVE_MUTATOR_RAILS_E2E=1 bundle exec rspec spec/e2e/rails_app_spec.rb`
 Expected: PASS. If `error` statuses appear, debug `Worker#after_fork_hygiene` (AR connection handling API differs across Rails versions — adjust to the generated app's Rails version).
 
 - [x] **Step 5: Full suite, all tags**
 
-Run: `OPEN_MUTATOR_INTEGRATION=1 OPEN_MUTATOR_E2E=1 OPEN_MUTATOR_RAILS_E2E=1 bundle exec rspec`
+Run: `ACTIVE_MUTATOR_INTEGRATION=1 ACTIVE_MUTATOR_E2E=1 ACTIVE_MUTATOR_RAILS_E2E=1 bundle exec rspec`
 Expected: all pass
 
 - [x] **Step 6: Commit**

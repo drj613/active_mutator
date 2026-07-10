@@ -1,4 +1,4 @@
-RSpec.describe OpenMutator::CLI do
+RSpec.describe ActiveMutator::CLI do
   describe ".parse" do
     it "builds a default config" do
       config = described_class.parse([])

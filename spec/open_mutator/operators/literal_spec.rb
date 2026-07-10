@@ -1,4 +1,4 @@
-RSpec.describe OpenMutator::Operators::Literal do
+RSpec.describe ActiveMutator::Operators::Literal do
   subject(:operator) { described_class.new }
 
   it "mutates nonzero integers to 0 and n+1" do
@@ -14,7 +14,7 @@ RSpec.describe OpenMutator::Operators::Literal do
   end
 
   it "fills empty strings" do
-    expect(mutations_of(%(x = ""), operator)).to eq([%(x = "open_mutator")])
+    expect(mutations_of(%(x = ""), operator)).to eq([%(x = "active_mutator")])
   end
 
   it "flips boolean literals" do

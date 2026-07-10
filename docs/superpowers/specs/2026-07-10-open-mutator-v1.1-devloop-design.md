@@ -1,4 +1,4 @@
-# open_mutator v1.1 — Dev-Loop Era
+# active_mutator v1.1 — Dev-Loop Era
 
 **Date:** 2026-07-10
 **Status:** Draft — pending review
@@ -60,8 +60,8 @@ Change: after `preload!`, the Runner also requires the project's spec helper
   mutation run and overwrites the project's real `coverage/` data with
   parent noise, and (b) `minimum_coverage` makes it `exit 1`, corrupting our
   exit code. After preload, if `defined?(SimpleCov)`, the Runner neutralizes
-  its at_exit (`SimpleCov.at_exit { }`). Additionally every open_mutator
-  process (parent, forks, baseline subprocess) sets `ENV["OPEN_MUTATOR"] =
+  its at_exit (`SimpleCov.at_exit { }`). Additionally every active_mutator
+  process (parent, forks, baseline subprocess) sets `ENV["ACTIVE_MUTATOR"] =
   "1"` so host projects can guard coverage/profiling setup themselves; the
   README documents this as the recommended pattern. (Baseline subprocess
   already coexists: modern SimpleCov guards on `Coverage.running?` and
@@ -198,8 +198,8 @@ green (same baseline gate); a red partial run aborts with the same
   from `Dir[]`, not git) — now stated explicitly.
 - **Survivor acceptance ledger** — equivalent mutants are undecidable, so
   the loop needs a way to say "this survivor is fine":
-  - **`.open_mutator_accepted.json` at the repo root** — deliberately NOT
-    inside `.open_mutator/`: the cache dir is gitignored and disposable,
+  - **`.active_mutator_accepted.json` at the repo root** — deliberately NOT
+    inside `.active_mutator/`: the cache dir is gitignored and disposable,
     while acceptance decisions are durable team/CI state that must be
     committed (the PR recipe `--since origin/main` must honor them or CI
     exits 1 on known equivalents forever).
@@ -226,7 +226,7 @@ green (same baseline gate); a red partial run aborts with the same
 
 ```
 tests green
-  → open_mutator --changed --format json
+  → active_mutator --changed --format json
   → survivors? each is a concrete test gap: file, line, exact diff
   → strengthen tests (or --accept-survivors with justification)
   → repeat until exit 0
@@ -256,9 +256,9 @@ nightly full), dev-loop recipe, all flags.
 
 | When | Command | Expected cost after WS1+WS2 |
 |---|---|---|
-| Inner loop, tests just passed | `open_mutator --changed` | seconds |
-| Pre-commit / PR CI | `open_mutator --since origin/main` | ~1–3 min |
-| Nightly CI | `open_mutator --force-baseline` (full) | tens of minutes |
+| Inner loop, tests just passed | `active_mutator --changed` | seconds |
+| Pre-commit / PR CI | `active_mutator --since origin/main` | ~1–3 min |
+| Nightly CI | `active_mutator --force-baseline` (full) | tens of minutes |
 
 ---
 

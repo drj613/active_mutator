@@ -1,4 +1,0 @@
-#!/usr/bin/env ruby
-require "open_mutator"
-
-exit OpenMutator::CLI.run(ARGV)

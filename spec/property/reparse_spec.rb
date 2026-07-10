@@ -12,9 +12,9 @@ RSpec.describe "operator re-parse property" do
 
       failures = []
       each_node(result.value) do |node|
-        OpenMutator::Operators::Base.all.each do |operator|
+        ActiveMutator::Operators::Base.all.each do |operator|
           operator.edits(node).each do |edit|
-            mutated = OpenMutator::Splicer.apply(source, [edit])
+            mutated = ActiveMutator::Splicer.apply(source, [edit])
             unless Prism.parse(mutated).success?
               failures << "#{operator.class}: #{edit.description} @ bytes #{edit.range}"
             end

@@ -1,13 +1,13 @@
 require "tmpdir"
 
-RSpec.describe OpenMutator::Engine do
+RSpec.describe ActiveMutator::Engine do
   subject(:engine) { described_class.new }
 
   def analyze(source)
     Dir.mktmpdir do |dir|
       file = File.join(dir, "code.rb")
       File.write(file, source)
-      subject_ = OpenMutator::SubjectFinder.call(file).first
+      subject_ = ActiveMutator::SubjectFinder.call(file).first
       engine.analyze(subject_)
     end
   end
@@ -78,7 +78,7 @@ RSpec.describe OpenMutator::Engine do
     bad_operator = Class.new do
       def edits(node)
         return [] unless node.is_a?(Prism::IntegerNode)
-        [OpenMutator::Edit.new(range: node.location.start_offset...node.location.end_offset,
+        [ActiveMutator::Edit.new(range: node.location.start_offset...node.location.end_offset,
                                replacement: "(((", description: "break syntax")]
       end
     end
@@ -86,7 +86,7 @@ RSpec.describe OpenMutator::Engine do
     Dir.mktmpdir do |dir|
       file = File.join(dir, "code.rb")
       File.write(file, source)
-      subject_ = OpenMutator::SubjectFinder.call(file).first
+      subject_ = ActiveMutator::SubjectFinder.call(file).first
       analysis = engine.analyze(subject_)
       expect(analysis.mutations).to be_empty
       expect(analysis.invalid_count).to eq(1)

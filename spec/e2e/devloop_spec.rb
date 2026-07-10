@@ -5,7 +5,7 @@ RSpec.describe "dev-loop end-to-end", :e2e do
   def run_mutator(root, *args)
     stdout, stderr, status = Open3.capture3(
       { "BUNDLE_GEMFILE" => File.join(root, "Gemfile") },
-      "bundle", "exec", "open_mutator", *args, chdir: root
+      "bundle", "exec", "active_mutator", *args, chdir: root
     )
     [stdout, stderr, status]
   end
@@ -18,7 +18,7 @@ RSpec.describe "dev-loop end-to-end", :e2e do
 
       _, err2, status2 = run_mutator(root, "lib", "--format", "json", "--accept-survivors")
       expect(status2.exitstatus).to eq(1), err2 # acceptance takes effect NEXT run
-      ledger = JSON.parse(File.read(File.join(root, ".open_mutator_accepted.json")))
+      ledger = JSON.parse(File.read(File.join(root, ".active_mutator_accepted.json")))
       expect(ledger.size).to eq(2)
 
       out3, err3, status3 = run_mutator(root, "lib", "--format", "json")

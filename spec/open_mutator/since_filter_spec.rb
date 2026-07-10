@@ -1,4 +1,4 @@
-RSpec.describe OpenMutator::SinceFilter do
+RSpec.describe ActiveMutator::SinceFilter do
   describe ".parse" do
     it "extracts added/changed line numbers per file from unified=0 diffs" do
       diff = <<~DIFF
@@ -41,7 +41,7 @@ RSpec.describe OpenMutator::SinceFilter do
       filter.instance_variable_set(:@root, "/root")
       filter.instance_variable_set(:@changed, "lib/a.rb" => [11, 12])
 
-      hit = OpenMutator::Subject.new(name: "A#x", file: "/root/lib/a.rb",
+      hit = ActiveMutator::Subject.new(name: "A#x", file: "/root/lib/a.rb",
                                      byte_range: 0...1, line_range: 10..14,
                                      constant_scope: "A", kind: :instance)
       miss = hit.with(line_range: 20..24)
@@ -59,7 +59,7 @@ RSpec.describe OpenMutator::SinceFilter do
       filter.instance_variable_set(:@root, "/root")
       filter.instance_variable_set(:@changed, "lib/new.rb" => :all)
 
-      subject_ = OpenMutator::Subject.new(name: "N#x", file: "/root/lib/new.rb",
+      subject_ = ActiveMutator::Subject.new(name: "N#x", file: "/root/lib/new.rb",
                                           byte_range: 0...1, line_range: 500..510,
                                           constant_scope: "N", kind: :instance)
       expect(filter.cover?(subject_)).to be(true)

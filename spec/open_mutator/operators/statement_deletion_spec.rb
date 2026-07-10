@@ -1,4 +1,4 @@
-RSpec.describe OpenMutator::Operators::StatementDeletion do
+RSpec.describe ActiveMutator::Operators::StatementDeletion do
   subject(:operator) { described_class.new }
 
   it "deletes each statement in a multi-statement body" do

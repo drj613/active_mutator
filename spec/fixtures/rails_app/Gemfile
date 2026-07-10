@@ -18,4 +18,4 @@ group :development, :test do
 end
 
 gem "rspec-rails", group: %i[development test]
-gem "open_mutator", path: "../../.."
+gem "active_mutator", path: "../../.."

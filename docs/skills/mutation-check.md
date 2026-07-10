@@ -16,7 +16,7 @@ change, docs, config.
 
 ## The loop
 
-1. Run: `bundle exec open_mutator --changed --format json`
+1. Run: `bundle exec active_mutator --changed --format json`
 2. Exit 0 → done. Report the mutation counts and move on.
 3. Exit 1 → read `results` where `"status": "survived"`. Each survivor is a
    concrete, machine-verified test gap: the exact source span (`file`,
@@ -33,12 +33,12 @@ Some mutants cannot be killed because they don't change observable behavior
 unreachable). Accept one ONLY with a stated equivalence argument:
 
 - Say WHY no test can distinguish the mutant, in one sentence.
-- Then: `bundle exec open_mutator --changed --accept-survivors`
-- The acceptance ledger (`.open_mutator_accepted.json`, repo root) is
+- Then: `bundle exec active_mutator --changed --accept-survivors`
+- The acceptance ledger (`.active_mutator_accepted.json`, repo root) is
   committed state — include it in your commit.
 
 Never accept a survivor because killing it is tedious. Never weaken
-open_mutator flags (`--subject` scoping, patterns) to make a run pass.
+active_mutator flags (`--subject` scoping, patterns) to make a run pass.
 
 ## Interpreting other statuses
 

@@ -17,7 +17,7 @@ module FixtureCopy
       # coverage under realpaths (spec_helper's require_relative canonicalizes
       # via __dir__), so `root` must match or diff_coverage drops every record.
       root = File.realpath(root)
-      FileUtils.rm_rf(File.join(root, ".open_mutator"))
+      FileUtils.rm_rf(File.join(root, ".active_mutator"))
       gemfile = File.join(root, "Gemfile")
       File.write(gemfile, File.read(gemfile).sub('path: "../../.."', %(path: "#{GEM_ROOT}")))
       Bundler.with_unbundled_env do

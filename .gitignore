@@ -1,6 +1,6 @@
-.open_mutator/
+.active_mutator/
 spec/fixtures/*/Gemfile.lock
-spec/fixtures/*/.open_mutator/
+spec/fixtures/*/.active_mutator/
 spec/fixtures/rails_app/log/*.log
 spec/fixtures/rails_app/tmp/
 spec/fixtures/rails_app/storage/*.sqlite3

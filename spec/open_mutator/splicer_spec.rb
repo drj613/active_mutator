@@ -1,6 +1,6 @@
-RSpec.describe OpenMutator::Splicer do
+RSpec.describe ActiveMutator::Splicer do
   def edit(range, replacement)
-    OpenMutator::Edit.new(range: range, replacement: replacement, description: "test")
+    ActiveMutator::Edit.new(range: range, replacement: replacement, description: "test")
   end
 
   it "replaces a byte range" do

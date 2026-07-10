@@ -7,7 +7,7 @@ module OperatorHelper
 
     edits = []
     each_node(result.value) { |node| edits.concat(operator.edits(node)) }
-    edits.map { |e| OpenMutator::Splicer.apply(source, [e]) }
+    edits.map { |e| ActiveMutator::Splicer.apply(source, [e]) }
   end
 
   def each_node(node, &blk)

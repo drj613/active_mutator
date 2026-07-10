@@ -1,4 +1,4 @@
-RSpec.describe OpenMutator::Operators::EarlyReturn do
+RSpec.describe ActiveMutator::Operators::EarlyReturn do
   subject(:operator) { described_class.new }
 
   it "unwraps return and substitutes return nil" do

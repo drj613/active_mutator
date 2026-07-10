@@ -1,24 +1,24 @@
 require "stringio"
 
-RSpec.describe OpenMutator::Reporter::Terminal do
+RSpec.describe ActiveMutator::Reporter::Terminal do
   let(:out) { StringIO.new }
   subject(:reporter) { described_class.new(out: out) }
 
   def mutation(description: "replace `<` with `<=`")
-    subject_ = OpenMutator::Subject.new(
+    subject_ = ActiveMutator::Subject.new(
       name: "Calculator#discount", file: "lib/calculator.rb",
       byte_range: 0...1, line_range: 10..13, constant_scope: "Calculator", kind: :instance
     )
-    OpenMutator::Mutation.new(
+    ActiveMutator::Mutation.new(
       subject: subject_,
-      edit: OpenMutator::Edit.new(range: 5...6, replacement: "<=", description: description),
+      edit: ActiveMutator::Edit.new(range: 5...6, replacement: "<=", description: description),
       original_snippet: "<", line: 11,
       mutated_file_source: "", mutated_def_source: "", mutated_def_line: 10
     )
   end
 
   def result(status)
-    OpenMutator::Result.new(mutation: mutation, status: status, details: nil)
+    ActiveMutator::Result.new(mutation: mutation, status: status, details: nil)
   end
 
   it "prints one progress char per result" do

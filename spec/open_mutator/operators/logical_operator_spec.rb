@@ -1,4 +1,4 @@
-RSpec.describe OpenMutator::Operators::LogicalOperator do
+RSpec.describe ActiveMutator::Operators::LogicalOperator do
   subject(:operator) { described_class.new }
 
   it "swaps && with || and drops each operand" do

@@ -1,4 +1,4 @@
-RSpec.describe OpenMutator::Operators::ConditionForcing do
+RSpec.describe ActiveMutator::Operators::ConditionForcing do
   subject(:operator) { described_class.new }
 
   it "forces if predicates to true and false" do

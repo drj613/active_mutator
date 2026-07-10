@@ -1,10 +1,10 @@
-RSpec.describe OpenMutator::Fingerprint do
+RSpec.describe ActiveMutator::Fingerprint do
   def mutation(desc, snippet, range_begin, subject_name: "Calc#go", file: "/root/lib/calc.rb")
-    subject_ = OpenMutator::Subject.new(name: subject_name, file: file, byte_range: 0...100,
+    subject_ = ActiveMutator::Subject.new(name: subject_name, file: file, byte_range: 0...100,
                                         line_range: 1..10, constant_scope: "Calc", kind: :instance)
-    OpenMutator::Mutation.new(
+    ActiveMutator::Mutation.new(
       subject: subject_,
-      edit: OpenMutator::Edit.new(range: range_begin...(range_begin + 1), replacement: "x", description: desc),
+      edit: ActiveMutator::Edit.new(range: range_begin...(range_begin + 1), replacement: "x", description: desc),
       original_snippet: snippet, line: 2,
       mutated_file_source: "", mutated_def_source: "", mutated_def_line: 1
     )

@@ -1,8 +1,8 @@
-RSpec.describe OpenMutator::BaselineDelta do
+RSpec.describe ActiveMutator::BaselineDelta do
   let(:root) { "/project" }
 
   def coverage_map(records)
-    OpenMutator::CoverageMap.new("version" => 2, "records" => records, "times" => {}, "digests" => {})
+    ActiveMutator::CoverageMap.new("version" => 2, "records" => records, "times" => {}, "digests" => {})
   end
 
   let(:records) do

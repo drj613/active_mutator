@@ -1,6 +1,6 @@
 require "tmpdir"
 
-RSpec.describe OpenMutator::AtomicFile do
+RSpec.describe ActiveMutator::AtomicFile do
   it "writes content atomically" do
     Dir.mktmpdir do |dir|
       path = File.join(dir, "data.json")

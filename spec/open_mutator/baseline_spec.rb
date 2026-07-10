@@ -1,8 +1,8 @@
 require "fileutils"
 
-RSpec.describe OpenMutator::Baseline, :integration do
+RSpec.describe ActiveMutator::Baseline, :integration do
   let(:root) { File.expand_path("../fixtures/tiny_project", __dir__) }
-  let(:cache_dir) { File.join(root, ".open_mutator") }
+  let(:cache_dir) { File.join(root, ".active_mutator") }
 
   after { FileUtils.rm_rf(cache_dir) }
 
@@ -37,7 +37,7 @@ RSpec.describe OpenMutator::Baseline, :integration do
     File.write(broken_spec, "RSpec.describe('x') { it { expect(1).to eq(2) } }\n")
     begin
       expect { run_in_fixture { described_class.new(root: root).coverage_map } }
-        .to raise_error(OpenMutator::BaselineFailed)
+        .to raise_error(ActiveMutator::BaselineFailed)
     ensure
       File.delete(broken_spec)
     end

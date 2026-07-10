@@ -1,4 +1,4 @@
-# open_mutator v1.1 Dev-Loop Implementation Plan
+# active_mutator v1.1 Dev-Loop Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -15,23 +15,23 @@
 ## File structure
 
 ```
-lib/open_mutator/atomic_file.rb        # NEW — flock + tmp-rename writes
-lib/open_mutator/baseline_delta.rb     # NEW — digest diff → Delta decision
-lib/open_mutator/fingerprint.rb        # NEW — Fingerprint + ordinal computation
-lib/open_mutator/accepted_ledger.rb    # NEW — repo-root committed ledger
-lib/open_mutator/runner.rb             # MOD — spec-helper preload, SimpleCov disarm, ENV flag, lanes, ledger integration
-lib/open_mutator/worker.rb             # MOD — world-group filtering
-lib/open_mutator/work_item.rb          # MOD — lane field
-lib/open_mutator/scheduler.rb          # MOD — lane-aware two-pass run
-lib/open_mutator/baseline_hooks.rb     # MOD — v2 payload (records primary)
-lib/open_mutator/coverage_map.rb       # MOD — v2 load, records API
-lib/open_mutator/baseline.rb           # MOD — delta refresh, expanded digests, atomic writes
-lib/open_mutator/since_filter.rb       # MOD — untracked whole-file sentinel
-lib/open_mutator/config.rb             # MOD — new fields
-lib/open_mutator/cli.rb                # MOD — new flags
-lib/open_mutator/result.rb             # MOD — :accepted status
-lib/open_mutator/reporter/terminal.rb  # MOD — accepted char/count
-lib/open_mutator/reporter/json.rb      # MOD — accepted + exit_reason
+lib/active_mutator/atomic_file.rb        # NEW — flock + tmp-rename writes
+lib/active_mutator/baseline_delta.rb     # NEW — digest diff → Delta decision
+lib/active_mutator/fingerprint.rb        # NEW — Fingerprint + ordinal computation
+lib/active_mutator/accepted_ledger.rb    # NEW — repo-root committed ledger
+lib/active_mutator/runner.rb             # MOD — spec-helper preload, SimpleCov disarm, ENV flag, lanes, ledger integration
+lib/active_mutator/worker.rb             # MOD — world-group filtering
+lib/active_mutator/work_item.rb          # MOD — lane field
+lib/active_mutator/scheduler.rb          # MOD — lane-aware two-pass run
+lib/active_mutator/baseline_hooks.rb     # MOD — v2 payload (records primary)
+lib/active_mutator/coverage_map.rb       # MOD — v2 load, records API
+lib/active_mutator/baseline.rb           # MOD — delta refresh, expanded digests, atomic writes
+lib/active_mutator/since_filter.rb       # MOD — untracked whole-file sentinel
+lib/active_mutator/config.rb             # MOD — new fields
+lib/active_mutator/cli.rb                # MOD — new flags
+lib/active_mutator/result.rb             # MOD — :accepted status
+lib/active_mutator/reporter/terminal.rb  # MOD — accepted char/count
+lib/active_mutator/reporter/json.rb      # MOD — accepted + exit_reason
 spec/support/fixture_copy.rb           # NEW — tmpdir copies of tiny_project
 docs/skills/mutation-check.md          # NEW — agent-facing skill
 README.md                              # NEW
@@ -70,12 +70,12 @@ Status char map (Terminal): killed `.`, survived `S`, timeout `T`, error `E`, un
 ## Task 1: Config/CLI fields + ENV flag + spec-helper preload + SimpleCov disarm
 
 **Files:**
-- Modify: `lib/open_mutator/config.rb`, `lib/open_mutator/cli.rb`, `lib/open_mutator/runner.rb`
-- Test: `spec/open_mutator/cli_spec.rb`, `spec/open_mutator/runner_spec.rb`
+- Modify: `lib/active_mutator/config.rb`, `lib/active_mutator/cli.rb`, `lib/active_mutator/runner.rb`
+- Test: `spec/active_mutator/cli_spec.rb`, `spec/active_mutator/runner_spec.rb`
 
 - [x] **Step 1: Write the failing tests**
 
-Append to the `.parse` describe block in `spec/open_mutator/cli_spec.rb`:
+Append to the `.parse` describe block in `spec/active_mutator/cli_spec.rb`:
 ```ruby
     it "defaults the v1.1 fields" do
       config = described_class.parse([])
@@ -101,10 +101,10 @@ Append to the `.parse` describe block in `spec/open_mutator/cli_spec.rb`:
     end
 ```
 
-New describe block in `spec/open_mutator/runner_spec.rb` (inside the top-level describe; note `config` there must gain the new fields — replace the existing `let(:config)` with):
+New describe block in `spec/active_mutator/runner_spec.rb` (inside the top-level describe; note `config` there must gain the new fields — replace the existing `let(:config)` with):
 ```ruby
   let(:config) do
-    OpenMutator::Config.new(
+    ActiveMutator::Config.new(
       paths: ["lib"], since: nil, subject_filter: nil, jobs: 2, format: :terminal,
       requires: [], timeout_factor: 4.0, timeout_floor: 2.0, force_baseline: false,
       root: "/project", preload_helper: nil, serial_patterns: ["spec/system/", "spec/features/"],
@@ -153,16 +153,16 @@ Add `require "tmpdir"` and `require "fileutils"` at the top of `runner_spec.rb`.
 
 - [x] **Step 2: Run tests to verify they fail**
 
-Run: `bundle exec rspec spec/open_mutator/cli_spec.rb spec/open_mutator/runner_spec.rb`
+Run: `bundle exec rspec spec/active_mutator/cli_spec.rb spec/active_mutator/runner_spec.rb`
 Expected: FAIL — `Data.define` raises `ArgumentError: missing keyword` (Config lacks fields) and `NoMethodError` for `preload_spec_helper!`
 
 - [x] **Step 3: Implement**
 
-Replace `lib/open_mutator/config.rb` body:
+Replace `lib/active_mutator/config.rb` body:
 ```ruby
 require "etc"
 
-module OpenMutator
+module ActiveMutator
   Config = Data.define(:paths, :since, :subject_filter, :jobs, :format, :requires,
                        :timeout_factor, :timeout_floor, :force_baseline, :root,
                        :preload_helper, :serial_patterns, :browser_boot_seconds,
@@ -170,7 +170,7 @@ module OpenMutator
 end
 ```
 
-In `lib/open_mutator/cli.rb`, extend the defaults hash and parser:
+In `lib/active_mutator/cli.rb`, extend the defaults hash and parser:
 ```ruby
       options = {
         # Half the cores, not all of them: each worker pays full RSpec setup,
@@ -201,8 +201,8 @@ and add options (inside the OptionParser block, after `--timeout-floor`):
 ```
 Before `Config.new(...)`, drop the bookkeeping key: `options.delete(:serial_patterns_replaced)`.
 
-In `lib/open_mutator/runner.rb`:
-- In `#call`, first line: `ENV["OPEN_MUTATOR"] = "1"` and after `preload!` add `preload_spec_helper!`.
+In `lib/active_mutator/runner.rb`:
+- In `#call`, first line: `ENV["ACTIVE_MUTATOR"] = "1"` and after `preload!` add `preload_spec_helper!`.
 - Add private methods:
 ```ruby
     def preload_spec_helper!
@@ -232,7 +232,7 @@ In `lib/open_mutator/runner.rb`:
 
 - [x] **Step 4: Run tests to verify they pass**
 
-Run: `bundle exec rspec spec/open_mutator/cli_spec.rb spec/open_mutator/runner_spec.rb`
+Run: `bundle exec rspec spec/active_mutator/cli_spec.rb spec/active_mutator/runner_spec.rb`
 Expected: PASS (cli 6, runner 5)
 
 - [x] **Step 5: Full suite, commit**
@@ -245,12 +245,12 @@ git add -A && git commit -m "feat: spec-helper parent preload, SimpleCov disarm,
 ## Task 2: Worker world-group filtering
 
 **Files:**
-- Modify: `lib/open_mutator/worker.rb`
-- Test: `spec/open_mutator/worker_spec.rb`
+- Modify: `lib/active_mutator/worker.rb`
+- Test: `spec/active_mutator/worker_spec.rb`
 
 - [x] **Step 1: Write the failing test**
 
-Append inside the describe block of `spec/open_mutator/worker_spec.rb`:
+Append inside the describe block of `spec/active_mutator/worker_spec.rb`:
 ```ruby
   it "runs only groups belonging to covering spec files (drops helper-leaked groups)" do
     covering = instance_double(RSpec::Core::ExampleGroup,
@@ -268,12 +268,12 @@ Append inside the describe block of `spec/open_mutator/worker_spec.rb`:
 
 - [x] **Step 2: Run test to verify it fails**
 
-Run: `bundle exec rspec spec/open_mutator/worker_spec.rb`
+Run: `bundle exec rspec spec/active_mutator/worker_spec.rb`
 Expected: the new example FAILS — `ran_groups` is `[leaked, covering]`
 
 - [x] **Step 3: Implement**
 
-In `lib/open_mutator/worker.rb`, replace the `run_specs` line in `#run`:
+In `lib/active_mutator/worker.rb`, replace the `run_specs` line in `#run`:
 ```ruby
       code = runner.run_specs(covering_groups)
 ```
@@ -297,7 +297,7 @@ Add `require "set"` at the top of the file.
 
 - [x] **Step 4: Run tests to verify they pass**
 
-Run: `bundle exec rspec spec/open_mutator/worker_spec.rb`
+Run: `bundle exec rspec spec/active_mutator/worker_spec.rb`
 Expected: 5 examples, 0 failures
 
 - [x] **Step 5: Full suite, commit**
@@ -310,15 +310,15 @@ git add -A && git commit -m "feat: worker runs only covering-file example groups
 ## Task 3: Serial lane (WorkItem.lane, lane-aware Scheduler, Runner partition)
 
 **Files:**
-- Modify: `lib/open_mutator/work_item.rb`, `lib/open_mutator/scheduler.rb`, `lib/open_mutator/runner.rb`
-- Test: `spec/open_mutator/scheduler_spec.rb`, `spec/open_mutator/runner_spec.rb`
+- Modify: `lib/active_mutator/work_item.rb`, `lib/active_mutator/scheduler.rb`, `lib/active_mutator/runner.rb`
+- Test: `spec/active_mutator/scheduler_spec.rb`, `spec/active_mutator/runner_spec.rb`
 
 - [x] **Step 1: Write the failing tests**
 
-In `spec/open_mutator/scheduler_spec.rb`, change the `item` helper and add a lane test:
+In `spec/active_mutator/scheduler_spec.rb`, change the `item` helper and add a lane test:
 ```ruby
   def item(timeout: 5.0, lane: :parallel)
-    OpenMutator::WorkItem.new(mutation: nil, example_ids: [], timeout: timeout, lane: lane)
+    ActiveMutator::WorkItem.new(mutation: nil, example_ids: [], timeout: timeout, lane: lane)
   end
 ```
 ```ruby
@@ -336,12 +336,12 @@ In `spec/open_mutator/scheduler_spec.rb`, change the `item` helper and add a lan
   end
 ```
 
-In `spec/open_mutator/runner_spec.rb`, replace the existing `plan_work` example with a lane-aware version (the covered mutation should land in `:parallel`; add a browser-covered one):
+In `spec/active_mutator/runner_spec.rb`, replace the existing `plan_work` example with a lane-aware version (the covered mutation should land in `:parallel`; add a browser-covered one):
 ```ruby
   it "builds work items with lanes and reports uncovered ones" do
     covered = mutation(line: 2)
     uncovered = mutation(line: 3)
-    map = instance_double(OpenMutator::CoverageMap)
+    map = instance_double(ActiveMutator::CoverageMap)
     allow(map).to receive(:examples_for).with("/project/lib/a.rb", 2..2).and_return(["./spec/a_spec.rb[1:1]"])
     allow(map).to receive(:examples_for).with("/project/lib/a.rb", 3..3).and_return([])
     allow(map).to receive(:time_for).and_return(0.5)
@@ -356,7 +356,7 @@ In `spec/open_mutator/runner_spec.rb`, replace the existing `plan_work` example 
 
   it "assigns the serial lane and budget bump to browser-covered mutants" do
     m = mutation(line: 2)
-    map = instance_double(OpenMutator::CoverageMap)
+    map = instance_double(ActiveMutator::CoverageMap)
     allow(map).to receive(:examples_for)
       .and_return(["./spec/system/extractions_spec.rb[1:1]", "./spec/a_spec.rb[1:1]"])
     allow(map).to receive(:time_for).and_return(1.0)
@@ -369,20 +369,20 @@ In `spec/open_mutator/runner_spec.rb`, replace the existing `plan_work` example 
 
 - [x] **Step 2: Run tests to verify they fail**
 
-Run: `bundle exec rspec spec/open_mutator/scheduler_spec.rb spec/open_mutator/runner_spec.rb`
+Run: `bundle exec rspec spec/active_mutator/scheduler_spec.rb spec/active_mutator/runner_spec.rb`
 Expected: FAIL — WorkItem has no `lane` keyword
 
 - [x] **Step 3: Implement**
 
-`lib/open_mutator/work_item.rb`:
+`lib/active_mutator/work_item.rb`:
 ```ruby
-module OpenMutator
+module ActiveMutator
   # lane: :parallel (default pool) | :serial (browser-covered, one at a time)
   WorkItem = Data.define(:mutation, :example_ids, :timeout, :lane)
 end
 ```
 
-`lib/open_mutator/scheduler.rb` — replace `#run` with a lane-aware version (keep everything else):
+`lib/active_mutator/scheduler.rb` — replace `#run` with a lane-aware version (keep everything else):
 ```ruby
     def run(items)
       previous_traps = nil
@@ -414,7 +414,7 @@ end
 ```
 (`spawn`/`reap`/`finish`/`kill`/trap methods unchanged; `running` is now created in `run` and passed through so the signal handler closure keeps working.)
 
-`lib/open_mutator/runner.rb` — in `plan_work`, replace the item-building branch:
+`lib/active_mutator/runner.rb` — in `plan_work`, replace the item-building branch:
 ```ruby
         else
           lane = example_ids.any? { |id| serial_example?(id) } ? :serial : :parallel
@@ -433,7 +433,7 @@ and add private:
 
 - [x] **Step 4: Run tests to verify they pass**
 
-Run: `bundle exec rspec spec/open_mutator/scheduler_spec.rb spec/open_mutator/runner_spec.rb`
+Run: `bundle exec rspec spec/active_mutator/scheduler_spec.rb spec/active_mutator/runner_spec.rb`
 Expected: PASS (scheduler 6, runner 6)
 
 - [x] **Step 5: Full suite (twice, seeds differ), commit**
@@ -450,12 +450,12 @@ git add -A && git commit -m "feat: serial lane for browser-covered mutants"
 ## Task 4: Cache v2 payload + CoverageMap v2
 
 **Files:**
-- Modify: `lib/open_mutator/baseline_hooks.rb`, `lib/open_mutator/coverage_map.rb`
-- Test: `spec/open_mutator/baseline_hooks_spec.rb`, `spec/open_mutator/coverage_map_spec.rb`
+- Modify: `lib/active_mutator/baseline_hooks.rb`, `lib/active_mutator/coverage_map.rb`
+- Test: `spec/active_mutator/baseline_hooks_spec.rb`, `spec/active_mutator/coverage_map_spec.rb`
 
 - [x] **Step 1: Write the failing tests**
 
-In `spec/open_mutator/baseline_hooks_spec.rb`, replace the `.build_payload` example:
+In `spec/active_mutator/baseline_hooks_spec.rb`, replace the `.build_payload` example:
 ```ruby
   describe ".build_payload" do
     it "emits version-2 primary records" do
@@ -470,12 +470,12 @@ In `spec/open_mutator/baseline_hooks_spec.rb`, replace the `.build_payload` exam
   end
 ```
 
-Replace `spec/open_mutator/coverage_map_spec.rb` wholesale:
+Replace `spec/active_mutator/coverage_map_spec.rb` wholesale:
 ```ruby
 require "tmpdir"
 require "json"
 
-RSpec.describe OpenMutator::CoverageMap do
+RSpec.describe ActiveMutator::CoverageMap do
   subject(:map) do
     described_class.new(
       "version" => 2,
@@ -530,23 +530,23 @@ end
 
 - [x] **Step 2: Run tests to verify they fail**
 
-Run: `bundle exec rspec spec/open_mutator/baseline_hooks_spec.rb spec/open_mutator/coverage_map_spec.rb`
+Run: `bundle exec rspec spec/active_mutator/baseline_hooks_spec.rb spec/active_mutator/coverage_map_spec.rb`
 Expected: FAIL (payload shape, missing methods)
 
 - [x] **Step 3: Implement**
 
-In `lib/open_mutator/baseline_hooks.rb`, replace `build_payload`:
+In `lib/active_mutator/baseline_hooks.rb`, replace `build_payload`:
 ```ruby
     def self.build_payload(records, times)
       { "version" => 2, "records" => records, "times" => times }
     end
 ```
 
-Replace `lib/open_mutator/coverage_map.rb`:
+Replace `lib/active_mutator/coverage_map.rb`:
 ```ruby
 require "json"
 
-module OpenMutator
+module ActiveMutator
   # Cache format v2: primary data is per-example `records`
   # ({example_id => [[abs_path, line], ...]}); the inverted index is derived
   # in memory at load. A missing/old version is simply stale — the cache is
@@ -603,12 +603,12 @@ end
 
 - [x] **Step 4: Run tests to verify they pass**
 
-Run: `bundle exec rspec spec/open_mutator/baseline_hooks_spec.rb spec/open_mutator/coverage_map_spec.rb`
+Run: `bundle exec rspec spec/active_mutator/baseline_hooks_spec.rb spec/active_mutator/coverage_map_spec.rb`
 Expected: PASS (hooks 4, coverage_map 6)
 
 - [x] **Step 5: Full suite, commit**
 
-`bundle exec rspec` — the Task 12 fixtures haven't run yet, but the baseline integration test (`:integration`) now regenerates a v2 cache; run `OPEN_MUTATOR_INTEGRATION=1 bundle exec rspec` too. All green.
+`bundle exec rspec` — the Task 12 fixtures haven't run yet, but the baseline integration test (`:integration`) now regenerates a v2 cache; run `ACTIVE_MUTATOR_INTEGRATION=1 bundle exec rspec` too. All green.
 ```bash
 git add -A && git commit -m "feat: coverage cache v2 with primary per-example records"
 ```
@@ -616,17 +616,17 @@ git add -A && git commit -m "feat: coverage cache v2 with primary per-example re
 ## Task 5: AtomicFile + expanded digests
 
 **Files:**
-- Create: `lib/open_mutator/atomic_file.rb`
-- Modify: `lib/open_mutator/baseline.rb`
-- Test: `spec/open_mutator/atomic_file_spec.rb`, `spec/open_mutator/baseline_spec.rb`
+- Create: `lib/active_mutator/atomic_file.rb`
+- Modify: `lib/active_mutator/baseline.rb`
+- Test: `spec/active_mutator/atomic_file_spec.rb`, `spec/active_mutator/baseline_spec.rb`
 
 - [x] **Step 1: Write the failing tests**
 
-`spec/open_mutator/atomic_file_spec.rb`:
+`spec/active_mutator/atomic_file_spec.rb`:
 ```ruby
 require "tmpdir"
 
-RSpec.describe OpenMutator::AtomicFile do
+RSpec.describe ActiveMutator::AtomicFile do
   it "writes content atomically" do
     Dir.mktmpdir do |dir|
       path = File.join(dir, "data.json")
@@ -650,7 +650,7 @@ RSpec.describe OpenMutator::AtomicFile do
 end
 ```
 
-Append to `spec/open_mutator/baseline_spec.rb` (inside the describe, `:integration` inherited):
+Append to `spec/active_mutator/baseline_spec.rb` (inside the describe, `:integration` inherited):
 ```ruby
   it "includes Gemfile.lock and .rspec in the digest set" do
     baseline = described_class.new(root: root)
@@ -662,14 +662,14 @@ Append to `spec/open_mutator/baseline_spec.rb` (inside the describe, `:integrati
 
 - [x] **Step 2: Run tests to verify they fail**
 
-Run: `bundle exec rspec spec/open_mutator/atomic_file_spec.rb && OPEN_MUTATOR_INTEGRATION=1 bundle exec rspec spec/open_mutator/baseline_spec.rb`
+Run: `bundle exec rspec spec/active_mutator/atomic_file_spec.rb && ACTIVE_MUTATOR_INTEGRATION=1 bundle exec rspec spec/active_mutator/baseline_spec.rb`
 Expected: FAIL (uninitialized constant; missing digest keys)
 
 - [x] **Step 3: Implement**
 
-`lib/open_mutator/atomic_file.rb`:
+`lib/active_mutator/atomic_file.rb`:
 ```ruby
-module OpenMutator
+module ActiveMutator
   # flock-guarded write-to-temp + rename. Concurrent runs in one repo (an
   # agent plus a human — the dev-loop case) must not corrupt cache or ledger.
   module AtomicFile
@@ -685,9 +685,9 @@ module OpenMutator
   end
 end
 ```
-Append `require_relative "open_mutator/atomic_file"` to `lib/open_mutator.rb` (before the baseline require).
+Append `require_relative "active_mutator/atomic_file"` to `lib/active_mutator.rb` (before the baseline require).
 
-In `lib/open_mutator/baseline.rb`:
+In `lib/active_mutator/baseline.rb`:
 - `current_digests` becomes:
 ```ruby
     def current_digests
@@ -707,7 +707,7 @@ In `lib/open_mutator/baseline.rb`:
 
 - [x] **Step 4: Run tests to verify they pass**
 
-Run: `bundle exec rspec spec/open_mutator/atomic_file_spec.rb && OPEN_MUTATOR_INTEGRATION=1 bundle exec rspec spec/open_mutator/baseline_spec.rb`
+Run: `bundle exec rspec spec/active_mutator/atomic_file_spec.rb && ACTIVE_MUTATOR_INTEGRATION=1 bundle exec rspec spec/active_mutator/baseline_spec.rb`
 Expected: PASS
 
 - [x] **Step 5: Commit**
@@ -719,18 +719,18 @@ git add -A && git commit -m "feat: atomic flock-guarded cache writes; digest Gem
 ## Task 6: BaselineDelta
 
 **Files:**
-- Create: `lib/open_mutator/baseline_delta.rb`
-- Test: `spec/open_mutator/baseline_delta_spec.rb`
+- Create: `lib/active_mutator/baseline_delta.rb`
+- Test: `spec/active_mutator/baseline_delta_spec.rb`
 
 - [x] **Step 1: Write the failing tests**
 
-`spec/open_mutator/baseline_delta_spec.rb`:
+`spec/active_mutator/baseline_delta_spec.rb`:
 ```ruby
-RSpec.describe OpenMutator::BaselineDelta do
+RSpec.describe ActiveMutator::BaselineDelta do
   let(:root) { "/project" }
 
   def coverage_map(records)
-    OpenMutator::CoverageMap.new("version" => 2, "records" => records, "times" => {}, "digests" => {})
+    ActiveMutator::CoverageMap.new("version" => 2, "records" => records, "times" => {}, "digests" => {})
   end
 
   let(:records) do
@@ -803,14 +803,14 @@ end
 
 - [x] **Step 2: Run tests to verify they fail**
 
-Run: `bundle exec rspec spec/open_mutator/baseline_delta_spec.rb`
+Run: `bundle exec rspec spec/active_mutator/baseline_delta_spec.rb`
 Expected: FAIL — uninitialized constant
 
 - [x] **Step 3: Implement**
 
-`lib/open_mutator/baseline_delta.rb`:
+`lib/active_mutator/baseline_delta.rb`:
 ```ruby
-module OpenMutator
+module ActiveMutator
   # Decides how to refresh a stale coverage cache: surgically (re-run only
   # affected spec files / examples) or fully (the safe fallback). Rules per
   # the v1.1 spec's delta table; anything ambiguous prefers full.
@@ -868,11 +868,11 @@ module OpenMutator
   end
 end
 ```
-Append `require_relative "open_mutator/baseline_delta"` to `lib/open_mutator.rb`.
+Append `require_relative "active_mutator/baseline_delta"` to `lib/active_mutator.rb`.
 
 - [x] **Step 4: Run tests to verify they pass**
 
-Run: `bundle exec rspec spec/open_mutator/baseline_delta_spec.rb`
+Run: `bundle exec rspec spec/active_mutator/baseline_delta_spec.rb`
 Expected: 10 examples, 0 failures
 
 - [x] **Step 5: Commit**
@@ -884,9 +884,9 @@ git add -A && git commit -m "feat: BaselineDelta — surgical vs full refresh de
 ## Task 7: Baseline delta refresh + merge
 
 **Files:**
-- Modify: `lib/open_mutator/baseline.rb`
+- Modify: `lib/active_mutator/baseline.rb`
 - Create: `spec/support/fixture_copy.rb`
-- Test: `spec/open_mutator/baseline_refresh_spec.rb` (`:integration`)
+- Test: `spec/active_mutator/baseline_refresh_spec.rb` (`:integration`)
 
 - [x] **Step 1: Write the fixture-copy helper**
 
@@ -907,7 +907,7 @@ module FixtureCopy
     Dir.mktmpdir do |dir|
       root = File.join(dir, "tiny_project")
       FileUtils.cp_r(FIXTURE, root)
-      FileUtils.rm_rf(File.join(root, ".open_mutator"))
+      FileUtils.rm_rf(File.join(root, ".active_mutator"))
       gemfile = File.join(root, "Gemfile")
       File.write(gemfile, File.read(gemfile).sub('path: "../../.."', %(path: "#{GEM_ROOT}")))
       Bundler.with_unbundled_env do
@@ -926,14 +926,14 @@ RSpec.configure { |c| c.include FixtureCopy }
 
 - [x] **Step 2: Write the failing integration test**
 
-`spec/open_mutator/baseline_refresh_spec.rb`:
+`spec/active_mutator/baseline_refresh_spec.rb`:
 ```ruby
 require "json"
 
 RSpec.describe "Baseline delta refresh", :integration do
   it "refreshes surgically when a spec file changes, keeping unrelated records" do
     with_fixture_copy do |root|
-      baseline = OpenMutator::Baseline.new(root: root)
+      baseline = ActiveMutator::Baseline.new(root: root)
       map1 = baseline.coverage_map
       calculator = File.join(root, "lib/calculator.rb")
       original_examples = map1.examples_for(calculator, 3..3)
@@ -957,13 +957,13 @@ RSpec.describe "Baseline delta refresh", :integration do
 
   it "falls back to full re-run when a support file appears" do
     with_fixture_copy do |root|
-      baseline = OpenMutator::Baseline.new(root: root)
+      baseline = ActiveMutator::Baseline.new(root: root)
       baseline.coverage_map
       FileUtils.mkdir_p(File.join(root, "spec", "support"))
       File.write(File.join(root, "spec", "support", "noise.rb"), "# support change\n")
       baseline.coverage_map
       expect(baseline.last_refresh).to eq(:full)
-      expect(OpenMutator::CoverageMap.load(File.join(root, ".open_mutator", "coverage.json")).version).to eq(2)
+      expect(ActiveMutator::CoverageMap.load(File.join(root, ".active_mutator", "coverage.json")).version).to eq(2)
     end
   end
 end
@@ -971,12 +971,12 @@ end
 
 - [x] **Step 3: Run test to verify it fails**
 
-Run: `OPEN_MUTATOR_INTEGRATION=1 bundle exec rspec spec/open_mutator/baseline_refresh_spec.rb`
+Run: `ACTIVE_MUTATOR_INTEGRATION=1 bundle exec rspec spec/active_mutator/baseline_refresh_spec.rb`
 Expected: FAIL with `NoMethodError: undefined method 'last_refresh'` — the `last_refresh` marker (`:cached`/`:partial`/`:full`) is the observable that distinguishes surgical refresh from the always-full v1 behavior (timing assertions would be flaky).
 
 - [x] **Step 4: Implement**
 
-In `lib/open_mutator/baseline.rb`, replace `coverage_map` and add the partial machinery:
+In `lib/active_mutator/baseline.rb`, replace `coverage_map` and add the partial machinery:
 ```ruby
     attr_reader :last_refresh
 
@@ -1051,9 +1051,9 @@ Extract the env hash used by `run_baseline!` into `baseline_env(out_path)` and r
 ```ruby
     def baseline_env(out_path)
       {
-        "OPEN_MUTATOR" => "1",
-        "OPEN_MUTATOR_ROOT" => @root,
-        "OPEN_MUTATOR_BASELINE_OUT" => out_path,
+        "ACTIVE_MUTATOR" => "1",
+        "ACTIVE_MUTATOR_ROOT" => @root,
+        "ACTIVE_MUTATOR_BASELINE_OUT" => out_path,
         "RUBYOPT" => "-r#{File.expand_path("baseline_hooks", __dir__)}"
       }
     end
@@ -1063,12 +1063,12 @@ Add `require "fileutils"` if not already present (it is, from v1).
 
 - [x] **Step 5: Run tests to verify they pass**
 
-Run: `OPEN_MUTATOR_INTEGRATION=1 bundle exec rspec spec/open_mutator/baseline_refresh_spec.rb spec/open_mutator/baseline_spec.rb`
+Run: `ACTIVE_MUTATOR_INTEGRATION=1 bundle exec rspec spec/active_mutator/baseline_refresh_spec.rb spec/active_mutator/baseline_spec.rb`
 Expected: PASS (refresh 2, baseline 4)
 
 - [x] **Step 6: Full tagged suite, commit**
 
-Run: `OPEN_MUTATOR_INTEGRATION=1 OPEN_MUTATOR_E2E=1 bundle exec rspec` — green.
+Run: `ACTIVE_MUTATOR_INTEGRATION=1 ACTIVE_MUTATOR_E2E=1 bundle exec rspec` — green.
 ```bash
 git add -A && git commit -m "feat: incremental baseline — delta refresh with record merge"
 ```
@@ -1080,12 +1080,12 @@ git add -A && git commit -m "feat: incremental baseline — delta refresh with r
 ## Task 8: SinceFilter untracked files + --changed
 
 **Files:**
-- Modify: `lib/open_mutator/since_filter.rb`, `lib/open_mutator/cli.rb`
-- Test: `spec/open_mutator/since_filter_spec.rb`, `spec/open_mutator/cli_spec.rb`
+- Modify: `lib/active_mutator/since_filter.rb`, `lib/active_mutator/cli.rb`
+- Test: `spec/active_mutator/since_filter_spec.rb`, `spec/active_mutator/cli_spec.rb`
 
 - [x] **Step 1: Write the failing tests**
 
-Append to `spec/open_mutator/since_filter_spec.rb`:
+Append to `spec/active_mutator/since_filter_spec.rb`:
 ```ruby
   describe "untracked files" do
     it "treats untracked files as fully changed (whole-file sentinel)" do
@@ -1093,14 +1093,14 @@ Append to `spec/open_mutator/since_filter_spec.rb`:
       filter.instance_variable_set(:@root, "/root")
       filter.instance_variable_set(:@changed, "lib/new.rb" => :all)
 
-      subject_ = OpenMutator::Subject.new(name: "N#x", file: "/root/lib/new.rb",
+      subject_ = ActiveMutator::Subject.new(name: "N#x", file: "/root/lib/new.rb",
                                           byte_range: 0...1, line_range: 500..510,
                                           constant_scope: "N", kind: :instance)
       expect(filter.cover?(subject_)).to be(true)
     end
   end
 ```
-Append to `spec/open_mutator/cli_spec.rb` `.parse` block:
+Append to `spec/active_mutator/cli_spec.rb` `.parse` block:
 ```ruby
     it "aliases --changed to --since HEAD" do
       expect(described_class.parse(%w[--changed]).since).to eq("HEAD")
@@ -1109,12 +1109,12 @@ Append to `spec/open_mutator/cli_spec.rb` `.parse` block:
 
 - [x] **Step 2: Run tests to verify they fail**
 
-Run: `bundle exec rspec spec/open_mutator/since_filter_spec.rb spec/open_mutator/cli_spec.rb`
+Run: `bundle exec rspec spec/active_mutator/since_filter_spec.rb spec/active_mutator/cli_spec.rb`
 Expected: FAIL — `cover?` returns false for `:all`; `--changed` is an invalid option
 
 - [x] **Step 3: Implement**
 
-In `lib/open_mutator/since_filter.rb`:
+In `lib/active_mutator/since_filter.rb`:
 - `initialize` gains untracked detection after the diff parse:
 ```ruby
     def initialize(ref:, root:)
@@ -1145,14 +1145,14 @@ In `lib/open_mutator/since_filter.rb`:
     end
 ```
 
-In `lib/open_mutator/cli.rb`, add after `--since`:
+In `lib/active_mutator/cli.rb`, add after `--since`:
 ```ruby
         o.on("--changed", "Mutate uncommitted work (alias for --since HEAD, plus untracked files)") { options[:since] = "HEAD" }
 ```
 
 - [x] **Step 4: Run tests to verify they pass**
 
-Run: `bundle exec rspec spec/open_mutator/since_filter_spec.rb spec/open_mutator/cli_spec.rb`
+Run: `bundle exec rspec spec/active_mutator/since_filter_spec.rb spec/active_mutator/cli_spec.rb`
 Expected: PASS (since_filter 4, cli 7)
 
 - [x] **Step 5: Full suite, commit**
@@ -1164,20 +1164,20 @@ git add -A && git commit -m "feat: --changed flag; untracked files count as full
 ## Task 9: Fingerprint + AcceptedLedger
 
 **Files:**
-- Create: `lib/open_mutator/fingerprint.rb`, `lib/open_mutator/accepted_ledger.rb`
-- Test: `spec/open_mutator/fingerprint_spec.rb`, `spec/open_mutator/accepted_ledger_spec.rb`
+- Create: `lib/active_mutator/fingerprint.rb`, `lib/active_mutator/accepted_ledger.rb`
+- Test: `spec/active_mutator/fingerprint_spec.rb`, `spec/active_mutator/accepted_ledger_spec.rb`
 
 - [x] **Step 1: Write the failing tests**
 
-`spec/open_mutator/fingerprint_spec.rb`:
+`spec/active_mutator/fingerprint_spec.rb`:
 ```ruby
-RSpec.describe OpenMutator::Fingerprint do
+RSpec.describe ActiveMutator::Fingerprint do
   def mutation(desc, snippet, range_begin, subject_name: "Calc#go", file: "/root/lib/calc.rb")
-    subject_ = OpenMutator::Subject.new(name: subject_name, file: file, byte_range: 0...100,
+    subject_ = ActiveMutator::Subject.new(name: subject_name, file: file, byte_range: 0...100,
                                         line_range: 1..10, constant_scope: "Calc", kind: :instance)
-    OpenMutator::Mutation.new(
+    ActiveMutator::Mutation.new(
       subject: subject_,
-      edit: OpenMutator::Edit.new(range: range_begin...(range_begin + 1), replacement: "x", description: desc),
+      edit: ActiveMutator::Edit.new(range: range_begin...(range_begin + 1), replacement: "x", description: desc),
       original_snippet: snippet, line: 2,
       mutated_file_source: "", mutated_def_source: "", mutated_def_line: 1
     )
@@ -1197,14 +1197,14 @@ RSpec.describe OpenMutator::Fingerprint do
 end
 ```
 
-`spec/open_mutator/accepted_ledger_spec.rb`:
+`spec/active_mutator/accepted_ledger_spec.rb`:
 ```ruby
 require "tmpdir"
 require "json"
 
-RSpec.describe OpenMutator::AcceptedLedger do
+RSpec.describe ActiveMutator::AcceptedLedger do
   def fp(ordinal: 0, file: "lib/calc.rb", subject: "Calc#go")
-    OpenMutator::Fingerprint.new(file: file, subject: subject,
+    ActiveMutator::Fingerprint.new(file: file, subject: subject,
                                  description: "replace `>` with `>=`",
                                  original_snippet: ">", ordinal: ordinal)
   end
@@ -1222,7 +1222,7 @@ RSpec.describe OpenMutator::AcceptedLedger do
       reloaded = described_class.load(root)
       expect(reloaded.accepted?(fp)).to be(true)
       expect(reloaded.accepted?(fp(ordinal: 1))).to be(false)
-      expect(File.exist?(File.join(root, ".open_mutator_accepted.json"))).to be(true)
+      expect(File.exist?(File.join(root, ".active_mutator_accepted.json"))).to be(true)
     end
   end
 
@@ -1250,14 +1250,14 @@ end
 
 - [x] **Step 2: Run tests to verify they fail**
 
-Run: `bundle exec rspec spec/open_mutator/fingerprint_spec.rb spec/open_mutator/accepted_ledger_spec.rb`
+Run: `bundle exec rspec spec/active_mutator/fingerprint_spec.rb spec/active_mutator/accepted_ledger_spec.rb`
 Expected: FAIL — uninitialized constants
 
 - [x] **Step 3: Implement**
 
-`lib/open_mutator/fingerprint.rb`:
+`lib/active_mutator/fingerprint.rb`:
 ```ruby
-module OpenMutator
+module ActiveMutator
   # Line-number-independent identity for a mutant, used by the acceptance
   # ledger. `ordinal` disambiguates byte-identical mutants within one subject
   # (e.g. the two `>` in `a > 0 && b > 0`) by source order — without it,
@@ -1280,16 +1280,16 @@ module OpenMutator
 end
 ```
 
-`lib/open_mutator/accepted_ledger.rb`:
+`lib/active_mutator/accepted_ledger.rb`:
 ```ruby
 require "json"
 
-module OpenMutator
+module ActiveMutator
   # Committed, repo-root ledger of accepted (equivalent) survivors.
-  # Deliberately NOT inside .open_mutator/ — that dir is gitignored and
+  # Deliberately NOT inside .active_mutator/ — that dir is gitignored and
   # disposable, while acceptance decisions are durable team/CI state.
   class AcceptedLedger
-    FILENAME = ".open_mutator_accepted.json"
+    FILENAME = ".active_mutator_accepted.json"
 
     def self.load(root)
       path = File.join(root, FILENAME)
@@ -1327,15 +1327,15 @@ module OpenMutator
   end
 end
 ```
-Add `require "set"` at the top of `accepted_ledger.rb`. Append both requires to `lib/open_mutator.rb`:
+Add `require "set"` at the top of `accepted_ledger.rb`. Append both requires to `lib/active_mutator.rb`:
 ```ruby
-require_relative "open_mutator/fingerprint"
-require_relative "open_mutator/accepted_ledger"
+require_relative "active_mutator/fingerprint"
+require_relative "active_mutator/accepted_ledger"
 ```
 
 - [x] **Step 4: Run tests to verify they pass**
 
-Run: `bundle exec rspec spec/open_mutator/fingerprint_spec.rb spec/open_mutator/accepted_ledger_spec.rb`
+Run: `bundle exec rspec spec/active_mutator/fingerprint_spec.rb spec/active_mutator/accepted_ledger_spec.rb`
 Expected: PASS (fingerprint 1, ledger 4)
 
 - [x] **Step 5: Commit**
@@ -1347,21 +1347,21 @@ git add -A && git commit -m "feat: mutant fingerprints and committed acceptance 
 ## Task 10: Runner/reporter integration — accepted status, --accept-survivors, exit_reason
 
 **Files:**
-- Modify: `lib/open_mutator/runner.rb`, `lib/open_mutator/result.rb`, `lib/open_mutator/reporter/terminal.rb`, `lib/open_mutator/reporter/json.rb`
-- Test: `spec/open_mutator/runner_spec.rb`, `spec/open_mutator/reporter/terminal_spec.rb`, `spec/open_mutator/reporter/json_spec.rb`
+- Modify: `lib/active_mutator/runner.rb`, `lib/active_mutator/result.rb`, `lib/active_mutator/reporter/terminal.rb`, `lib/active_mutator/reporter/json.rb`
+- Test: `spec/active_mutator/runner_spec.rb`, `spec/active_mutator/reporter/terminal_spec.rb`, `spec/active_mutator/reporter/json_spec.rb`
 
 - [x] **Step 1: Write the failing tests**
 
-Append to `spec/open_mutator/runner_spec.rb`:
+Append to `spec/active_mutator/runner_spec.rb`:
 ```ruby
   describe "acceptance integration" do
     it "pre-classifies ledger-accepted mutants and never schedules them" do
       m = mutation(line: 2)
-      map = instance_double(OpenMutator::CoverageMap)
+      map = instance_double(ActiveMutator::CoverageMap)
       allow(map).to receive(:examples_for).and_return(["e1"])
       allow(map).to receive(:time_for).and_return(0.1)
-      fps = OpenMutator::Fingerprint.for_mutations([m], root: config.root)
-      ledger = instance_double(OpenMutator::AcceptedLedger)
+      fps = ActiveMutator::Fingerprint.for_mutations([m], root: config.root)
+      ledger = instance_double(ActiveMutator::AcceptedLedger)
       allow(ledger).to receive(:accepted?).with(fps[m]).and_return(true)
 
       runner = described_class.new(config)
@@ -1373,7 +1373,7 @@ Append to `spec/open_mutator/runner_spec.rb`:
 ```
 (Note: `plan_work`'s signature grows optional keywords; the two existing `plan_work` examples must pass `ledger: nil, fingerprints: {}` — update them accordingly, or rely on defaults: use defaults, leave them unchanged.)
 
-In `spec/open_mutator/reporter/terminal_spec.rb`, update the progress-chars example:
+In `spec/active_mutator/reporter/terminal_spec.rb`, update the progress-chars example:
 ```ruby
   it "prints one progress char per result" do
     %i[killed survived timeout error uncovered accepted].each { |s| reporter.on_result(result(s)) }
@@ -1381,7 +1381,7 @@ In `spec/open_mutator/reporter/terminal_spec.rb`, update the progress-chars exam
   end
 ```
 
-In `spec/open_mutator/reporter/json_spec.rb`, append inside the example after the existing expectations:
+In `spec/active_mutator/reporter/json_spec.rb`, append inside the example after the existing expectations:
 ```ruby
     expect(data["exit_reason"]).to eq("unaccepted_survivors")
 ```
@@ -1395,30 +1395,30 @@ and add a second example:
 
 - [x] **Step 2: Run tests to verify they fail**
 
-Run: `bundle exec rspec spec/open_mutator/runner_spec.rb spec/open_mutator/reporter`
+Run: `bundle exec rspec spec/active_mutator/runner_spec.rb spec/active_mutator/reporter`
 Expected: FAIL (plan_work arity, missing `A` char, missing exit_reason)
 
 - [x] **Step 3: Implement**
 
-`lib/open_mutator/result.rb` — update the comment only:
+`lib/active_mutator/result.rb` — update the comment only:
 ```ruby
   # status: :killed | :survived | :timeout | :error | :uncovered | :accepted
 ```
 
-`lib/open_mutator/reporter/terminal.rb`:
+`lib/active_mutator/reporter/terminal.rb`:
 - `CHARS` gains `accepted: "A"`.
 - `summary` prints the ledger note: after the counts loop nothing else changes (accepted shows via CHARS iteration automatically).
 
-`lib/open_mutator/reporter/json.rb` — in `summary`, add to the emitted hash:
+`lib/active_mutator/reporter/json.rb` — in `summary`, add to the emitted hash:
 ```ruby
           "exit_reason" => counts.fetch(:survived, 0).positive? ? "unaccepted_survivors" : "clean",
 ```
 
-`lib/open_mutator/runner.rb`:
+`lib/active_mutator/runner.rb`:
 - `#call` becomes ledger-aware (full replacement):
 ```ruby
     def call
-      ENV["OPEN_MUTATOR"] = "1"
+      ENV["ACTIVE_MUTATOR"] = "1"
       preload!
       preload_spec_helper!
       map = Baseline.new(root: @config.root).coverage_map(force: @config.force_baseline)
@@ -1476,7 +1476,7 @@ Expected: FAIL (plan_work arity, missing `A` char, missing exit_reason)
 
     def warn_stale(ledger, all_fingerprints)
       ledger.stale_entries(all_fingerprints).each do |entry|
-        warn "open_mutator: stale accepted fingerprint (no matching mutant): #{entry.subject} — #{entry.description}"
+        warn "active_mutator: stale accepted fingerprint (no matching mutant): #{entry.subject} — #{entry.description}"
       end
     end
 ```
@@ -1486,7 +1486,7 @@ Note the uncovered-results rename: `#call` previously used a variable named `unc
 
 - [x] **Step 4: Run tests to verify they pass**
 
-Run: `bundle exec rspec spec/open_mutator/runner_spec.rb spec/open_mutator/reporter spec/open_mutator/cli_spec.rb`
+Run: `bundle exec rspec spec/active_mutator/runner_spec.rb spec/active_mutator/reporter spec/active_mutator/cli_spec.rb`
 Expected: PASS
 
 - [x] **Step 5: Full suite, commit**
@@ -1527,7 +1527,7 @@ change, docs, config.
 
 ## The loop
 
-1. Run: `bundle exec open_mutator --changed --format json`
+1. Run: `bundle exec active_mutator --changed --format json`
 2. Exit 0 → done. Report the mutation counts and move on.
 3. Exit 1 → read `results` where `"status": "survived"`. Each survivor is a
    concrete, machine-verified test gap: the exact source span (`file`,
@@ -1544,12 +1544,12 @@ Some mutants cannot be killed because they don't change observable behavior
 unreachable). Accept one ONLY with a stated equivalence argument:
 
 - Say WHY no test can distinguish the mutant, in one sentence.
-- Then: `bundle exec open_mutator --changed --accept-survivors`
-- The acceptance ledger (`.open_mutator_accepted.json`, repo root) is
+- Then: `bundle exec active_mutator --changed --accept-survivors`
+- The acceptance ledger (`.active_mutator_accepted.json`, repo root) is
   committed state — include it in your commit.
 
 Never accept a survivor because killing it is tedious. Never weaken
-open_mutator flags (`--subject` scoping, patterns) to make a run pass.
+active_mutator flags (`--subject` scoping, patterns) to make a run pass.
 
 ## Interpreting other statuses
 
@@ -1566,12 +1566,12 @@ open_mutator flags (`--subject` scoping, patterns) to make a run pass.
 
 `README.md`:
 ```markdown
-# open_mutator
+# active_mutator
 
 Mutation testing for Ruby, built on [Prism](https://github.com/ruby/prism).
 Open source, RSpec-integrated, Rails-first.
 
-open_mutator mutates your code one small change at a time (`>` → `>=`,
+active_mutator mutates your code one small change at a time (`>` → `>=`,
 `&&` → `||`, delete a statement, force a condition…), runs exactly the
 examples that cover the mutated line, and reports every mutant your suite
 fails to kill. A surviving mutant is a behavior change no test notices —
@@ -1582,7 +1582,7 @@ a precise, machine-verified test gap.
 ```ruby
 # Gemfile
 group :development, :test do
-  gem "open_mutator"
+  gem "active_mutator"
 end
 ```
 
@@ -1591,15 +1591,15 @@ Requires Ruby ≥ 3.2, RSpec, and a green suite. Linux/macOS (MRI fork).
 ## Usage
 
 ```bash
-open_mutator                          # mutate app/ and lib/, full run
-open_mutator app/models               # scope by path
-open_mutator --changed                # uncommitted work only (dev loop)
-open_mutator --since origin/main      # PR scope (CI)
-open_mutator --subject 'Foo::Bar#baz' # one method
+active_mutator                          # mutate app/ and lib/, full run
+active_mutator app/models               # scope by path
+active_mutator --changed                # uncommitted work only (dev loop)
+active_mutator --since origin/main      # PR scope (CI)
+active_mutator --subject 'Foo::Bar#baz' # one method
 ```
 
 First run performs an instrumented baseline of your suite to build the
-coverage map (cached in `.open_mutator/`, refreshed incrementally). Then
+coverage map (cached in `.active_mutator/`, refreshed incrementally). Then
 each mutant runs in its own fork against only its covering examples.
 
 Statuses: `killed` (test failed — good), `survived` (test gap), `timeout`
@@ -1614,14 +1614,14 @@ Score = (killed + timeout) / (killed + timeout + survived).
 TDD until green, then verify the tests constrain the behavior:
 
 ```bash
-bundle exec open_mutator --changed --format json
+bundle exec active_mutator --changed --format json
 ```
 
 Kill survivors by writing the missing tests. For genuine equivalent mutants:
 
 ```bash
-bundle exec open_mutator --changed --accept-survivors   # records to ledger
-git add .open_mutator_accepted.json                     # committed state
+bundle exec active_mutator --changed --accept-survivors   # records to ledger
+git add .active_mutator_accepted.json                     # committed state
 ```
 
 Acceptance takes effect on the NEXT run (the accepting run still exits 1).
@@ -1629,8 +1629,8 @@ Agent workflow: see `docs/skills/mutation-check.md`.
 
 ## CI recipe
 
-- Per-PR: `open_mutator --since origin/main` (minutes)
-- Nightly: `open_mutator --force-baseline` (full run; also recovers the
+- Per-PR: `active_mutator --since origin/main` (minutes)
+- Nightly: `active_mutator --force-baseline` (full run; also recovers the
   incremental baseline's newly-covering-example blind spot)
 
 ## Flags
@@ -1650,7 +1650,7 @@ Agent workflow: see `docs/skills/mutation-check.md`.
 | `--timeout-factor F` / `--timeout-floor S` | 8 / 10 | mutation timeout budget |
 | `--require FILE` | — | preload files (repeatable) |
 
-Every open_mutator process sets `ENV["OPEN_MUTATOR"] = "1"` — use it to
+Every active_mutator process sets `ENV["ACTIVE_MUTATOR"] = "1"` — use it to
 guard SimpleCov or other tooling in your spec helper.
 
 ## Known limits (v1.1)
@@ -1684,7 +1684,7 @@ RSpec.describe "dev-loop end-to-end", :e2e do
   def run_mutator(root, *args)
     stdout, stderr, status = Open3.capture3(
       { "BUNDLE_GEMFILE" => File.join(root, "Gemfile") },
-      "bundle", "exec", "open_mutator", *args, chdir: root
+      "bundle", "exec", "active_mutator", *args, chdir: root
     )
     [stdout, stderr, status]
   end
@@ -1697,7 +1697,7 @@ RSpec.describe "dev-loop end-to-end", :e2e do
 
       _, err2, status2 = run_mutator(root, "lib", "--format", "json", "--accept-survivors")
       expect(status2.exitstatus).to eq(1), err2 # acceptance takes effect NEXT run
-      ledger = JSON.parse(File.read(File.join(root, ".open_mutator_accepted.json")))
+      ledger = JSON.parse(File.read(File.join(root, ".active_mutator_accepted.json")))
       expect(ledger.size).to eq(2)
 
       out3, err3, status3 = run_mutator(root, "lib", "--format", "json")
@@ -1747,17 +1747,17 @@ Note: `with_fixture_copy` requires the fixture's `spec_helper.rb` to load `lib/g
 
 - [x] **Step 2: Run the E2E**
 
-Run: `OPEN_MUTATOR_E2E=1 bundle exec rspec spec/e2e/devloop_spec.rb`
+Run: `ACTIVE_MUTATOR_E2E=1 bundle exec rspec spec/e2e/devloop_spec.rb`
 Expected: PASS. Debug hints if not: acceptance test — fingerprint ordinal/relative-path mismatches show up as `accepted: 0` on run 3 (dump the ledger and compare against the JSON survivors' file/subject fields); `--changed` test — if Calculator subjects appear, `SinceFilter` ran against the wrong root or the fixture git repo didn't commit.
 
 - [x] **Step 3: Verify existing E2Es still hold**
 
-Run: `OPEN_MUTATOR_INTEGRATION=1 OPEN_MUTATOR_E2E=1 bundle exec rspec`
+Run: `ACTIVE_MUTATOR_INTEGRATION=1 ACTIVE_MUTATOR_E2E=1 bundle exec rspec`
 Expected: all green — tiny_project E2E counts unchanged (2 survivors, eligible? all killed, untested_helper uncovered).
 
 - [x] **Step 4: Rails E2E (opt-in, heavier)**
 
-Run: `OPEN_MUTATOR_RAILS_E2E=1 bundle exec rspec spec/e2e/rails_app_spec.rb`
+Run: `ACTIVE_MUTATOR_RAILS_E2E=1 bundle exec rspec spec/e2e/rails_app_spec.rb`
 Expected: PASS — the preload path now also loads the fixture app's `rails_helper` in the parent; if world-group leakage or SimpleCov assumptions break anything, this is where it shows.
 
 - [x] **Step 5: Commit**
@@ -1770,7 +1770,7 @@ git add -A && git commit -m "test: dev-loop E2E — acceptance ledger and --chan
 
 ## Post-plan verification (final gate)
 
-Run: `OPEN_MUTATOR_INTEGRATION=1 OPEN_MUTATOR_E2E=1 OPEN_MUTATOR_RAILS_E2E=1 bundle exec rspec`
+Run: `ACTIVE_MUTATOR_INTEGRATION=1 ACTIVE_MUTATOR_E2E=1 ACTIVE_MUTATOR_RAILS_E2E=1 bundle exec rspec`
 Expected: all green. Then a real-world smoke: rerun against payint `app/models` at new defaults and compare timeout count vs the 62/2 data points (expect ≈0–5 with the serial lane + preload).
 
 ## Out of scope (unchanged from spec)

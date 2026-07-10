@@ -1,4 +1,4 @@
-RSpec.describe OpenMutator::Operators::ConditionalBoundary do
+RSpec.describe ActiveMutator::Operators::ConditionalBoundary do
   subject(:operator) { described_class.new }
 
   it "widens and narrows comparison operators" do
@@ -17,6 +17,6 @@ RSpec.describe OpenMutator::Operators::ConditionalBoundary do
   end
 
   it "registers itself" do
-    expect(OpenMutator::Operators::Base.all.map(&:class)).to include(described_class)
+    expect(ActiveMutator::Operators::Base.all.map(&:class)).to include(described_class)
   end
 end

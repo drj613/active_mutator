@@ -1,4 +1,4 @@
-RSpec.describe OpenMutator::Operators::CallSwap do
+RSpec.describe ActiveMutator::Operators::CallSwap do
   subject(:operator) { described_class.new }
 
   {

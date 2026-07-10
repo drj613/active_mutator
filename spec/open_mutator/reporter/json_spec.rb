@@ -1,22 +1,22 @@
 require "json"
 require "stringio"
 
-RSpec.describe OpenMutator::Reporter::Json do
+RSpec.describe ActiveMutator::Reporter::Json do
   let(:out) { StringIO.new }
   subject(:reporter) { described_class.new(out: out) }
 
   it "emits machine-readable results" do
-    subject_ = OpenMutator::Subject.new(
+    subject_ = ActiveMutator::Subject.new(
       name: "Calculator#discount", file: "lib/calculator.rb",
       byte_range: 0...1, line_range: 10..13, constant_scope: "Calculator", kind: :instance
     )
-    mutation = OpenMutator::Mutation.new(
+    mutation = ActiveMutator::Mutation.new(
       subject: subject_,
-      edit: OpenMutator::Edit.new(range: 5...6, replacement: "<=", description: "replace `<` with `<=`"),
+      edit: ActiveMutator::Edit.new(range: 5...6, replacement: "<=", description: "replace `<` with `<=`"),
       original_snippet: "<", line: 11,
       mutated_file_source: "", mutated_def_source: "", mutated_def_line: 10
     )
-    result = OpenMutator::Result.new(mutation: mutation, status: :survived, details: nil)
+    result = ActiveMutator::Result.new(mutation: mutation, status: :survived, details: nil)
     reporter.on_result(result) # must be a no-op, not crash
     reporter.summary([result], invalid_count: 1)
 

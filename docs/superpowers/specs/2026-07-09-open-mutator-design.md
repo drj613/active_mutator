@@ -1,11 +1,11 @@
-# open_mutator — Design
+# active_mutator — Design
 
 **Date:** 2026-07-09
 **Status:** Approved
 
 ## Summary
 
-`open_mutator` is an open-source mutation testing tool for Ruby, designed from
+`active_mutator` is an open-source mutation testing tool for Ruby, designed from
 the ground up as a modern successor to prior-generation tools. It is
 pure Ruby, built on Prism (Ruby's official parser), integrates with RSpec, and
 is designed Rails-first: application preload, fork-safe workers, and
@@ -15,7 +15,7 @@ applications with slow suites.
 ## Motivation
 
 - **License freedom.** Established Ruby mutation testing tools require a paid
-  license for commercial use. open_mutator is fully open source.
+  license for commercial use. active_mutator is fully open source.
 - **Modern parser stack.** Prior-generation tools depend on the
   `parser`/`unparser` gems and lag every new Ruby release. Prism is maintained
   by Ruby core and supports new syntax on release day.
@@ -27,7 +27,7 @@ applications with slow suites.
 
 ## Core architectural decision: source-span mutations
 
-open_mutator does **not** mutate ASTs and unparse them back to source
+active_mutator does **not** mutate ASTs and unparse them back to source
 (the classic approach — which requires an unparser, the single largest and
 riskiest component of that design; no unparser exists for Prism).
 
@@ -109,7 +109,7 @@ produces an inverted index:
 { "path/to/file.rb:42" => [example_id, ...] }
 ```
 
-Serialized to a cache directory (`.open_mutator/`). Also produced by the
+Serialized to a cache directory (`.active_mutator/`). Also produced by the
 baseline run:
 - **baseline pass check** — the suite must be green before mutating
 - per-example runtimes — used to compute mutation timeouts
@@ -187,7 +187,7 @@ surprise.
   the CI story: PR runs take minutes, full runs happen nightly/on-demand.
 - `--subject 'Billing::Calculator#total'` — tight dev loop on one method.
 
-## Testing strategy (for open_mutator itself)
+## Testing strategy (for active_mutator itself)
 
 - **Operators:** golden tests — Ruby snippet in, expected
   `(description, mutated_source)` pairs out. Pure, no forking, milliseconds.
@@ -197,7 +197,7 @@ surprise.
 - **Coverage map:** fixture RSpec project; assert inverted-index contents.
 - **End-to-end:** minimal fixture Rails app in `spec/fixtures/` with planted
   known-survivor and known-killed mutants; run the full pipeline; assert
-  statuses. Eventual goal: self-hosting (open_mutator run on itself).
+  statuses. Eventual goal: self-hosting (active_mutator run on itself).
 
 ## v1 scope
 

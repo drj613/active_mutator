@@ -1,4 +1,4 @@
-RSpec.describe OpenMutator::Operators::NegationRemoval do
+RSpec.describe ActiveMutator::Operators::NegationRemoval do
   subject(:operator) { described_class.new }
 
   it "removes unary bang" do

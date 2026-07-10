@@ -1,7 +1,7 @@
 require "tmpdir"
 require "json"
 
-RSpec.describe OpenMutator::CoverageMap do
+RSpec.describe ActiveMutator::CoverageMap do
   subject(:map) do
     described_class.new(
       "version" => 2,

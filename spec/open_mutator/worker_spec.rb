@@ -1,9 +1,9 @@
 require "json"
 require "stringio"
 
-RSpec.describe OpenMutator::Worker do
+RSpec.describe ActiveMutator::Worker do
   let(:writer) { StringIO.new }
-  let(:mutation) { instance_double(OpenMutator::Mutation) }
+  let(:mutation) { instance_double(ActiveMutator::Mutation) }
   let(:rspec_runner) { instance_double(RSpec::Core::Runner) }
 
   def emitted
@@ -18,7 +18,7 @@ RSpec.describe OpenMutator::Worker do
     allow(RSpec::Core::Runner).to receive(:new).and_return(rspec_runner)
     allow(rspec_runner).to receive(:setup)
     allow(RSpec.world).to receive(:ordered_example_groups).and_return([])
-    allow_any_instance_of(OpenMutator::Inserter).to receive(:insert)
+    allow_any_instance_of(ActiveMutator::Inserter).to receive(:insert)
   end
 
   it "emits killed when examples fail" do
@@ -36,7 +36,7 @@ RSpec.describe OpenMutator::Worker do
   it "loads specs BEFORE inserting the mutation" do
     calls = []
     allow(rspec_runner).to receive(:setup) { calls << :setup }
-    allow_any_instance_of(OpenMutator::Inserter).to receive(:insert) { calls << :insert }
+    allow_any_instance_of(ActiveMutator::Inserter).to receive(:insert) { calls << :insert }
     allow(rspec_runner).to receive(:run_specs) do
       calls << :run_specs
       0
@@ -47,7 +47,7 @@ RSpec.describe OpenMutator::Worker do
 
   it "emits error when insertion raises" do
     allow(rspec_runner).to receive(:run_specs).and_return(0)
-    allow_any_instance_of(OpenMutator::Inserter)
+    allow_any_instance_of(ActiveMutator::Inserter)
       .to receive(:insert).and_raise(SyntaxError, "boom")
     run_worker
     expect(emitted["status"]).to eq("error")
