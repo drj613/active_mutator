@@ -50,6 +50,10 @@ RSpec.describe OpenMutator::CLI do
     it "parses --no-preload-helper as :none" do
       expect(described_class.parse(%w[--no-preload-helper]).preload_helper).to eq(:none)
     end
+
+    it "aliases --changed to --since HEAD" do
+      expect(described_class.parse(%w[--changed]).since).to eq("HEAD")
+    end
   end
 
   describe ".run" do

@@ -27,6 +27,7 @@ module OpenMutator
       paths = OptionParser.new do |o|
         o.banner = "Usage: open_mutator [paths] [options]"
         o.on("--since REF", "Mutate only methods changed since git REF") { |v| options[:since] = v }
+        o.on("--changed", "Mutate uncommitted work (alias for --since HEAD, plus untracked files)") { options[:since] = "HEAD" }
         o.on("--subject NAME", "Mutate only the named subject, e.g. Foo::Bar#baz") { |v| options[:subject_filter] = v }
         o.on("--jobs N", Integer, "Concurrent workers (default: half the CPU count)") { |v| options[:jobs] = v }
         o.on("--format FMT", %w[terminal json], "Output format") { |v| options[:format] = v.to_sym }

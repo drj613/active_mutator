@@ -52,4 +52,17 @@ RSpec.describe OpenMutator::SinceFilter do
       expect(filter.cover?(other_file)).to be(false)
     end
   end
+
+  describe "untracked files" do
+    it "treats untracked files as fully changed (whole-file sentinel)" do
+      filter = described_class.allocate
+      filter.instance_variable_set(:@root, "/root")
+      filter.instance_variable_set(:@changed, "lib/new.rb" => :all)
+
+      subject_ = OpenMutator::Subject.new(name: "N#x", file: "/root/lib/new.rb",
+                                          byte_range: 0...1, line_range: 500..510,
+                                          constant_scope: "N", kind: :instance)
+      expect(filter.cover?(subject_)).to be(true)
+    end
+  end
 end

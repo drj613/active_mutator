@@ -28,11 +28,19 @@ module OpenMutator
       raise Error, "git diff #{ref} failed" unless $?.success?
 
       @changed = self.class.parse(diff)
+      untracked = IO.popen(
+        ["git", "-C", root, "ls-files", "--others", "--exclude-standard", "--", "*.rb"], &:read
+      )
+      # Untracked files are invisible to `git diff` but are agentic TDD's most
+      # common case (brand-new file + spec). Whole-file sentinel: every line
+      # counts as changed.
+      untracked.each_line { |l| @changed[l.strip] = :all unless l.strip.empty? }
     end
 
     def cover?(subject)
       lines = @changed[subject.file.delete_prefix("#{@root}/")]
       return false unless lines
+      return true if lines == :all
 
       lines.any? { |line| subject.line_range.cover?(line) }
     end
