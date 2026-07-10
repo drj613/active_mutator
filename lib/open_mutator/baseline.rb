@@ -52,13 +52,13 @@ module OpenMutator
     def stamp_digests(digests)
       data = JSON.parse(File.read(@out_path))
       data["digests"] = digests
-      File.write(@out_path, JSON.generate(data))
+      AtomicFile.write(@out_path, JSON.generate(data))
     end
 
     def current_digests
-      Dir[File.join(@root, "{app,lib,spec}/**/*.rb")].sort.to_h do |f|
-        [f.delete_prefix("#{@root}/"), Digest::SHA256.file(f).hexdigest]
-      end
+      files = Dir[File.join(@root, "{app,lib,spec}/**/*.rb")].sort
+      files += [File.join(@root, "Gemfile.lock"), File.join(@root, ".rspec")].select { |f| File.exist?(f) }
+      files.to_h { |f| [f.delete_prefix("#{@root}/"), Digest::SHA256.file(f).hexdigest] }
     end
   end
 end

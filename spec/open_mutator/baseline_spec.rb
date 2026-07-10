@@ -42,4 +42,11 @@ RSpec.describe OpenMutator::Baseline, :integration do
       File.delete(broken_spec)
     end
   end
+
+  it "includes Gemfile.lock and .rspec in the digest set" do
+    baseline = described_class.new(root: root)
+    digests = baseline.send(:current_digests)
+    expect(digests).to have_key("Gemfile.lock")
+    expect(digests).to have_key(".rspec")
+  end
 end

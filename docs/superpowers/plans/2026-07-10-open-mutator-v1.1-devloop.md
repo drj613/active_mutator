@@ -620,7 +620,7 @@ git add -A && git commit -m "feat: coverage cache v2 with primary per-example re
 - Modify: `lib/open_mutator/baseline.rb`
 - Test: `spec/open_mutator/atomic_file_spec.rb`, `spec/open_mutator/baseline_spec.rb`
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 `spec/open_mutator/atomic_file_spec.rb`:
 ```ruby
@@ -660,12 +660,12 @@ Append to `spec/open_mutator/baseline_spec.rb` (inside the describe, `:integrati
   end
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `bundle exec rspec spec/open_mutator/atomic_file_spec.rb && OPEN_MUTATOR_INTEGRATION=1 bundle exec rspec spec/open_mutator/baseline_spec.rb`
 Expected: FAIL (uninitialized constant; missing digest keys)
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 `lib/open_mutator/atomic_file.rb`:
 ```ruby
@@ -705,12 +705,12 @@ In `lib/open_mutator/baseline.rb`:
     end
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `bundle exec rspec spec/open_mutator/atomic_file_spec.rb && OPEN_MUTATOR_INTEGRATION=1 bundle exec rspec spec/open_mutator/baseline_spec.rb`
 Expected: PASS
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add -A && git commit -m "feat: atomic flock-guarded cache writes; digest Gemfile.lock and .rspec"
