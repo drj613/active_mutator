@@ -96,7 +96,7 @@ Runner.new(config, reporter: nil); #call         → Integer exit code
 **Files:**
 - Create: `open_mutator.gemspec`, `Gemfile`, `.rspec`, `.gitignore`, `lib/open_mutator.rb`, `lib/open_mutator/version.rb`, `exe/open_mutator`, `spec/spec_helper.rb`
 
-- [ ] **Step 1: Write scaffold files**
+- [x] **Step 1: Write scaffold files**
 
 `open_mutator.gemspec`:
 ```ruby
@@ -183,12 +183,12 @@ RSpec.configure do |config|
 end
 ```
 
-- [ ] **Step 2: Install and verify**
+- [x] **Step 2: Install and verify**
 
 Run: `cd /Users/djdjo/Documents/enovis/open_mutator && chmod +x exe/open_mutator && bundle install && bundle exec rspec`
 Expected: `0 examples, 0 failures`
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add -A && git commit -m "chore: gem scaffold"

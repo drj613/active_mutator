@@ -1,0 +1,5 @@
+.open_mutator/
+spec/fixtures/*/Gemfile.lock
+spec/fixtures/*/.open_mutator/
+Gemfile.lock
+*.gem
