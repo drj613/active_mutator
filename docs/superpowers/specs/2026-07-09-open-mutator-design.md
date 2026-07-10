@@ -124,10 +124,13 @@ The parent process preloads the Rails environment once (boot + eager load),
 then runs a fork pool sized to available CPUs. One mutation per fork.
 
 Worker lifecycle:
-1. Apply the edit-set to an in-memory copy of the file text.
-2. Extract the enclosing `def` span from the mutated text.
-3. `eval` it within the subject's constant scope — redefining the method.
-4. Run the covering examples in-process via the RSpec runner API.
+1. Set up RSpec and load the covering spec files — spec_helper loads the
+   application, so the target constant exists (mandatory ordering: insertion
+   before app load would NameError on projects not preloaded in the parent).
+2. `eval` the mutated `def` (extracted from the spliced file text) within the
+   subject's constant scope — redefining the just-loaded method.
+3. Re-establish fork-unsafe state (DB connections, randomness).
+4. Run the loaded examples in-process via the RSpec runner API.
 5. Exit with kill status.
 
 Fork gives free isolation: no un-mutating, and global-state bleed dies with

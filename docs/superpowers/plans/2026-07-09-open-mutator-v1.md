@@ -37,7 +37,7 @@ lib/open_mutator/operators/early_return.rb
 lib/open_mutator/operators/call_swap.rb
 lib/open_mutator/operators/negation_removal.rb
 lib/open_mutator/engine.rb              # subject → Analysis (validity gate here)
-lib/open_mutator/baseline_hooks.rb      # REQUIRED STANDALONE via `rspec --require`; never required by lib/open_mutator.rb (it starts Coverage)
+lib/open_mutator/baseline_hooks.rb      # loaded STANDALONE via RUBYOPT=-r…; never required by lib/open_mutator.rb (it starts Coverage)
 lib/open_mutator/coverage_map.rb        # inverted index wrapper
 lib/open_mutator/baseline.rb            # baseline subprocess runner + cache
 lib/open_mutator/inserter.rb            # eval mutated def into constant scope
@@ -114,6 +114,7 @@ Gem::Specification.new do |spec|
   spec.bindir = "exe"
   spec.executables = ["open_mutator"]
   spec.add_dependency "prism", ">= 0.30"
+  spec.add_dependency "rspec-core", ">= 3.12" # worker + baseline_hooks require it at runtime
   spec.add_development_dependency "rspec", "~> 3.13"
 end
 ```
@@ -1176,7 +1177,12 @@ RSpec.describe OpenMutator::Engine do
   end
 
   it "counts and discards mutants that fail to re-parse" do
-    bad_operator = Class.new(OpenMutator::Operators::Base) do
+    # Deliberately NOT a subclass of Operators::Base — subclassing fires
+    # `inherited` and would permanently register this syntax-breaking operator
+    # in REGISTRY, poisoning Operators::Base.all for the rest of the process
+    # (flaky property gate under random ordering). Engine only calls #edits,
+    # so a duck type suffices.
+    bad_operator = Class.new do
       def edits(node)
         return [] unless node.is_a?(Prism::IntegerNode)
         [OpenMutator::Edit.new(range: node.location.start_offset...node.location.end_offset,
@@ -1196,7 +1202,7 @@ RSpec.describe OpenMutator::Engine do
 end
 ```
 
-Note: the anonymous `bad_operator` class registers itself in `REGISTRY` via `inherited`; that is harmless (registry order only affects default operator set, and `Engine` here gets operators explicitly).
+Note: never subclass `Operators::Base` in tests — `inherited` registers the class permanently, and `Base.all` is exactly what the Task 20 property gate and `Engine.new` defaults iterate.
 
 - [ ] **Step 2: Run tests to verify they fail**
 
@@ -1339,7 +1345,11 @@ git add -A && git commit -m "feat: Mutation engine with re-parse validity gate"
 - Create: `lib/open_mutator/baseline_hooks.rb`
 - Test: `spec/open_mutator/baseline_hooks_spec.rb`
 
-**Important:** this file is loaded via `rspec --require open_mutator/baseline_hooks` inside the HOST project's suite. It must never be required by `lib/open_mutator.rb` — it starts `Coverage` at load time. Its pure functions live in `OpenMutator::BaselineHooks` so they are unit-testable without triggering instrumentation (`Coverage.start` and the RSpec hooks are guarded behind `ENV["OPEN_MUTATOR_BASELINE_OUT"]`).
+**Important:** this file is loaded standalone in the HOST project's suite via `RUBYOPT=-ropen_mutator/baseline_hooks` — NOT via `rspec --require`. RSpec merges project-file `.rspec` requires before command-line requires, so `rspec --require` would fire AFTER the host's `--require spec_helper` has already loaded the app, and `Coverage` only instruments files loaded after `Coverage.start` — the map would be empty. `RUBYOPT`'s `-r` fires before rspec boots (under `bundle exec`, Bundler puts the gem's lib dir on the load path first). Consequence: at load time rspec-core may not be loaded yet, so this file must `require "rspec/core"` itself before `RSpec.configure`.
+
+It must never be required by `lib/open_mutator.rb` — it starts `Coverage` at load time. Its pure functions live in `OpenMutator::BaselineHooks` so they are unit-testable without triggering instrumentation (`Coverage.start` and the RSpec hooks are guarded behind `ENV["OPEN_MUTATOR_BASELINE_OUT"]`).
+
+Timing note: `example.execution_result.run_time` is nil inside `around(:each)` hooks (RSpec sets it after around hooks complete), so the hook measures elapsed time itself with a monotonic clock.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -1399,9 +1409,10 @@ Expected: FAIL (cannot load such file or uninitialized constant)
 
 `lib/open_mutator/baseline_hooks.rb`:
 ```ruby
-# Loaded standalone via `rspec --require open_mutator/baseline_hooks` in the
-# host project's suite. Starts line coverage, records per-example coverage
-# diffs, and writes the inverted map to OPEN_MUTATOR_BASELINE_OUT.
+# Loaded standalone via RUBYOPT=-ropen_mutator/baseline_hooks in the host
+# project's suite — before rspec boots, so Coverage instruments everything
+# the suite loads (including code loaded by spec_helper). Records per-example
+# coverage diffs and writes the inverted map to OPEN_MUTATOR_BASELINE_OUT.
 require "json"
 
 module OpenMutator
@@ -1439,16 +1450,21 @@ end
 if ENV["OPEN_MUTATOR_BASELINE_OUT"]
   require "coverage"
   Coverage.start(lines: true)
+  require "rspec/core" # loaded via RUBYOPT, so rspec isn't up yet
 
   RSpec.configure do |config|
     config.around(:each) do |example|
       before = Coverage.peek_result
+      started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
       example.run
+      elapsed = Process.clock_gettime(Process::CLOCK_MONOTONIC) - started
       after = Coverage.peek_result
       root = ENV.fetch("OPEN_MUTATOR_ROOT")
       OpenMutator::BaselineHooks::RECORDS[example.id] =
         OpenMutator::BaselineHooks.diff_coverage(before, after, root)
-      OpenMutator::BaselineHooks::TIMES[example.id] = example.execution_result.run_time
+      # NOT example.execution_result.run_time — that is nil until after
+      # around hooks complete.
+      OpenMutator::BaselineHooks::TIMES[example.id] = elapsed
     end
 
     config.after(:suite) do
@@ -1508,6 +1524,13 @@ RSpec.describe OpenMutator::CoverageMap do
       .to eq(0.75)
   end
 
+  it "treats recorded-but-nil times as zero" do
+    nil_map = described_class.new(
+      "map" => {}, "times" => { "spec/n_spec.rb[1:1]" => nil }, "digests" => {}
+    )
+    expect(nil_map.time_for(["spec/n_spec.rb[1:1]"])).to eq(0.0)
+  end
+
   it "checks freshness against digests" do
     expect(map.fresh?("lib/a.rb" => "abc")).to be(true)
     expect(map.fresh?("lib/a.rb" => "zzz")).to be(false)
@@ -1551,7 +1574,9 @@ module OpenMutator
     end
 
     def time_for(example_ids)
-      example_ids.sum { |id| @times.fetch(id, 0.0) }
+      # `|| 0.0`, not fetch-with-default: a key present with nil value must
+      # also coerce to zero, or Runner#plan_work explodes with TypeError.
+      example_ids.sum { |id| @times[id] || 0.0 }
     end
 
     def fresh?(digests) = @digests == digests
@@ -1567,7 +1592,7 @@ require_relative "open_mutator/coverage_map"
 - [ ] **Step 4: Run tests to verify they pass**
 
 Run: `bundle exec rspec spec/open_mutator/coverage_map_spec.rb`
-Expected: 5 examples, 0 failures
+Expected: 6 examples, 0 failures
 
 - [ ] **Step 5: Commit**
 
@@ -1678,8 +1703,8 @@ RSpec.describe OpenMutator::Baseline, :integration do
     calculator = File.join(root, "lib/calculator.rb")
     # eligible? body (lines 3-7) is covered:
     expect(map.examples_for(calculator, 3..3)).not_to be_empty
-    # untested_helper body (line 15) is not:
-    expect(map.examples_for(calculator, 15..15)).to eq([])
+    # untested_helper body (`42`, line 16) is not:
+    expect(map.examples_for(calculator, 16..16)).to eq([])
   end
 
   it "reuses a fresh cache without re-running" do
@@ -1744,10 +1769,15 @@ module OpenMutator
       FileUtils.mkdir_p(@cache_dir)
       env = {
         "OPEN_MUTATOR_ROOT" => @root,
-        "OPEN_MUTATOR_BASELINE_OUT" => @out_path
+        "OPEN_MUTATOR_BASELINE_OUT" => @out_path,
+        # RUBYOPT, not `rspec --require`: project .rspec requires (spec_helper
+        # → app code) run before command-line requires, and Coverage misses
+        # everything loaded before Coverage.start. -r fires before rspec boots.
+        "RUBYOPT" => "-ropen_mutator/baseline_hooks"
       }
-      ok = system(env, "bundle", "exec", "rspec",
-                  "--require", "open_mutator/baseline_hooks", chdir: @root)
+      # out: :err — the subprocess suite's progress output must not pollute
+      # our stdout (breaks `--format json` consumers).
+      ok = system(env, "bundle", "exec", "rspec", chdir: @root, out: :err)
       raise BaselineFailed, "baseline suite failed — fix the suite before mutating" unless ok
       raise BaselineFailed, "baseline produced no coverage output" unless File.exist?(@out_path)
     end
@@ -1894,37 +1924,53 @@ require "stringio"
 
 RSpec.describe OpenMutator::Worker do
   let(:writer) { StringIO.new }
+  let(:mutation) { instance_double(OpenMutator::Mutation) }
+  let(:rspec_runner) { instance_double(RSpec::Core::Runner) }
 
   def emitted
     JSON.parse(writer.string)
   end
 
-  def worker_with(mutation)
-    described_class.new(mutation, ["spec/x_spec.rb[1:1]"], writer)
+  def run_worker
+    described_class.new(mutation, ["spec/x_spec.rb[1:1]"], writer).run
   end
 
-  let(:mutation) { instance_double(OpenMutator::Mutation) }
-
   before do
+    allow(RSpec::Core::Runner).to receive(:new).and_return(rspec_runner)
+    allow(rspec_runner).to receive(:setup)
+    allow(RSpec.world).to receive(:ordered_example_groups).and_return([])
     allow_any_instance_of(OpenMutator::Inserter).to receive(:insert)
   end
 
   it "emits killed when examples fail" do
-    allow(RSpec::Core::Runner).to receive(:run).and_return(1)
-    worker_with(mutation).run
+    allow(rspec_runner).to receive(:run_specs).and_return(1)
+    run_worker
     expect(emitted).to eq("status" => "killed", "details" => nil)
   end
 
   it "emits survived when examples pass" do
-    allow(RSpec::Core::Runner).to receive(:run).and_return(0)
-    worker_with(mutation).run
+    allow(rspec_runner).to receive(:run_specs).and_return(0)
+    run_worker
     expect(emitted).to eq("status" => "survived", "details" => nil)
   end
 
+  it "loads specs BEFORE inserting the mutation" do
+    calls = []
+    allow(rspec_runner).to receive(:setup) { calls << :setup }
+    allow_any_instance_of(OpenMutator::Inserter).to receive(:insert) { calls << :insert }
+    allow(rspec_runner).to receive(:run_specs) do
+      calls << :run_specs
+      0
+    end
+    run_worker
+    expect(calls).to eq(%i[setup insert run_specs])
+  end
+
   it "emits error when insertion raises" do
+    allow(rspec_runner).to receive(:run_specs).and_return(0)
     allow_any_instance_of(OpenMutator::Inserter)
       .to receive(:insert).and_raise(SyntaxError, "boom")
-    worker_with(mutation).run
+    run_worker
     expect(emitted["status"]).to eq("error")
     expect(emitted["details"]).to include("SyntaxError", "boom")
   end
@@ -1943,8 +1989,12 @@ Expected: FAIL with `uninitialized constant OpenMutator::Worker`
 require "json"
 
 module OpenMutator
-  # Runs INSIDE a fork. Inserts the mutation, re-establishes fork-unsafe
-  # state, runs the covering examples in-process, and reports over the pipe.
+  # Runs INSIDE a fork. Order is critical: RSpec's setup phase loads the spec
+  # files, whose spec_helper/rails_helper loads the application — only THEN
+  # can the mutation be inserted over the loaded original. Insert-first would
+  # NameError on any project not preloaded in the parent (all non-Rails
+  # projects), and loading app code after insertion would silently restore
+  # the original method.
   class Worker
     def self.run(mutation, example_ids, writer)
       new(mutation, example_ids, writer).run
@@ -1957,21 +2007,19 @@ module OpenMutator
     end
 
     def run
-      Inserter.new.insert(@mutation)
+      require "rspec/core"
+      devnull = File.open(File::NULL, "w")
+      runner = RSpec::Core::Runner.new(RSpec::Core::ConfigurationOptions.new(@example_ids))
+      runner.setup(devnull, devnull)   # loads spec files -> loads the app
+      Inserter.new.insert(@mutation)   # now the target constant exists
       after_fork_hygiene
-      code = run_examples
+      code = runner.run_specs(RSpec.world.ordered_example_groups)
       emit(code.zero? ? "survived" : "killed")
     rescue StandardError, ScriptError => e
       emit("error", details: "#{e.class}: #{e.message}")
     end
 
     private
-
-    def run_examples
-      require "rspec/core"
-      devnull = File.open(File::NULL, "w")
-      RSpec::Core::Runner.run(@example_ids, devnull, devnull)
-    end
 
     def after_fork_hygiene
       srand
@@ -1997,12 +2045,12 @@ require_relative "open_mutator/worker"
 - [ ] **Step 4: Run tests to verify they pass**
 
 Run: `bundle exec rspec spec/open_mutator/worker_spec.rb`
-Expected: 3 examples, 0 failures
+Expected: 4 examples, 0 failures
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add -A && git commit -m "feat: Worker — insert, hygiene, in-process RSpec kill run"
+git add -A && git commit -m "feat: Worker — load specs, insert mutation, in-process kill run"
 ```
 
 ## Task 15: Result, WorkItem, Scheduler (fork pool + deadlines)
@@ -2112,13 +2160,15 @@ module OpenMutator
       queue = items.dup
       running = {}
       results = []
-      install_signal_handlers(running)
+      previous_traps = install_signal_handlers(running)
       until queue.empty? && running.empty?
         spawn(queue.shift, running) while running.size < @jobs && !queue.empty?
         reap(running, results)
         sleep 0.02 unless running.empty?
       end
       results
+    ensure
+      restore_traps(previous_traps) if previous_traps
     end
 
     private
@@ -2127,6 +2177,8 @@ module OpenMutator
       reader, writer = IO.pipe
       pid = fork do
         reader.close
+        Process.setpgid(0, 0)          # own process group: deadline kill reaps grandchildren too
+        $stdout.reopen(File::NULL)     # app code that prints must not corrupt parent's report
         @worker.call(item.mutation, item.example_ids, writer)
         writer.close
         Process.exit!(0)
@@ -2165,19 +2217,40 @@ module OpenMutator
     end
 
     def kill(pid)
-      Process.kill("KILL", pid)
-      Process.waitpid(pid)
-    rescue Errno::ESRCH, Errno::ECHILD
-      nil
+      Process.kill("KILL", -pid) # negative pid = whole process group
+    rescue Errno::ESRCH, Errno::EPERM
+      # Group not established yet (setpgid race) or already gone — direct kill.
+      begin
+        Process.kill("KILL", pid)
+      rescue Errno::ESRCH
+        nil
+      end
+    ensure
+      begin
+        Process.waitpid(pid)
+      rescue Errno::ECHILD
+        nil
+      end
     end
 
+    # Returns {sig => previous_handler} so #run can restore on exit —
+    # otherwise our traps permanently replace the host's (e.g. RSpec's Ctrl-C).
     def install_signal_handlers(running)
-      %w[INT TERM].each do |sig|
-        trap(sig) do
-          running.each_key { |pid| Process.kill("KILL", pid) rescue nil }
+      %w[INT TERM].to_h do |sig|
+        previous = trap(sig) do
+          running.each_key do |pid|
+            Process.kill("KILL", -pid)
+          rescue StandardError
+            nil
+          end
           exit(130)
         end
+        [sig, previous]
       end
+    end
+
+    def restore_traps(previous)
+      previous.each { |sig, handler| trap(sig, handler || "DEFAULT") }
     end
 
     def now = Process.clock_gettime(Process::CLOCK_MONOTONIC)
@@ -2506,6 +2579,8 @@ Expected: FAIL with `uninitialized constant OpenMutator::SinceFilter`
 ```ruby
 module OpenMutator
   # Restricts subjects to methods overlapping lines changed since a git ref.
+  # Known v1 limit: `git diff <ref>` omits untracked files, so brand-new
+  # uncommitted files are skipped.
   class SinceFilter
     HUNK = /\A@@ [^+]*\+(\d+)(?:,(\d+))? @@/
 
@@ -2600,6 +2675,15 @@ RSpec.describe OpenMutator::CLI do
       expect(config.timeout_floor).to eq(5.0)
     end
   end
+
+  describe ".run" do
+    it "returns exit code 2 with a message on unknown flags" do
+      code = nil
+      expect { code = described_class.run(["--nope"]) }
+        .to output(/invalid option/).to_stderr
+      expect(code).to eq(2)
+    end
+  end
 end
 ```
 
@@ -2685,7 +2769,7 @@ module OpenMutator
   module CLI
     def self.run(argv)
       Runner.new(parse(argv)).call
-    rescue Error => e
+    rescue OptionParser::ParseError, Error => e
       warn "open_mutator: #{e.message}"
       2
     end
@@ -2693,7 +2777,9 @@ module OpenMutator
     def self.parse(argv)
       options = {
         since: nil, subject_filter: nil, jobs: Etc.nprocessors, format: :terminal,
-        requires: [], timeout_factor: 4.0, timeout_floor: 2.0, force_baseline: false
+        # Floor must absorb the fork's boot cost (RSpec setup + spec_helper
+        # load), not just example runtime — hence 10s, not 2s.
+        requires: [], timeout_factor: 4.0, timeout_floor: 10.0, force_baseline: false
       }
       paths = OptionParser.new do |o|
         o.banner = "Usage: open_mutator [paths] [options]"
@@ -2804,7 +2890,7 @@ require_relative "open_mutator/cli"
 - [ ] **Step 5: Run tests to verify they pass**
 
 Run: `bundle exec rspec spec/open_mutator/cli_spec.rb spec/open_mutator/runner_spec.rb`
-Expected: 4 examples, 0 failures
+Expected: 5 examples, 0 failures
 
 - [ ] **Step 6: Run whole suite**
 
@@ -2825,6 +2911,8 @@ git add -A && git commit -m "feat: Config, CLI, and Runner orchestration"
 
 **Files:**
 - Test: `spec/e2e/tiny_project_spec.rb` (tagged `:e2e`)
+
+**Prerequisite:** the fixture's bundle must be installed (done once in Task 12 Step 1). Fresh clones/CI must run `cd spec/fixtures/tiny_project && BUNDLE_GEMFILE=Gemfile bundle install` before the tagged suite.
 
 - [ ] **Step 1: Write the E2E test**
 
@@ -2951,6 +3039,10 @@ gem exec rails new rails_app --minimal --skip-git --skip-bundle --skip-docker --
 cd rails_app
 ```
 
+Notes:
+- `--skip-ci` requires Rails ≥ 7.2 — if `gem exec` resolves an older Rails, drop the flag.
+- The E2E uses `--jobs 1` deliberately: two forks sharing one SQLite test database invites intermittent lock errors, and concurrency is already proven by the tiny_project E2E.
+
 Append to `spec/fixtures/rails_app/Gemfile`:
 ```ruby
 gem "rspec-rails", group: %i[development test]
@@ -3019,7 +3111,7 @@ RSpec.describe "rails_app end-to-end", :rails_e2e do
     stdout, stderr, status = Bundler.with_unbundled_env do
       Open3.capture3(
         { "BUNDLE_GEMFILE" => File.join(root, "Gemfile"), "RAILS_ENV" => "test" },
-        "bundle", "exec", "open_mutator", "app", "--format", "json", "--jobs", "2",
+        "bundle", "exec", "open_mutator", "app", "--format", "json", "--jobs", "1",
         chdir: root
       )
     end
@@ -3057,4 +3149,4 @@ git add -A && git commit -m "test: Rails fixture end-to-end — preload, fork hy
 
 ## Post-v1 backlog (explicitly out of scope, from spec)
 
-minitest integration · operator plugin API · fine-grained baseline invalidation · full subject-expression language · HTML report · Windows support · per-method opt-out magic comment (spec lists it; deferred out of v1 — add as first post-v1 item) · `class << self` bodies · nested defs · heredoc string mutations.
+minitest integration · operator plugin API · fine-grained baseline invalidation · full subject-expression language · HTML report · Windows support · per-method opt-out magic comment (spec lists it; deferred out of v1 — add as first post-v1 item) · path exclude globs (spec lists include/exclude; v1 ships include-only) · broader Enumerable call-swap pack · `--since` coverage of untracked files · `class << self` bodies · nested defs · heredoc string mutations · timeout budget that measures in-fork boot cost instead of relying on the floor.
