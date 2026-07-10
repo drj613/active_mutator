@@ -27,6 +27,29 @@ RSpec.describe OpenMutator::CLI do
       expect(config.timeout_factor).to eq(3.0)
       expect(config.timeout_floor).to eq(5.0)
     end
+
+    it "defaults the v1.1 fields" do
+      config = described_class.parse([])
+      expect(config.preload_helper).to be_nil
+      expect(config.serial_patterns).to eq(["spec/system/", "spec/features/"])
+      expect(config.browser_boot_seconds).to eq(15.0)
+      expect(config.accept_survivors).to be(false)
+    end
+
+    it "parses the v1.1 flags" do
+      config = described_class.parse(
+        %w[--preload-helper spec/other_helper.rb --serial-pattern spec/browser/
+           --browser-boot-seconds 30 --accept-survivors]
+      )
+      expect(config.preload_helper).to eq("spec/other_helper.rb")
+      expect(config.serial_patterns).to eq(["spec/browser/"])
+      expect(config.browser_boot_seconds).to eq(30.0)
+      expect(config.accept_survivors).to be(true)
+    end
+
+    it "parses --no-preload-helper as :none" do
+      expect(described_class.parse(%w[--no-preload-helper]).preload_helper).to eq(:none)
+    end
   end
 
   describe ".run" do

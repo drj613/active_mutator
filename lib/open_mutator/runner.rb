@@ -6,7 +6,9 @@ module OpenMutator
     end
 
     def call
+      ENV["OPEN_MUTATOR"] = "1"
       preload!
+      preload_spec_helper!
       map = Baseline.new(root: @config.root).coverage_map(force: @config.force_baseline)
       subjects = discover_subjects
       analyses = subjects.map { |s| Engine.new.analyze(s) }
@@ -75,6 +77,30 @@ module OpenMutator
 
     def default_paths
       %w[app lib].select { |p| Dir.exist?(File.join(@config.root, p)) }
+    end
+
+    def preload_spec_helper!
+      return if @config.preload_helper == :none
+
+      helper = if @config.preload_helper
+                 File.expand_path(@config.preload_helper, @config.root)
+               else
+                 %w[spec/rails_helper.rb spec/spec_helper.rb]
+                   .map { |p| File.join(@config.root, p) }
+                   .find { |p| File.exist?(p) }
+               end
+      return unless helper && File.exist?(helper)
+
+      require helper
+      disarm_simplecov
+    end
+
+    # A preloaded helper commonly starts SimpleCov. Its at_exit would fire in
+    # THIS parent process at the end of the mutation run, clobbering the
+    # project's real coverage data — and minimum_coverage would exit(1) for a
+    # bogus reason. Neutralize it.
+    def disarm_simplecov
+      SimpleCov.at_exit {} if defined?(SimpleCov)
     end
   end
 end

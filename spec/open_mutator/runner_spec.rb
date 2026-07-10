@@ -1,9 +1,13 @@
+require "tmpdir"
+require "fileutils"
+
 RSpec.describe OpenMutator::Runner do
   let(:config) do
     OpenMutator::Config.new(
       paths: ["lib"], since: nil, subject_filter: nil, jobs: 2, format: :terminal,
       requires: [], timeout_factor: 4.0, timeout_floor: 2.0, force_baseline: false,
-      root: "/project"
+      root: "/project", preload_helper: nil, serial_patterns: ["spec/system/", "spec/features/"],
+      browser_boot_seconds: 15.0, accept_survivors: false
     )
   end
 
@@ -45,5 +49,40 @@ RSpec.describe OpenMutator::Runner do
     killed = OpenMutator::Result.new(mutation: mutation, status: :killed, details: nil)
     expect(described_class.new(config).exit_code([killed, survived])).to eq(1)
     expect(described_class.new(config).exit_code([killed])).to eq(0)
+  end
+
+  describe "#preload_spec_helper!" do
+    it "requires rails_helper when present, in preference order" do
+      Dir.mktmpdir do |dir|
+        FileUtils.mkdir_p(File.join(dir, "spec"))
+        File.write(File.join(dir, "spec", "rails_helper.rb"), "$rails_helper_loaded = true")
+        File.write(File.join(dir, "spec", "spec_helper.rb"), "$spec_helper_loaded = true")
+        runner = described_class.new(config.with(root: dir))
+        runner.send(:preload_spec_helper!)
+        expect($rails_helper_loaded).to be(true)
+        expect($spec_helper_loaded).to be_nil
+      ensure
+        $rails_helper_loaded = $spec_helper_loaded = nil
+      end
+    end
+
+    it "does nothing for :none" do
+      runner = described_class.new(config.with(preload_helper: :none, root: "/nonexistent"))
+      expect { runner.send(:preload_spec_helper!) }.not_to raise_error
+    end
+
+    it "disarms SimpleCov after preload" do
+      fake = Class.new do
+        def self.at_exit_calls = @at_exit_calls ||= []
+        def self.at_exit(&blk) = at_exit_calls << blk
+      end
+      stub_const("SimpleCov", fake)
+      Dir.mktmpdir do |dir|
+        FileUtils.mkdir_p(File.join(dir, "spec"))
+        File.write(File.join(dir, "spec", "spec_helper.rb"), "# empty")
+        described_class.new(config.with(root: dir)).send(:preload_spec_helper!)
+      end
+      expect(fake.at_exit_calls.size).to eq(1)
+    end
   end
 end
