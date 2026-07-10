@@ -73,7 +73,7 @@ Status char map (Terminal): killed `.`, survived `S`, timeout `T`, error `E`, un
 - Modify: `lib/open_mutator/config.rb`, `lib/open_mutator/cli.rb`, `lib/open_mutator/runner.rb`
 - Test: `spec/open_mutator/cli_spec.rb`, `spec/open_mutator/runner_spec.rb`
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Append to the `.parse` describe block in `spec/open_mutator/cli_spec.rb`:
 ```ruby
@@ -151,12 +151,12 @@ and append:
 ```
 Add `require "tmpdir"` and `require "fileutils"` at the top of `runner_spec.rb`.
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `bundle exec rspec spec/open_mutator/cli_spec.rb spec/open_mutator/runner_spec.rb`
 Expected: FAIL — `Data.define` raises `ArgumentError: missing keyword` (Config lacks fields) and `NoMethodError` for `preload_spec_helper!`
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 Replace `lib/open_mutator/config.rb` body:
 ```ruby
@@ -230,12 +230,12 @@ In `lib/open_mutator/runner.rb`:
     end
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `bundle exec rspec spec/open_mutator/cli_spec.rb spec/open_mutator/runner_spec.rb`
 Expected: PASS (cli 6, runner 5)
 
-- [ ] **Step 5: Full suite, commit**
+- [x] **Step 5: Full suite, commit**
 
 Run: `bundle exec rspec` — all green.
 ```bash
@@ -248,7 +248,7 @@ git add -A && git commit -m "feat: spec-helper parent preload, SimpleCov disarm,
 - Modify: `lib/open_mutator/worker.rb`
 - Test: `spec/open_mutator/worker_spec.rb`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Append inside the describe block of `spec/open_mutator/worker_spec.rb`:
 ```ruby
@@ -266,12 +266,12 @@ Append inside the describe block of `spec/open_mutator/worker_spec.rb`:
 ```
 (The existing `before` block already stubs `ordered_example_groups` with `[]`; the `allow` here overrides it for this example. `run_worker` passes `["spec/x_spec.rb[1:1]"]` — unchanged.)
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `bundle exec rspec spec/open_mutator/worker_spec.rb`
 Expected: the new example FAILS — `ran_groups` is `[leaked, covering]`
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 In `lib/open_mutator/worker.rb`, replace the `run_specs` line in `#run`:
 ```ruby
@@ -295,12 +295,12 @@ and add a private method:
 ```
 Add `require "set"` at the top of the file.
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `bundle exec rspec spec/open_mutator/worker_spec.rb`
 Expected: 5 examples, 0 failures
 
-- [ ] **Step 5: Full suite, commit**
+- [x] **Step 5: Full suite, commit**
 
 Run: `bundle exec rspec` — green.
 ```bash
@@ -313,7 +313,7 @@ git add -A && git commit -m "feat: worker runs only covering-file example groups
 - Modify: `lib/open_mutator/work_item.rb`, `lib/open_mutator/scheduler.rb`, `lib/open_mutator/runner.rb`
 - Test: `spec/open_mutator/scheduler_spec.rb`, `spec/open_mutator/runner_spec.rb`
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 In `spec/open_mutator/scheduler_spec.rb`, change the `item` helper and add a lane test:
 ```ruby
@@ -367,12 +367,12 @@ In `spec/open_mutator/runner_spec.rb`, replace the existing `plan_work` example 
   end
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `bundle exec rspec spec/open_mutator/scheduler_spec.rb spec/open_mutator/runner_spec.rb`
 Expected: FAIL — WorkItem has no `lane` keyword
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 `lib/open_mutator/work_item.rb`:
 ```ruby
@@ -431,12 +431,12 @@ and add private:
     end
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `bundle exec rspec spec/open_mutator/scheduler_spec.rb spec/open_mutator/runner_spec.rb`
 Expected: PASS (scheduler 6, runner 6)
 
-- [ ] **Step 5: Full suite (twice, seeds differ), commit**
+- [x] **Step 5: Full suite (twice, seeds differ), commit**
 
 Run: `bundle exec rspec && bundle exec rspec` — green both.
 ```bash
