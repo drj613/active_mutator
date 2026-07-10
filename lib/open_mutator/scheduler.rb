@@ -34,6 +34,7 @@ module OpenMutator
         reader.close
         Process.setpgid(0, 0)          # own process group: deadline kill reaps grandchildren too
         $stdout.reopen(File::NULL)     # app code that prints must not corrupt parent's report
+        $stderr.reopen(File::NULL)     # ditto for warnings (RSpec/app noise interleaves with reports)
         @worker.call(item.mutation, item.example_ids, writer)
         writer.close
         Process.exit!(0)

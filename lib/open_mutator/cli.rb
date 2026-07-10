@@ -11,16 +11,22 @@ module OpenMutator
 
     def self.parse(argv)
       options = {
-        since: nil, subject_filter: nil, jobs: Etc.nprocessors, format: :terminal,
-        # Floor must absorb the fork's boot cost (RSpec setup + spec_helper
-        # load), not just example runtime — hence 10s, not 2s.
-        requires: [], timeout_factor: 4.0, timeout_floor: 10.0, force_baseline: false
+        # Half the cores, not all of them: each worker pays full RSpec setup,
+        # and system-spec workers boot a browser + app server. Full-core
+        # oversubscription starves workers of CPU and turns slow-but-honest
+        # kills into false timeouts (observed on a real Rails monolith).
+        since: nil, subject_filter: nil, jobs: [Etc.nprocessors / 2, 1].max,
+        format: :terminal,
+        # Budgets derive from baseline times measured warm and unloaded; the
+        # factor must absorb parallel-load slowdown, and the floor the fork's
+        # boot cost (RSpec setup + spec file loading).
+        requires: [], timeout_factor: 8.0, timeout_floor: 10.0, force_baseline: false
       }
       paths = OptionParser.new do |o|
         o.banner = "Usage: open_mutator [paths] [options]"
         o.on("--since REF", "Mutate only methods changed since git REF") { |v| options[:since] = v }
         o.on("--subject NAME", "Mutate only the named subject, e.g. Foo::Bar#baz") { |v| options[:subject_filter] = v }
-        o.on("--jobs N", Integer, "Concurrent workers (default: CPU count)") { |v| options[:jobs] = v }
+        o.on("--jobs N", Integer, "Concurrent workers (default: half the CPU count)") { |v| options[:jobs] = v }
         o.on("--format FMT", %w[terminal json], "Output format") { |v| options[:format] = v.to_sym }
         o.on("--require FILE", "File to require before mutating (repeatable)") { |v| options[:requires] << v }
         o.on("--force-baseline", "Ignore cached coverage map") { options[:force_baseline] = true }
