@@ -617,7 +617,7 @@ git add -A && git commit -m "feat: operator base/registry and ConditionalBoundar
 - Create: `lib/open_mutator/operators/condition_forcing.rb`, `lib/open_mutator/operators/logical_operator.rb`
 - Test: `spec/open_mutator/operators/condition_forcing_spec.rb`, `spec/open_mutator/operators/logical_operator_spec.rb`
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 `spec/open_mutator/operators/condition_forcing_spec.rb`:
 ```ruby
@@ -670,12 +670,12 @@ RSpec.describe OpenMutator::Operators::LogicalOperator do
 end
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `bundle exec rspec spec/open_mutator/operators/condition_forcing_spec.rb spec/open_mutator/operators/logical_operator_spec.rb`
 Expected: FAIL with uninitialized constant errors
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 `lib/open_mutator/operators/condition_forcing.rb`:
 ```ruby
@@ -732,12 +732,12 @@ require_relative "open_mutator/operators/condition_forcing"
 require_relative "open_mutator/operators/logical_operator"
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `bundle exec rspec spec/open_mutator/operators`
 Expected: all pass
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add -A && git commit -m "feat: ConditionForcing and LogicalOperator operators"
