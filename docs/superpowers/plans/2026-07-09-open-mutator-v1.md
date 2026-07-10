@@ -749,7 +749,7 @@ git add -A && git commit -m "feat: ConditionForcing and LogicalOperator operator
 - Create: `lib/open_mutator/operators/literal.rb`
 - Test: `spec/open_mutator/operators/literal_spec.rb`
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 `spec/open_mutator/operators/literal_spec.rb`:
 ```ruby
@@ -790,12 +790,12 @@ RSpec.describe OpenMutator::Operators::Literal do
 end
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `bundle exec rspec spec/open_mutator/operators/literal_spec.rb`
 Expected: FAIL with `uninitialized constant OpenMutator::Operators::Literal`
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 `lib/open_mutator/operators/literal.rb`:
 ```ruby
@@ -843,12 +843,12 @@ Append to `lib/open_mutator.rb`:
 require_relative "open_mutator/operators/literal"
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `bundle exec rspec spec/open_mutator/operators/literal_spec.rb`
 Expected: 7 examples, 0 failures
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add -A && git commit -m "feat: Literal operator (integers, strings, booleans)"
