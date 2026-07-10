@@ -1,5 +1,5 @@
 # Loaded standalone via RUBYOPT=-ractive_mutator/baseline_hooks in the host
-# project's suite — before rspec boots, so Coverage instruments everything
+# project's suite, before rspec boots, so Coverage instruments everything
 # the suite loads (including code loaded by spec_helper). Records per-example
 # coverage diffs and writes the inverted map to ACTIVE_MUTATOR_BASELINE_OUT.
 require "json"
@@ -53,7 +53,7 @@ if ENV["ACTIVE_MUTATOR_BASELINE_OUT"]
       root = ENV.fetch("ACTIVE_MUTATOR_ROOT")
       ActiveMutator::BaselineHooks::RECORDS[example.id] =
         ActiveMutator::BaselineHooks.diff_coverage(before, after, root)
-      # NOT example.execution_result.run_time — that is nil until after
+      # NOT example.execution_result.run_time: that is nil until after
       # around hooks complete.
       ActiveMutator::BaselineHooks::TIMES[example.id] = elapsed
     end

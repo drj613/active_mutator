@@ -121,7 +121,7 @@ module ActiveMutator
 
     # A preloaded helper commonly starts SimpleCov. Its at_exit would fire in
     # THIS parent process at the end of the mutation run, clobbering the
-    # project's real coverage data — and minimum_coverage would exit(1) for a
+    # project's real coverage data, and minimum_coverage would exit(1) for a
     # bogus reason. Neutralize it.
     def disarm_simplecov
       SimpleCov.at_exit {} if defined?(SimpleCov)
@@ -136,7 +136,7 @@ module ActiveMutator
 
     def warn_stale(ledger, all_fingerprints)
       ledger.stale_entries(all_fingerprints).each do |entry|
-        warn "active_mutator: stale accepted fingerprint (no matching mutant): #{entry.subject} — #{entry.description}"
+        warn "active_mutator: stale accepted fingerprint (no matching mutant): #{entry.subject}, #{entry.description}"
       end
     end
   end

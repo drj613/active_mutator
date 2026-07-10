@@ -1,7 +1,7 @@
 module ActiveMutator
   # Line-number-independent identity for a mutant, used by the acceptance
   # ledger. `ordinal` disambiguates byte-identical mutants within one subject
-  # (e.g. the two `>` in `a > 0 && b > 0`) by source order — without it,
+  # (e.g. the two `>` in `a > 0 && b > 0`) by source order. Without it,
   # accepting one would silently accept both.
   Fingerprint = Data.define(:file, :subject, :description, :original_snippet, :ordinal) do
     def self.for_mutations(mutations, root:)

@@ -16,16 +16,16 @@ Initial release.
   content, with a Prism re-parse validity gate (no unparser).
 - Eight-operator catalog: `ConditionalBoundary`, `ConditionForcing`,
   `LogicalOperator`, `Literal`, `StatementDeletion`, `EarlyReturn`,
-  `CallSwap` (including a Rails-aware pack — `present?`/`blank?`,
+  `CallSwap` (including a Rails-aware pack: `present?`/`blank?`,
   `save`/`save!`), and `NegationRemoval`.
 - Instrumented-baseline coverage map (cache format v2) mapping every
   source line to its covering RSpec examples and per-example run times.
 - Incremental delta refresh: file-level, digest-driven partial re-runs
   instead of a full baseline re-run on every change, with `--force-baseline`
   as the full-recovery escape hatch.
-- Fork-per-mutant kill pipeline: parent preloads the application and spec
-  helper once; each mutant is inserted and exercised in an isolated fork
-  against only its covering examples.
+- Fork-per-mutant kill pipeline: the parent preloads the application and
+  spec helper once. Each mutant is inserted and exercised in an isolated
+  fork against only its covering examples.
 - World-group filtering so a fork runs only the example groups belonging to
   its covering spec files, never the full inherited `RSpec.world`.
 - SimpleCov disarm in the parent process, and `ENV["ACTIVE_MUTATOR"] = "1"`

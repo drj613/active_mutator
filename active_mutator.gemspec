@@ -4,11 +4,11 @@ Gem::Specification.new do |spec|
   spec.name = "active_mutator"
   spec.version = ActiveMutator::VERSION
   spec.summary = "Mutation testing for Ruby, built on Prism"
-  spec.description = "Mutation testing for Ruby and Rails: Prism-based source-span mutations " \
-                      "(no unparser), coverage-mapped test selection, and a fork-per-mutant " \
-                      "kill pipeline. Scopes to changed methods for a fast dev loop, or a diff " \
-                      "for CI, with an incremental coverage baseline and a committed acceptance " \
-                      "ledger for equivalent mutants."
+  spec.description = "Mutation testing for Ruby and Rails. Uses Prism-based source-span " \
+                      "mutations (no unparser), coverage-mapped test selection, and a " \
+                      "fork-per-mutant kill pipeline. Scopes to changed methods for a fast " \
+                      "dev loop, or to a diff for CI. Includes an incremental coverage " \
+                      "baseline and a committed acceptance ledger for equivalent mutants."
   spec.authors = ["Daniel John"]
   spec.license = "MIT"
   spec.homepage = "https://github.com/drj613/active_mutator"

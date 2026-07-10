@@ -3,7 +3,7 @@ require "set"
 
 module ActiveMutator
   # Committed, repo-root ledger of accepted (equivalent) survivors.
-  # Deliberately NOT inside .active_mutator/ — that dir is gitignored and
+  # Deliberately NOT inside .active_mutator/: that dir is gitignored and
   # disposable, while acceptance decisions are durable team/CI state.
   class AcceptedLedger
     FILENAME = ".active_mutator_accepted.json"

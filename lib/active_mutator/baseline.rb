@@ -45,10 +45,10 @@ module ActiveMutator
     def run_baseline!
       FileUtils.mkdir_p(@cache_dir)
       env = baseline_env(@out_path)
-      # out: :err — the subprocess suite's progress output must not pollute
+      # out: :err: the subprocess suite's progress output must not pollute
       # our stdout (breaks `--format json` consumers).
       ok = system(env, "bundle", "exec", "rspec", chdir: @root, out: :err)
-      raise BaselineFailed, "baseline suite failed — fix the suite before mutating" unless ok
+      raise BaselineFailed, "baseline suite failed, fix the suite before mutating" unless ok
       raise BaselineFailed, "baseline produced no coverage output" unless File.exist?(@out_path)
     end
 
@@ -80,7 +80,7 @@ module ActiveMutator
       if targets.any?
         env = baseline_env(partial_out)
         ok = system(env, "bundle", "exec", "rspec", *targets, chdir: @root, out: :err)
-        raise BaselineFailed, "partial baseline run failed — fix the suite before mutating" unless ok
+        raise BaselineFailed, "partial baseline run failed, fix the suite before mutating" unless ok
         raise BaselineFailed, "partial baseline produced no output" unless File.exist?(partial_out)
       end
       merge_partial!(partial_out, delta)

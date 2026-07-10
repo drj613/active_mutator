@@ -86,7 +86,7 @@ module ActiveMutator
     def kill(pid)
       Process.kill("KILL", -pid) # negative pid = whole process group
     rescue Errno::ESRCH, Errno::EPERM
-      # Group not established yet (setpgid race) or already gone — direct kill.
+      # Group not established yet (setpgid race) or already gone: direct kill.
       begin
         Process.kill("KILL", pid)
       rescue Errno::ESRCH
@@ -100,7 +100,7 @@ module ActiveMutator
       end
     end
 
-    # Returns {sig => previous_handler} so #run can restore on exit —
+    # Returns {sig => previous_handler} so #run can restore on exit,
     # otherwise our traps permanently replace the host's (e.g. RSpec's Ctrl-C).
     def install_signal_handlers(running)
       %w[INT TERM].to_h do |sig|

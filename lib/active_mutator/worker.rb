@@ -3,7 +3,7 @@ require "set"
 
 module ActiveMutator
   # Runs INSIDE a fork. Order is critical: RSpec's setup phase loads the spec
-  # files, whose spec_helper/rails_helper loads the application — only THEN
+  # files, whose spec_helper/rails_helper loads the application. Only THEN
   # can the mutation be inserted over the loaded original. Insert-first would
   # NameError on any project not preloaded in the parent (all non-Rails
   # projects), and loading app code after insertion would silently restore
@@ -47,7 +47,7 @@ module ActiveMutator
       @writer.flush if @writer.respond_to?(:flush)
     end
 
-    # RSpec.world holds every group registered in the process — including any
+    # RSpec.world holds every group registered in the process, including any
     # top-level groups evaluated while the PARENT preloaded the spec helper
     # (spec/support files with RSpec.describe at load time are common). Those
     # leak into the fork; running them would report their failures as false

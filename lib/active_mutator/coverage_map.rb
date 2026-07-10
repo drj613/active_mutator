@@ -3,7 +3,7 @@ require "json"
 module ActiveMutator
   # Cache format v2: primary data is per-example `records`
   # ({example_id => [[abs_path, line], ...]}); the inverted index is derived
-  # in memory at load. A missing/old version is simply stale — the cache is
+  # in memory at load. A missing/old version is simply stale: the cache is
   # disposable, so there is no migration path, only regeneration.
   class CoverageMap
     def self.load(path) = new(JSON.parse(File.read(path)))
