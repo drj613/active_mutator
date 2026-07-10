@@ -1101,7 +1101,7 @@ git add -A && git commit -m "feat: CallSwap (with Rails pack) and NegationRemova
 - Create: `lib/open_mutator/mutation.rb`, `lib/open_mutator/analysis.rb`, `lib/open_mutator/engine.rb`
 - Test: `spec/open_mutator/engine_spec.rb`
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 `spec/open_mutator/engine_spec.rb`:
 ```ruby
@@ -1204,12 +1204,12 @@ end
 
 Note: never subclass `Operators::Base` in tests — `inherited` registers the class permanently, and `Base.all` is exactly what the Task 20 property gate and `Engine.new` defaults iterate.
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `bundle exec rspec spec/open_mutator/engine_spec.rb`
 Expected: FAIL with `uninitialized constant OpenMutator::Engine`
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 `lib/open_mutator/mutation.rb`:
 ```ruby
@@ -1319,17 +1319,17 @@ require_relative "open_mutator/analysis"
 require_relative "open_mutator/engine"
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `bundle exec rspec spec/open_mutator/engine_spec.rb`
 Expected: 5 examples, 0 failures
 
-- [ ] **Step 5: Run the whole suite**
+- [x] **Step 5: Run the whole suite**
 
 Run: `bundle exec rspec`
 Expected: all pass
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add -A && git commit -m "feat: Mutation engine with re-parse validity gate"
