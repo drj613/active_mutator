@@ -294,7 +294,7 @@ git add -A && git commit -m "feat: Edit value object and byte-range splicer"
 - Create: `lib/open_mutator/subject.rb`, `lib/open_mutator/subject_finder.rb`
 - Test: `spec/open_mutator/subject_finder_spec.rb`
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 `spec/open_mutator/subject_finder_spec.rb`:
 ```ruby
@@ -379,12 +379,12 @@ RSpec.describe OpenMutator::SubjectFinder do
 end
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `bundle exec rspec spec/open_mutator/subject_finder_spec.rb`
 Expected: FAIL with `uninitialized constant OpenMutator::SubjectFinder`
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 `lib/open_mutator/subject.rb`:
 ```ruby
@@ -463,12 +463,12 @@ require_relative "open_mutator/subject"
 require_relative "open_mutator/subject_finder"
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `bundle exec rspec spec/open_mutator/subject_finder_spec.rb`
 Expected: 7 examples, 0 failures
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add -A && git commit -m "feat: Subject and Prism-based SubjectFinder"
