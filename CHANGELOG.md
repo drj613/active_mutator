@@ -4,7 +4,7 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
-## [Unreleased]
+## [0.1.1] - 2026-07-13
 
 ### Fixed
 
@@ -13,6 +13,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   reparenting, kills all running workers, and aborts. Before this fix an
   orphaned run kept forking through the whole mutant queue unsupervised,
   which could exhaust the machine's CPU.
+- The `.active_mutator/` cache directory now writes its own `.gitignore`
+  on creation, so host projects can never commit the disposable coverage
+  cache by accident.
 
 ## [0.1.0] - 2026-07-10
 
