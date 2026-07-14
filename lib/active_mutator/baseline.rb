@@ -42,8 +42,17 @@ module ActiveMutator
 
     private
 
-    def run_baseline!
+    # The cache is disposable and must never be committed. Host projects
+    # rarely gitignore it themselves, so the directory ignores its own
+    # contents (the node_modules trick).
+    def prepare_cache_dir
       FileUtils.mkdir_p(@cache_dir)
+      ignore = File.join(@cache_dir, ".gitignore")
+      File.write(ignore, "*\n") unless File.exist?(ignore)
+    end
+
+    def run_baseline!
+      prepare_cache_dir
       env = baseline_env(@out_path)
       # out: :err: the subprocess suite's progress output must not pollute
       # our stdout (breaks `--format json` consumers).

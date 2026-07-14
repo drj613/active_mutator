@@ -22,6 +22,8 @@ RSpec.describe ActiveMutator::Baseline, :integration do
     expect(map.examples_for(calculator, 3..3)).not_to be_empty
     # untested_helper body (`42`, line 16) is not:
     expect(map.examples_for(calculator, 16..16)).to eq([])
+    # cache dir must ignore its own contents (never committed by hosts):
+    expect(File.read(File.join(cache_dir, ".gitignore"))).to eq("*\n")
   end
 
   it "reuses a fresh cache without re-running" do
