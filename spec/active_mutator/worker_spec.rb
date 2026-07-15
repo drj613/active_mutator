@@ -54,6 +54,21 @@ RSpec.describe ActiveMutator::Worker do
     expect(emitted["details"]).to include("SyntaxError", "boom")
   end
 
+  it "sets fail_fast so the first killing example ends the run" do
+    original_fail_fast = RSpec.configuration.fail_fast
+    fail_fast_seen = nil
+    allow(rspec_runner).to receive(:run_specs) do
+      fail_fast_seen = RSpec.configuration.fail_fast
+      1
+    end
+
+    run_worker
+
+    expect(fail_fast_seen).to eq(1)
+  ensure
+    RSpec.configuration.fail_fast = original_fail_fast
+  end
+
   it "runs only groups belonging to covering spec files (drops helper-leaked groups)" do
     covering = class_double(RSpec::Core::ExampleGroup,
                             metadata: { absolute_file_path: File.expand_path("spec/x_spec.rb") })

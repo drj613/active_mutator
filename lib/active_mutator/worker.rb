@@ -24,6 +24,9 @@ module ActiveMutator
       devnull = File.open(File::NULL, "w")
       runner = RSpec::Core::Runner.new(RSpec::Core::ConfigurationOptions.new(@example_ids))
       runner.setup(devnull, devnull)   # loads spec files -> loads the app
+      # One failure kills the mutant; running the rest of the covering set
+      # is pure waste inside the fork.
+      RSpec.configuration.fail_fast = 1
       Inserter.new.insert(@mutation)   # now the target constant exists
       after_fork_hygiene
       code = runner.run_specs(covering_groups)
