@@ -80,7 +80,10 @@ module ActiveMutator
         .flat_map { |p| Dir[File.join(@config.root, p, "**", "*.rb")] }
         .reject { |file| excluded?(file) }
         .sort.flat_map { |file| SubjectFinder.call(file) }
-      subjects = subjects.select { |s| s.name == @config.subject_filter } if @config.subject_filter
+      if @config.subject_filter
+        matcher = SubjectMatcher.new(@config.subject_filter)
+        subjects = subjects.select { |s| matcher.match?(s.name) }
+      end
       if @config.since
         filter = SinceFilter.new(ref: @config.since, root: @config.root)
         subjects = subjects.select { |s| filter.cover?(s) }

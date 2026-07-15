@@ -164,6 +164,26 @@ RSpec.describe ActiveMutator::Runner do
         expect(runner.send(:discover_subjects).map(&:name)).to eq(["Keep#a"])
       end
     end
+
+    it "applies the subject_filter expression when present" do
+      Dir.mktmpdir do |dir|
+        FileUtils.mkdir_p(File.join(dir, "lib"))
+        File.write(File.join(dir, "lib", "keep.rb"), "class Keep; def a; 1; end; def b; 2; end; end")
+
+        runner = described_class.new(config.with(root: dir, subject_filter: "Keep#a"))
+        expect(runner.send(:discover_subjects).map(&:name)).to eq(["Keep#a"])
+      end
+    end
+
+    it "returns all discovered subjects when subject_filter is nil" do
+      Dir.mktmpdir do |dir|
+        FileUtils.mkdir_p(File.join(dir, "lib"))
+        File.write(File.join(dir, "lib", "keep.rb"), "class Keep; def a; 1; end; def b; 2; end; end")
+
+        runner = described_class.new(config.with(root: dir, subject_filter: nil))
+        expect(runner.send(:discover_subjects).map(&:name)).to contain_exactly("Keep#a", "Keep#b")
+      end
+    end
   end
 
   describe "acceptance integration" do
