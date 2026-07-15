@@ -68,6 +68,7 @@ module ActiveMutator
       case @config.format
       when :json then Reporter::Json.new
       when :stryker_json then Reporter::StrykerJson.new(root: @config.root)
+      when :github then Reporter::Github.new(root: @config.root)
       else Reporter::Terminal.new
       end
     end

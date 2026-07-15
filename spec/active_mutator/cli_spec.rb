@@ -55,6 +55,10 @@ RSpec.describe ActiveMutator::CLI do
       expect(described_class.parse(["--format", "stryker-json"]).format).to eq(:stryker_json)
     end
 
+    it "parses --format github" do
+      expect(described_class.parse(["--format", "github"]).format).to eq(:github)
+    end
+
     it "defaults jobs to half the CPU count, minimum 1" do
       allow(Etc).to receive(:nprocessors).and_return(8)
       expect(described_class.parse([]).jobs).to eq(4)

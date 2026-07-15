@@ -61,6 +61,12 @@ RSpec.describe ActiveMutator::Runner do
     expect(reporter).to be_a(ActiveMutator::Reporter::StrykerJson)
   end
 
+  it "builds a Github reporter for :github format" do
+    github_config = config.with(format: :github)
+    reporter = described_class.new(github_config).instance_variable_get(:@reporter)
+    expect(reporter).to be_a(ActiveMutator::Reporter::Github)
+  end
+
   it "exits 1 when mutants survive, 0 otherwise" do
     survived = ActiveMutator::Result.new(mutation: mutation, status: :survived, details: nil)
     killed = ActiveMutator::Result.new(mutation: mutation, status: :killed, details: nil)
