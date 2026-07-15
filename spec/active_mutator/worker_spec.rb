@@ -14,6 +14,16 @@ RSpec.describe ActiveMutator::Worker do
     described_class.new(mutation, ["spec/x_spec.rb[1:1]"], writer).run
   end
 
+  # Every test routes through Worker#run, which sets the GLOBAL
+  # RSpec.configuration.fail_fast = 1; restore it so the host suite
+  # keeps its own configuration.
+  around do |example|
+    original = RSpec.configuration.fail_fast
+    example.run
+  ensure
+    RSpec.configuration.fail_fast = original
+  end
+
   before do
     allow(RSpec::Core::Runner).to receive(:new).and_return(rspec_runner)
     allow(rspec_runner).to receive(:setup)
@@ -55,7 +65,6 @@ RSpec.describe ActiveMutator::Worker do
   end
 
   it "sets fail_fast so the first killing example ends the run" do
-    original_fail_fast = RSpec.configuration.fail_fast
     fail_fast_seen = nil
     allow(rspec_runner).to receive(:run_specs) do
       fail_fast_seen = RSpec.configuration.fail_fast
@@ -65,8 +74,6 @@ RSpec.describe ActiveMutator::Worker do
     run_worker
 
     expect(fail_fast_seen).to eq(1)
-  ensure
-    RSpec.configuration.fail_fast = original_fail_fast
   end
 
   it "runs only groups belonging to covering spec files (drops helper-leaked groups)" do
