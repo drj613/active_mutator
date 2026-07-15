@@ -1,0 +1,23 @@
+[
+  {
+    "file": "lib/active_mutator/worker.rb",
+    "subject": "ActiveMutator::Worker#run",
+    "description": "delete `require \"rspec/core\"`",
+    "original_snippet": "require \"rspec/core\"",
+    "ordinal": 0
+  },
+  {
+    "file": "lib/active_mutator/worker.rb",
+    "subject": "ActiveMutator::Worker#run",
+    "description": "delete `RSpec.configuration.fail_fast = 1`",
+    "original_snippet": "RSpec.configuration.fail_fast = 1",
+    "ordinal": 0
+  },
+  {
+    "file": "lib/active_mutator/worker.rb",
+    "subject": "ActiveMutator::Worker#run",
+    "description": "delete `after_fork_hygiene`",
+    "original_snippet": "after_fork_hygiene",
+    "ordinal": 0
+  }
+]
