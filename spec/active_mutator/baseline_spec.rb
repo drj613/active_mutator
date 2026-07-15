@@ -4,6 +4,7 @@ RSpec.describe ActiveMutator::Baseline, :integration do
   let(:root) { File.expand_path("../fixtures/tiny_project", __dir__) }
   let(:cache_dir) { File.join(root, ".active_mutator") }
 
+  before { ensure_fixture_bundle! }
   after { FileUtils.rm_rf(cache_dir) }
 
   def run_in_fixture

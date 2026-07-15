@@ -9,7 +9,31 @@ module FixtureCopy
   GEM_ROOT = File.expand_path("../..", __dir__)
   FIXTURE = File.join(GEM_ROOT, "spec/fixtures/tiny_project")
 
+  # The fixture's Gemfile.lock is gitignored, so a fresh checkout (CI) has
+  # neither a lockfile nor the fixture's gems anywhere a subprocess can see
+  # them: the outer suite's gems live under Bundler's isolated path (e.g.
+  # setup-ruby's vendor/bundle), and fixture subprocesses run unbundled
+  # against the default gem home. Without this install-once:
+  # - `bundle exec` in the fixture fails outright (empty stdout), and
+  # - the first in-fixture run CREATES Gemfile.lock, which flips the
+  #   baseline digest set and invalidates a just-written coverage cache.
+  def self.ensure_fixture_bundle!
+    return if @fixture_bundle_ready
+
+    Bundler.with_unbundled_env do
+      ENV["BUNDLE_GEMFILE"] = File.join(FIXTURE, "Gemfile")
+      system("bundle", "install", "--quiet", chdir: FIXTURE, out: :err) or
+        raise "fixture bundle install failed"
+    ensure
+      ENV.delete("BUNDLE_GEMFILE")
+    end
+    @fixture_bundle_ready = true
+  end
+
+  def ensure_fixture_bundle! = FixtureCopy.ensure_fixture_bundle!
+
   def with_fixture_copy
+    FixtureCopy.ensure_fixture_bundle!
     Dir.mktmpdir do |dir|
       root = File.join(dir, "tiny_project")
       FileUtils.cp_r(FIXTURE, root)
