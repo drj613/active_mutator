@@ -4,6 +4,10 @@
 |---|---|---|---|---|---|---|
 | 2026-07-15 | pre-1 | `active_mutator app/models --subject "Document#size_category"` | 2.14s | 100.0% | 0 | baseline before fail-fast; 20 mutants, all killed, cached coverage map |
 | 2026-07-15 | 1 (post #18) | `active_mutator app/models --subject "Document#size_category"` | 1.89s | 100.0% | 0 | fail-fast active; small subject, modest gain expected — larger sets benefit more |
+| 2026-07-15 | 1 close | `--subject "Document" --debug-plan` | n/a | n/a | n/a | bare-constant expr plans 115 mutants across class; JSON valid |
+| 2026-07-15 | 1 close | `--subject "Document#size_category" --max-mutants 5` | n/a | 100.0% | 0 | exactly 5 mutants run |
+| 2026-07-15 | 1 close | `--exclude "app/models/document.rb"` + subject | n/a | n/a | 0 | target excluded → 0 mutants (vs 20) |
+| 2026-07-15 | 1 close | `--changed` | n/a | 100.0% | 0 | clean tree, 0 mutants — correct |
 
 ## Findings
 
