@@ -7,4 +7,5 @@
 
 ## Findings
 
+- 2026-07-15: `--accept-survivors` on a scoped run (`--subject`/`--changed`) rewrites the ledger to only fingerprints seen in THAT run — silently deletes out-of-scope acceptances (lost the 3 Worker#run entries when accepting a SubjectFinder one; recovered by manual merge). Candidate new issue: ledger accept! must merge, pruning only true stale entries, or prune only within the run's discovery scope.
 - 2026-07-15: positional path args are directory prefixes only — `active_mutator app/models/document.rb` globs `document.rb/**/*.rb`, finds 0 subjects, exits 0 vacuously. Silent false-green; candidate new issue: accept file paths (or error on non-directory args).
