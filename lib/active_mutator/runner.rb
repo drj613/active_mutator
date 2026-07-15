@@ -78,6 +78,7 @@ module ActiveMutator
       paths = @config.paths.empty? ? default_paths : @config.paths
       subjects = paths
         .flat_map { |p| Dir[File.join(@config.root, p, "**", "*.rb")] }
+        .reject { |file| excluded?(file) }
         .sort.flat_map { |file| SubjectFinder.call(file) }
       subjects = subjects.select { |s| s.name == @config.subject_filter } if @config.subject_filter
       if @config.since
@@ -85,6 +86,13 @@ module ActiveMutator
         subjects = subjects.select { |s| filter.cover?(s) }
       end
       subjects
+    end
+
+    def excluded?(file)
+      relative = file.delete_prefix("#{@config.root}/")
+      @config.exclude.any? do |pattern|
+        File.fnmatch?(pattern, relative, File::FNM_PATHNAME | File::FNM_EXTGLOB)
+      end
     end
 
     def default_paths

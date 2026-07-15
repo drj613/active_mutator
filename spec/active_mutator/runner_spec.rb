@@ -7,7 +7,7 @@ RSpec.describe ActiveMutator::Runner do
       paths: ["lib"], since: nil, subject_filter: nil, jobs: 2, format: :terminal,
       requires: [], timeout_factor: 4.0, timeout_floor: 2.0, force_baseline: false,
       root: "/project", preload_helper: nil, serial_patterns: ["spec/system/", "spec/features/"],
-      browser_boot_seconds: 15.0, accept_survivors: false
+      browser_boot_seconds: 15.0, accept_survivors: false, exclude: []
     )
   end
 
@@ -93,6 +93,21 @@ RSpec.describe ActiveMutator::Runner do
         described_class.new(config.with(root: dir)).send(:preload_spec_helper!)
       end
       expect(fake.at_exit_calls.size).to eq(1)
+    end
+  end
+
+  describe "#discover_subjects" do
+    it "drops files matching exclude globs during discovery" do
+      Dir.mktmpdir do |dir|
+        FileUtils.mkdir_p(File.join(dir, "lib", "generated"))
+        File.write(File.join(dir, "lib", "keep.rb"), "class Keep; def a; 1; end; end")
+        File.write(File.join(dir, "lib", "generated", "skip.rb"), "class Skip; def a; 1; end; end")
+
+        runner = described_class.new(config.with(root: dir, exclude: ["lib/generated/**"]))
+        subjects = runner.send(:discover_subjects)
+
+        expect(subjects.map(&:name)).to eq(["Keep#a"])
+      end
     end
   end
 

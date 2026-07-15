@@ -22,7 +22,7 @@ module ActiveMutator
         # boot cost (RSpec setup + spec file loading).
         requires: [], timeout_factor: 8.0, timeout_floor: 10.0, force_baseline: false,
         preload_helper: nil, serial_patterns: ["spec/system/", "spec/features/"],
-        browser_boot_seconds: 15.0, accept_survivors: false
+        browser_boot_seconds: 15.0, accept_survivors: false, exclude: []
       }
       paths = OptionParser.new do |o|
         o.banner = "Usage: active_mutator [paths] [options]"
@@ -44,6 +44,7 @@ module ActiveMutator
         end
         o.on("--browser-boot-seconds S", Float, "Extra timeout budget for serial-lane mutants") { |v| options[:browser_boot_seconds] = v }
         o.on("--accept-survivors", "Record surviving mutants into the acceptance ledger") { options[:accept_survivors] = true }
+        o.on("--exclude PAT", "Skip files matching glob, relative to root (repeatable)") { |v| options[:exclude] << v }
       end.parse(argv)
       options.delete(:serial_patterns_replaced)
 

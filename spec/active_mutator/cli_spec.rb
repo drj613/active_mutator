@@ -54,6 +54,15 @@ RSpec.describe ActiveMutator::CLI do
     it "aliases --changed to --since HEAD" do
       expect(described_class.parse(%w[--changed]).since).to eq("HEAD")
     end
+
+    it "collects repeatable --exclude patterns" do
+      config = described_class.parse(["lib", "--exclude", "lib/generated/**", "--exclude", "**/legacy/*"])
+      expect(config.exclude).to eq(["lib/generated/**", "**/legacy/*"])
+    end
+
+    it "defaults exclude to empty" do
+      expect(described_class.parse([]).exclude).to eq([])
+    end
   end
 
   describe ".run" do
