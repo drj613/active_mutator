@@ -131,6 +131,10 @@ discarded before scheduling and reported as a count only. Exit code is `1`
 if unaccepted survivors exist, `0` otherwise, including when there are
 only `uncovered`, `accepted`, or `error` results.
 
+When survivors exist, the summary also prints a per-operator table showing
+how often each operator's mutants survive, to help spot likely-equivalent
+mutant patterns.
+
 ## How it works, compactly
 
 1. **Subject discovery**: a Prism visitor finds every method (`def`) in
@@ -208,9 +212,23 @@ git add .active_mutator_accepted.json                     # committed state
 Acceptance takes effect on the next run. The accepting run still exits 1.
 Agent workflow: see [`docs/skills/mutation-check.md`](docs/skills/mutation-check.md).
 
+## Reports
+
+`--format stryker-json` writes `.active_mutator/mutation-report.json` in the
+Stryker [mutation-testing-report-schema](https://github.com/stryker-mutator/mutation-testing-elements)
+v2 format. Open it in the
+[Stryker report viewer](https://microsoft.github.io/mutation-testing-elements/)
+for per-file mutant maps with inline diffs, filterable by status.
+
+`--format github` prints one `::warning` annotation per surviving mutant, so
+survivors show inline on the PR diff. Pairs with the CI recipe:
+
+    bundle exec active_mutator --since origin/main --format github
+
 ## CI recipe
 
-- Per-PR: `active_mutator --since origin/main` (minutes)
+- Per-PR: `active_mutator --since origin/main --format github` (minutes;
+  survivors annotate the PR diff)
 - Nightly: `active_mutator --force-baseline` (full run; also recovers the
   incremental baseline's newly-covering-example blind spot)
 
@@ -225,7 +243,7 @@ Agent workflow: see [`docs/skills/mutation-check.md`](docs/skills/mutation-check
 | `--exclude PAT` | none | skip files matching glob during subject discovery (repeatable, gitignore-like) |
 | `--max-mutants N` | none | deterministic sample of the first N mutants (quick smoke run on huge scopes; accepted/uncovered mutants count against N) |
 | `--debug-plan` | off | print planned mutants as JSON and exit without running |
-| `--format terminal\|json` | terminal | report format |
+| `--format terminal\|json\|stryker-json\|github` | terminal | report format |
 | `--accept-survivors` | off | record survivors to the acceptance ledger |
 | `--force-baseline` | off | ignore cached coverage map |
 | `--preload-helper FILE` / `--no-preload-helper` | auto-detect | parent spec-helper preload |

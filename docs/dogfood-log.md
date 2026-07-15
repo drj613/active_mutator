@@ -8,6 +8,9 @@
 | 2026-07-15 | 1 close | `--subject "Document#size_category" --max-mutants 5` | n/a | 100.0% | 0 | exactly 5 mutants run |
 | 2026-07-15 | 1 close | `--exclude "app/models/document.rb"` + subject | n/a | n/a | 0 | target excluded → 0 mutants (vs 20) |
 | 2026-07-15 | 1 close | `--changed` | n/a | 100.0% | 0 | clean tree, 0 mutants — correct |
+| 2026-07-15 | 2 close | `active_mutator app/models --subject "Document#size_category"` | 2.65s | 100.0% | 0 | smoke run; 20 mutants, all killed |
+| 2026-07-15 | 2 close | `--subject "Document" --format stryker-json` | n/a | n/a | 15 | 115 mutants in report; schemaVersion 2, 1 file, testFiles present, valid JSON; exit 1 (survivors) |
+| 2026-07-15 | 2 close | `--subject "Document" --format github` | n/a | n/a | 15 | 15 `::warning` annotations, one per survivor; exit 1 |
 
 ## Findings
 
