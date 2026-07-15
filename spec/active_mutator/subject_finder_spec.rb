@@ -76,4 +76,37 @@ RSpec.describe ActiveMutator::SubjectFinder do
   it "returns [] for unparseable files" do
     expect(subjects_of("def broken(")).to eq([])
   end
+
+  it "skips a def annotated with active_mutator:skip on the previous line" do
+    subjects = subjects_of(<<~RUBY)
+      class Foo
+        # active_mutator:skip
+        def skipped; 1; end
+
+        def kept; 2; end
+      end
+    RUBY
+    expect(subjects.map(&:name)).to eq(["Foo#kept"])
+  end
+
+  it "tolerates surrounding text and whitespace in the marker" do
+    subjects = subjects_of(<<~RUBY)
+      class Foo
+        #   active_mutator: skip -- generated delegator
+        def skipped; 1; end
+      end
+    RUBY
+    expect(subjects).to be_empty
+  end
+
+  it "does not skip when the marker is elsewhere" do
+    subjects = subjects_of(<<~RUBY)
+      class Foo
+        # active_mutator:skip
+
+        def not_skipped; 1; end
+      end
+    RUBY
+    expect(subjects.map(&:name)).to eq(["Foo#not_skipped"])
+  end
 end

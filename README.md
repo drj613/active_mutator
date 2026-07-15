@@ -161,6 +161,16 @@ active_mutator --since origin/main      # PR scope (CI)
 active_mutator --subject 'Foo::Bar#baz' # one method
 ```
 
+Skip a single method by putting `# active_mutator:skip` on the line above
+its `def`:
+
+```ruby
+# active_mutator:skip
+def legacy_delegator
+  target.call
+end
+```
+
 Statuses: `killed` (test failed, this is good), `survived` (test gap),
 `timeout` (counts as detected), `uncovered` (no covering example, this is
 coverage debt), `accepted` (known-equivalent, see ledger), `error`,
