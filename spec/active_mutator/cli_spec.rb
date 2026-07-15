@@ -51,6 +51,56 @@ RSpec.describe ActiveMutator::CLI do
       expect(described_class.parse(%w[--no-preload-helper]).preload_helper).to eq(:none)
     end
 
+    it "parses --format stryker-json" do
+      expect(described_class.parse(["--format", "stryker-json"]).format).to eq(:stryker_json)
+    end
+
+    it "defaults jobs to half the CPU count, minimum 1" do
+      allow(Etc).to receive(:nprocessors).and_return(8)
+      expect(described_class.parse([]).jobs).to eq(4)
+      allow(Etc).to receive(:nprocessors).and_return(1)
+      expect(described_class.parse([]).jobs).to eq(1)
+    end
+
+    it "documents every option in --help" do
+      out = StringIO.new
+      orig = $stdout
+      $stdout = out
+      begin
+        expect { described_class.parse(["--help"]) }.to raise_error(SystemExit)
+      ensure
+        $stdout = orig
+      end
+      help = out.string
+      expect(help).to include("Usage: active_mutator [paths] [options]")
+      [
+        "Mutate only methods changed since git REF",
+        "Mutate uncommitted work (alias for --since HEAD, plus untracked files)",
+        "Mutate matching subjects: Foo::Bar#baz, Foo::Bar, Foo::Bar*, Foo::Bar#*",
+        "Concurrent workers (default: half the CPU count)",
+        "Output format",
+        "File to require before mutating (repeatable)",
+        "Ignore cached coverage map",
+        "Timeout = baseline time * F + floor",
+        "Minimum timeout seconds",
+        "Spec helper to preload in the parent (default: auto-detect)",
+        "Skip spec-helper preload",
+        "Covering-path prefix that forces the serial lane (repeatable; replaces defaults on first use)",
+        "Extra timeout budget for serial-lane mutants",
+        "Record surviving mutants into the acceptance ledger",
+        "Skip files matching glob, relative to root (repeatable)",
+        "Deterministically sample the first N mutants",
+        "Print the planned mutant list as JSON and exit"
+      ].each { |desc| expect(help).to include(desc) }
+    end
+
+    it "accumulates repeated --serial-pattern flags after replacing the defaults" do
+      config = described_class.parse(
+        %w[--serial-pattern spec/browser/ --serial-pattern spec/slow/]
+      )
+      expect(config.serial_patterns).to eq(["spec/browser/", "spec/slow/"])
+    end
+
     it "aliases --changed to --since HEAD" do
       expect(described_class.parse(%w[--changed]).since).to eq("HEAD")
     end

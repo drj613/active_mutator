@@ -55,6 +55,12 @@ RSpec.describe ActiveMutator::Runner do
     expect(items.first.timeout).to eq(1.0 * 4.0 + 2.0 + 15.0)
   end
 
+  it "builds a StrykerJson reporter for :stryker_json format" do
+    stryker_config = config.with(format: :stryker_json)
+    reporter = described_class.new(stryker_config).instance_variable_get(:@reporter)
+    expect(reporter).to be_a(ActiveMutator::Reporter::StrykerJson)
+  end
+
   it "exits 1 when mutants survive, 0 otherwise" do
     survived = ActiveMutator::Result.new(mutation: mutation, status: :survived, details: nil)
     killed = ActiveMutator::Result.new(mutation: mutation, status: :killed, details: nil)
@@ -262,6 +268,128 @@ RSpec.describe ActiveMutator::Runner do
       items, pre_results = runner.plan_work([m], map, ledger: ledger, fingerprints: fps)
       expect(items).to eq([])
       expect(pre_results.map(&:status)).to eq([:accepted])
+    end
+  end
+
+  describe "#call" do
+    let(:recording_reporter_class) do
+      Class.new do
+        attr_reader :events, :summary_results, :summary_invalid_count, :coverage_map
+
+        def initialize
+          @events = []
+        end
+
+        def coverage_map=(map)
+          @coverage_map = map
+        end
+
+        def on_result(result)
+          @events << result
+        end
+
+        def summary(results, invalid_count:)
+          @summary_results = results
+          @summary_invalid_count = invalid_count
+        end
+      end
+    end
+
+    let(:reporter) { recording_reporter_class.new }
+    let(:map) { instance_double(ActiveMutator::CoverageMap, time_for: 0.1) }
+
+    around do |ex|
+      saved = ENV.to_h.slice("ACTIVE_MUTATOR", "RAILS_ENV")
+      ENV.delete("ACTIVE_MUTATOR")
+      ENV.delete("RAILS_ENV")
+      Dir.mktmpdir do |root|
+        @root = root
+        FileUtils.mkdir_p(File.join(root, "lib"))
+        File.write(File.join(root, "lib", "a.rb"), "class A\n  def x\n    1 > 0\n  end\nend\n")
+        FileUtils.mkdir_p(File.join(root, "spec"))
+        File.write(File.join(root, "spec", "spec_helper.rb"), "$am_call_helper_loaded = true\n")
+        ex.run
+      end
+    ensure
+      ENV.delete("ACTIVE_MUTATOR")
+      ENV.delete("RAILS_ENV")
+      saved.each { |k, v| ENV[k] = v }
+    end
+
+    before do
+      allow(ActiveMutator::Baseline)
+        .to receive(:new).and_return(instance_double(ActiveMutator::Baseline, coverage_map: map))
+      allow(ActiveMutator::Scheduler)
+        .to receive(:new).and_return(instance_double(ActiveMutator::Scheduler, run: []))
+    end
+
+    def call_runner(**overrides)
+      described_class.new(config.with(root: @root, **overrides), reporter: reporter).call
+    end
+
+    it "wires the process env, preloads, injects the coverage map and reports" do
+      allow(map).to receive(:examples_for).and_return([])
+      code = call_runner
+      expect(ENV.fetch("ACTIVE_MUTATOR")).to eq("1")
+      expect(ENV.fetch("RAILS_ENV")).to eq("test")
+      expect($am_call_helper_loaded).to be(true)
+      expect(reporter.coverage_map).to be(map)
+      expect(reporter.events).not_to be_empty
+      expect(reporter.events.map(&:status).uniq).to eq([:uncovered])
+      expect(reporter.summary_results).to eq(reporter.events)
+      expect(reporter.summary_invalid_count).to eq(0)
+      expect(code).to eq(0)
+      expect(File).not_to exist(File.join(@root, ActiveMutator::AcceptedLedger::FILENAME))
+    end
+
+    it "returns 1 when scheduled mutants survive" do
+      allow(map).to receive(:examples_for).and_return(["./spec/a_spec.rb[1:1]"])
+      survived = ActiveMutator::Result.new(mutation: mutation, status: :survived, details: nil)
+      allow(ActiveMutator::Scheduler)
+        .to receive(:new).and_return(instance_double(ActiveMutator::Scheduler, run: [survived]))
+      expect(call_runner).to eq(1)
+      expect(File).not_to exist(File.join(@root, ActiveMutator::AcceptedLedger::FILENAME))
+    end
+
+    it "records survivors into the ledger with --accept-survivors" do
+      allow(map).to receive(:examples_for).and_return(["./spec/a_spec.rb[1:1]"])
+      allow(ActiveMutator::Scheduler).to receive(:new) do |**|
+        instance_double(ActiveMutator::Scheduler).tap do |s|
+          allow(s).to receive(:run) do |items|
+            items.map { |i| ActiveMutator::Result.new(mutation: i.mutation, status: :survived, details: nil) }
+          end
+        end
+      end
+      call_runner(accept_survivors: true)
+      ledger_path = File.join(@root, ActiveMutator::AcceptedLedger::FILENAME)
+      expect(File).to exist(ledger_path)
+      expect(JSON.parse(File.read(ledger_path))).not_to be_empty
+    end
+
+    it "warns about stale accepted fingerprints" do
+      allow(map).to receive(:examples_for).and_return([])
+      stale = { "file" => "lib/gone.rb", "subject" => "Gone#away", "description" => "d",
+                "original_snippet" => "x", "ordinal" => 0 }
+      File.write(File.join(@root, ActiveMutator::AcceptedLedger::FILENAME), JSON.generate([stale]))
+      expect { call_runner }.to output(/stale accepted fingerprint.*Gone#away/).to_stderr
+    end
+
+    it "prints the plan and skips execution with --debug-plan" do
+      allow(map).to receive(:examples_for).and_return(["./spec/a_spec.rb[1:1]"])
+      code = nil
+      out = StringIO.new
+      orig = $stdout
+      $stdout = out
+      begin
+        code = call_runner(debug_plan: true)
+      ensure
+        $stdout = orig
+      end
+      expect(code).to eq(0)
+      expect(ActiveMutator::Scheduler).not_to have_received(:new)
+      plan = JSON.parse(out.string)
+      expect(plan["planned"]).not_to be_empty
+      expect(reporter.summary_results).to be_nil
     end
   end
 end
