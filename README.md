@@ -163,7 +163,8 @@ active_mutator --exclude 'lib/generated' # skip a subtree (repeatable)
 ```
 
 `--subject` also takes broader expressions: `Foo::Bar` (all methods of
-that constant), `Foo::Bar*` (namespace prefix), `Foo::Bar#*` (instance
+that constant), `Foo::Bar*` (raw name prefix — matches `Foo::Bar::Qux`
+and also `Foo::Barn`), `Foo::Bar#*` (instance
 methods only), `Foo::Bar.*` (singleton methods only).
 
 `--exclude PAT` is a glob relative to the project root, applied during
@@ -222,7 +223,7 @@ Agent workflow: see [`docs/skills/mutation-check.md`](docs/skills/mutation-check
 | `--since REF` | none | mutate methods changed since REF |
 | `--subject EXPR` | none | subject expression, e.g. `Foo#bar`, `Foo::Bar`, `Foo::Bar*`, `Foo#*`, `Foo.*` |
 | `--exclude PAT` | none | skip files matching glob during subject discovery (repeatable, gitignore-like) |
-| `--max-mutants N` | none | deterministic sample of the first N mutants (quick smoke run on huge scopes) |
+| `--max-mutants N` | none | deterministic sample of the first N mutants (quick smoke run on huge scopes; accepted/uncovered mutants count against N) |
 | `--debug-plan` | off | print planned mutants as JSON and exit without running |
 | `--format terminal\|json` | terminal | report format |
 | `--accept-survivors` | off | record survivors to the acceptance ledger |

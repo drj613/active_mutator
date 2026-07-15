@@ -1,6 +1,6 @@
 # active_mutator Issue Backlog Roadmap (Phases 1–6)
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** Close all 22 open GitHub issues in six phases, each phase gated by TDD, a self-mutation run, and a dogfood run on payint's `active-mutator-poc` branch.
 
@@ -55,7 +55,7 @@ Phases 2–6: at phase start, run superpowers:writing-plans again to produce `do
 **Files:**
 - Create: `docs/dogfood-log.md`
 
-- [ ] **Step 1: Capture pre-change baseline on payint**
+- [x] **Step 1: Capture pre-change baseline on payint**
 
 ```bash
 cd ~/Documents/enovis/payint
@@ -63,7 +63,7 @@ git status   # confirm branch active-mutator-poc, note dirty files
 time bundle exec active_mutator app/models
 ```
 
-- [ ] **Step 2: Record it**
+- [x] **Step 2: Record it**
 
 Create `docs/dogfood-log.md` in active_mutator:
 
@@ -75,7 +75,7 @@ Create `docs/dogfood-log.md` in active_mutator:
 | 2026-07-15 | pre-1 | active_mutator app/models | <fill> | <fill> | <fill> | baseline before fail-fast |
 ```
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 cd ~/Documents/enovis/active_mutator
@@ -92,7 +92,7 @@ git add docs/dogfood-log.md && git commit -m "docs: start dogfood log for payint
 
 **Design note:** set `RSpec.configuration.fail_fast = 1` after `runner.setup` and before `runner.run_specs`. Kill semantics unchanged: `run_specs` still returns non-zero on the first failure, so `killed` vs `survived` mapping at `worker.rb:30` is untouched. The parent-side process-group KILL timeout path lives in the Scheduler, not the Worker — fail-fast only makes the fork exit *sooner*, never later, so the timeout path is unaffected (verify in Step 5).
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Add to `spec/active_mutator/worker_spec.rb` (follow the existing stubbing style in that file — it stubs `RSpec::Core::Runner`):
 
@@ -112,14 +112,14 @@ end
 
 (Adapt `runner`/`mutation`/`example_ids`/`writer` let-blocks to the file's existing setup; if the file has none for the runner, stub `RSpec::Core::Runner.new` to return an instance double with `setup` and `run_specs`.)
 
-- [ ] **Step 2: Run test, verify it fails**
+- [x] **Step 2: Run test, verify it fails**
 
 ```bash
 bundle exec rspec spec/active_mutator/worker_spec.rb -e "fail_fast"
 ```
 Expected: FAIL — `fail_fast_seen` is `nil`/`false`.
 
-- [ ] **Step 3: Minimal implementation**
+- [x] **Step 3: Minimal implementation**
 
 In `Worker#run`, after `runner.setup(devnull, devnull)`:
 
@@ -131,14 +131,14 @@ In `Worker#run`, after `runner.setup(devnull, devnull)`:
       Inserter.new.insert(@mutation)   # now the target constant exists
 ```
 
-- [ ] **Step 4: Run full suite**
+- [x] **Step 4: Run full suite**
 
 ```bash
 bundle exec rspec
 ```
 Expected: PASS. Pay attention to `spec/e2e/` — those exercise real forks and prove killed/survived/timeout exit semantics still hold.
 
-- [ ] **Step 5: Verify timeout path untouched**
+- [x] **Step 5: Verify timeout path untouched**
 
 ```bash
 bundle exec rspec spec/active_mutator/scheduler_spec.rb
@@ -146,7 +146,7 @@ ACTIVE_MUTATOR_E2E=1 bundle exec rspec spec/e2e   # e2e specs are env-gated (see
 ```
 Expected: PASS (timeout kill via process group unchanged). If the gate var differs, check `spec/spec_helper.rb` for the exact `ACTIVE_MUTATOR_*` names.
 
-- [ ] **Step 6: Self-mutation + dogfood timing**
+- [x] **Step 6: Self-mutation + dogfood timing**
 
 ```bash
 bundle exec exe/active_mutator lib --changed   # NOTE: positional args are directories, not files
@@ -154,7 +154,7 @@ cd ~/Documents/enovis/payint && time bundle exec active_mutator app/models --sub
 ```
 Expected: exit 0; payint wall time ≤ Task 0 baseline (should improve on multi-example covering sets). Log the row in `docs/dogfood-log.md`.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add lib/active_mutator/worker.rb spec/active_mutator/worker_spec.rb docs/dogfood-log.md
@@ -171,7 +171,7 @@ Closes #18"
 - Modify: `lib/active_mutator/cli.rb:13-47`, `lib/active_mutator/config.rb`, `lib/active_mutator/runner.rb:77-88` (`discover_subjects`)
 - Test: `spec/active_mutator/cli_spec.rb`, `spec/active_mutator/runner_spec.rb`
 
-- [ ] **Step 1: Failing CLI test**
+- [x] **Step 1: Failing CLI test**
 
 ```ruby
 it "collects repeatable --exclude patterns" do
@@ -184,9 +184,9 @@ it "defaults exclude to empty" do
 end
 ```
 
-- [ ] **Step 2: Run, verify fail** — `bundle exec rspec spec/active_mutator/cli_spec.rb` → FAIL (no `exclude` key).
+- [x] **Step 2: Run, verify fail** — `bundle exec rspec spec/active_mutator/cli_spec.rb` → FAIL (no `exclude` key).
 
-- [ ] **Step 3: Implement CLI + Config**
+- [x] **Step 3: Implement CLI + Config**
 
 `cli.rb` defaults hash: add `exclude: [],`. Option:
 
@@ -196,7 +196,7 @@ o.on("--exclude PAT", "Skip files matching glob, relative to root (repeatable)")
 
 `config.rb`: add `exclude` to the Config members (mirror how `requires` is declared).
 
-- [ ] **Step 4: Failing Runner test**
+- [x] **Step 4: Failing Runner test**
 
 In `spec/active_mutator/runner_spec.rb`, near existing `discover_subjects`/`plan_work` tests:
 
@@ -213,7 +213,7 @@ it "drops files matching exclude globs during discovery" do
 end
 ```
 
-- [ ] **Step 5: Implement in `discover_subjects`**
+- [x] **Step 5: Implement in `discover_subjects`**
 
 After the glob, before `SubjectFinder.call`:
 
@@ -235,14 +235,14 @@ New private method:
     end
 ```
 
-- [ ] **Step 6: Full suite + self-mutation**
+- [x] **Step 6: Full suite + self-mutation**
 
 ```bash
 bundle exec rspec && bundle exec exe/active_mutator lib --changed
 ```
 Expected: green, exit 0. (Self-mutation here directly stress-tests the new code: `excluded?` boundary mutants like `any?`→`none?` must die.)
 
-- [ ] **Step 7: Dogfood on payint**
+- [x] **Step 7: Dogfood on payint**
 
 ```bash
 cd ~/Documents/enovis/payint
@@ -250,7 +250,7 @@ bundle exec active_mutator app/models --exclude "app/models/concerns/**" --subje
 ```
 Expected: runs; a second run with `--exclude "app/models/document*"` finds 0 subjects.
 
-- [ ] **Step 8: Commit** — `git commit -m "feat: --exclude path globs in subject discovery" -m "Closes #7"` (with the four touched files).
+- [x] **Step 8: Commit** — `git commit -m "feat: --exclude path globs in subject discovery" -m "Closes #7"` (with the four touched files).
 
 ---
 
@@ -262,7 +262,7 @@ Expected: runs; a second run with `--exclude "app/models/document*"` finds 0 sub
 
 **Design:** marker `# active_mutator:skip` on the line directly above `def` (or above `def`'s first decorator-free line). Prism supplies comments via `Prism.parse(...).comments`.
 
-- [ ] **Step 1: Failing test**
+- [x] **Step 1: Failing test**
 
 ```ruby
 it "skips a def annotated with active_mutator:skip on the previous line" do
@@ -291,9 +291,9 @@ end
 
 (Use the spec file's existing fixture-writing helper; if none, `Tempfile`.)
 
-- [ ] **Step 2: Run, verify FAIL** — both subjects currently returned.
+- [x] **Step 2: Run, verify FAIL** — both subjects currently returned.
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 ```ruby
     SKIP_MARKER = /#\s*active_mutator:\s*skip\b/
@@ -325,13 +325,13 @@ In `visit_def_node`, first line:
 
 (`require "set"` at top if not already loaded.)
 
-- [ ] **Step 4: Full suite + self-mutation** — `bundle exec rspec && bundle exec exe/active_mutator lib --changed` → green, exit 0.
+- [x] **Step 4: Full suite + self-mutation** — `bundle exec rspec && bundle exec exe/active_mutator lib --changed` → green, exit 0.
 
-- [ ] **Step 5: Dogfood** — on payint, annotate one method in a POC-branch file, run `bundle exec active_mutator <that file>`, confirm subject absent; revert the annotation.
+- [x] **Step 5: Dogfood** — on payint, annotate one method in a POC-branch file, run `bundle exec active_mutator <that file>`, confirm subject absent; revert the annotation.
 
-- [ ] **Step 6: Document** — README subject-filters section: add the marker with one example.
+- [x] **Step 6: Document** — README subject-filters section: add the marker with one example.
 
-- [ ] **Step 7: Commit** — `"feat: per-method opt-out via # active_mutator:skip comment" / "Closes #1"`.
+- [x] **Step 7: Commit** — `"feat: per-method opt-out via # active_mutator:skip comment" / "Closes #1"`.
 
 ---
 
@@ -348,7 +348,7 @@ In `visit_def_node`, first line:
 - `Foo::Bar*` — namespace prefix (matches `Foo::Bar`, `Foo::Barn`, `Foo::Bar::Qux#m`)
 - `Foo::Bar#*` — instance methods only; `Foo::Bar.*` — singleton methods only
 
-- [ ] **Step 1: Failing tests**
+- [x] **Step 1: Failing tests**
 
 ```ruby
 RSpec.describe ActiveMutator::SubjectMatcher do
@@ -367,9 +367,9 @@ RSpec.describe ActiveMutator::SubjectMatcher do
 end
 ```
 
-- [ ] **Step 2: Run, verify FAIL** (uninitialized constant).
+- [x] **Step 2: Run, verify FAIL** (uninitialized constant).
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 ```ruby
 module ActiveMutator
@@ -408,11 +408,11 @@ Runner filter line becomes:
 
 CLI help text: `"Mutate matching subjects: Foo::Bar#baz, Foo::Bar, Foo::Bar*, Foo::Bar#*"`.
 
-- [ ] **Step 4: Full suite + self-mutation** — green, exit 0. Regex-compile mutants (`.+`→`.*`, anchors) are prime survivor candidates; kill any with added examples rather than accepting.
+- [x] **Step 4: Full suite + self-mutation** — green, exit 0. Regex-compile mutants (`.+`→`.*`, anchors) are prime survivor candidates; kill any with added examples rather than accepting.
 
-- [ ] **Step 5: Dogfood** — payint: `bundle exec active_mutator app/models --subject "Document#*"` runs all instance methods; `--subject "Document"` matches both `#` and `.` subjects.
+- [x] **Step 5: Dogfood** — payint: `bundle exec active_mutator app/models --subject "Document#*"` runs all instance methods; `--subject "Document"` matches both `#` and `.` subjects.
 
-- [ ] **Step 6: Commit** — `"feat: subject expression language for --subject" / "Closes #8"`.
+- [x] **Step 6: Commit** — `"feat: subject expression language for --subject" / "Closes #8"`.
 
 ---
 
@@ -424,7 +424,7 @@ CLI help text: `"Mutate matching subjects: Foo::Bar#baz, Foo::Bar, Foo::Bar*, Fo
 
 **Design:** mutants are already deterministic (files sorted at discovery, operators walk the AST in order), so `--max-mutants N` = `mutations.first(N)` after analysis, before ledger/planning. `--debug-plan` prints one JSON object per planned mutant (subject, description, file, line, lane, timeout, example count) and exits 0 without forking.
 
-- [ ] **Step 1: Failing CLI tests**
+- [x] **Step 1: Failing CLI tests**
 
 ```ruby
 it "parses --max-mutants" do
@@ -436,7 +436,7 @@ it "parses --debug-plan" do
 end
 ```
 
-- [ ] **Step 2: FAIL, then implement CLI/Config**
+- [x] **Step 2: FAIL, then implement CLI/Config**
 
 Defaults: `max_mutants: nil, debug_plan: false`. Options:
 
@@ -445,7 +445,7 @@ o.on("--max-mutants N", Integer, "Deterministically sample the first N mutants")
 o.on("--debug-plan", "Print the planned mutant list as JSON and exit") { options[:debug_plan] = true }
 ```
 
-- [ ] **Step 3: Failing Runner tests**
+- [x] **Step 3: Failing Runner tests**
 
 ```ruby
 it "caps mutations at max_mutants before planning" # build 3 mutations, config max_mutants: 2, assert plan_work receives 2
@@ -454,7 +454,7 @@ it "debug_plan prints items as JSON and skips the scheduler" # assert Scheduler 
 
 Write these against `Runner#call` with stubbed collaborators, matching the stubbing style already in `runner_spec.rb`.
 
-- [ ] **Step 4: Implement in `Runner#call`**
+- [x] **Step 4: Implement in `Runner#call`**
 
 After `mutations = analyses.flat_map(&:mutations)`:
 
@@ -484,20 +484,20 @@ New private method:
     end
 ```
 
-- [ ] **Step 5: Full suite + self-mutation** — green, exit 0.
+- [x] **Step 5: Full suite + self-mutation** — green, exit 0.
 
-- [ ] **Step 6: Dogfood** — payint: `bundle exec active_mutator app/models --debug-plan` shows plan instantly; `--max-mutants 5` runs exactly 5.
+- [x] **Step 6: Dogfood** — payint: `bundle exec active_mutator app/models --debug-plan` shows plan instantly; `--max-mutants 5` runs exactly 5.
 
-- [ ] **Step 7: Commit** — `"feat: --max-mutants sampling and --debug-plan dry run" / "Refs #22"` (issue stays open for config file + --fail-at).
+- [x] **Step 7: Commit** — `"feat: --max-mutants sampling and --debug-plan dry run" / "Refs #22"` (issue stays open for config file + --fail-at).
 
 ---
 
 ### Task 6: Phase 1 close-out
 
-- [ ] Full payint dogfood: `cd ~/Documents/enovis/payint && bundle exec active_mutator --changed` on the POC branch; log wall time/score row.
-- [ ] `bundle exec exe/active_mutator lib` (full self-run, not `--changed`) — exit 0 or every survivor triaged (killed with a new test, or accepted with ledger reason).
-- [ ] Close #18, #7, #1, #8 on GitHub; comment progress on #22.
-- [ ] Update README: `--exclude`, skip comment, subject expressions, `--max-mutants`, `--debug-plan`.
+- [x] Full payint dogfood: `cd ~/Documents/enovis/payint && bundle exec active_mutator --changed` on the POC branch; log wall time/score row.
+- [x] `bundle exec exe/active_mutator lib` (full self-run, not `--changed`) — exit 0 or every survivor triaged (killed with a new test, or accepted with ledger reason).
+- [x] Close #18, #7, #1, #8 on GitHub; comment progress on #22.
+- [x] Update README: `--exclude`, skip comment, subject expressions, `--max-mutants`, `--debug-plan`.
 
 ---
 
