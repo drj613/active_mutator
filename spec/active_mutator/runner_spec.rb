@@ -109,6 +109,61 @@ RSpec.describe ActiveMutator::Runner do
         expect(subjects.map(&:name)).to eq(["Keep#a"])
       end
     end
+
+    it "excludes nested files under a dir/** pattern" do
+      Dir.mktmpdir do |dir|
+        FileUtils.mkdir_p(File.join(dir, "lib", "generated", "a"))
+        File.write(File.join(dir, "lib", "keep.rb"), "class Keep; def a; 1; end; end")
+        File.write(File.join(dir, "lib", "generated", "a", "deep.rb"), "class Deep; def a; 1; end; end")
+
+        runner = described_class.new(config.with(root: dir, exclude: ["lib/generated/**"]))
+        expect(runner.send(:discover_subjects).map(&:name)).to eq(["Keep#a"])
+      end
+    end
+
+    it "treats a bare directory pattern as excluding everything beneath it" do
+      Dir.mktmpdir do |dir|
+        FileUtils.mkdir_p(File.join(dir, "lib", "generated", "a"))
+        File.write(File.join(dir, "lib", "keep.rb"), "class Keep; def a; 1; end; end")
+        File.write(File.join(dir, "lib", "generated", "skip.rb"), "class Skip; def a; 1; end; end")
+        File.write(File.join(dir, "lib", "generated", "a", "deep.rb"), "class Deep; def a; 1; end; end")
+
+        runner = described_class.new(config.with(root: dir, exclude: ["lib/generated"]))
+        expect(runner.send(:discover_subjects).map(&:name)).to eq(["Keep#a"])
+      end
+    end
+
+    it "supports plain file globs like **/legacy/*" do
+      Dir.mktmpdir do |dir|
+        FileUtils.mkdir_p(File.join(dir, "lib", "legacy"))
+        File.write(File.join(dir, "lib", "keep.rb"), "class Keep; def a; 1; end; end")
+        File.write(File.join(dir, "lib", "legacy", "old.rb"), "class Old; def a; 1; end; end")
+
+        runner = described_class.new(config.with(root: dir, exclude: ["**/legacy/*"]))
+        expect(runner.send(:discover_subjects).map(&:name)).to eq(["Keep#a"])
+      end
+    end
+
+    it "excludes correctly when root has a trailing slash" do
+      Dir.mktmpdir do |dir|
+        FileUtils.mkdir_p(File.join(dir, "lib", "generated"))
+        File.write(File.join(dir, "lib", "keep.rb"), "class Keep; def a; 1; end; end")
+        File.write(File.join(dir, "lib", "generated", "skip.rb"), "class Skip; def a; 1; end; end")
+
+        runner = described_class.new(config.with(root: "#{dir}/", exclude: ["lib/generated"]))
+        expect(runner.send(:discover_subjects).map(&:name)).to eq(["Keep#a"])
+      end
+    end
+
+    it "keeps files that match no exclude pattern" do
+      Dir.mktmpdir do |dir|
+        FileUtils.mkdir_p(File.join(dir, "lib"))
+        File.write(File.join(dir, "lib", "keep.rb"), "class Keep; def a; 1; end; end")
+
+        runner = described_class.new(config.with(root: dir, exclude: ["lib/generated"]))
+        expect(runner.send(:discover_subjects).map(&:name)).to eq(["Keep#a"])
+      end
+    end
   end
 
   describe "acceptance integration" do

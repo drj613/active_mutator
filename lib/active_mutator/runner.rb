@@ -89,9 +89,14 @@ module ActiveMutator
     end
 
     def excluded?(file)
-      relative = file.delete_prefix("#{@config.root}/")
+      flags = File::FNM_PATHNAME | File::FNM_EXTGLOB
+      relative = file.delete_prefix(@config.root.chomp("/") + "/")
       @config.exclude.any? do |pattern|
-        File.fnmatch?(pattern, relative, File::FNM_PATHNAME | File::FNM_EXTGLOB)
+        # Gitignore-like ergonomics: "lib/gen", "lib/gen/" and "lib/gen/**"
+        # all exclude the whole subtree, not just direct children.
+        dir = pattern.sub(%r{(/\*\*)?/?\z}, "")
+        File.fnmatch?(pattern, relative, flags) ||
+          File.fnmatch?("#{dir}/**/*", relative, flags)
       end
     end
 
