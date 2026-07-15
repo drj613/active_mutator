@@ -1,3 +1,5 @@
+require "json"
+
 module ActiveMutator
   class Runner
     def initialize(config, reporter: nil)
@@ -13,6 +15,7 @@ module ActiveMutator
       subjects = discover_subjects
       analyses = subjects.map { |s| Engine.new.analyze(s) }
       mutations = analyses.flat_map(&:mutations)
+      mutations = mutations.first(@config.max_mutants) if @config.max_mutants
       invalid_count = analyses.sum(&:invalid_count)
 
       fingerprints = Fingerprint.for_mutations(mutations, root: @config.root)
@@ -20,6 +23,8 @@ module ActiveMutator
       warn_stale(ledger, fingerprints.values)
 
       items, pre_results = plan_work(mutations, map, ledger: ledger, fingerprints: fingerprints)
+      return debug_plan(items, pre_results) if @config.debug_plan
+
       pre_results.each { |r| @reporter.on_result(r) }
       scheduler = Scheduler.new(jobs: @config.jobs, on_result: @reporter.method(:on_result))
       results = scheduler.run(items) + pre_results
@@ -148,6 +153,18 @@ module ActiveMutator
       return if survivors.empty?
 
       ledger.accept!(survivors, fingerprints.values)
+    end
+
+    def debug_plan(items, pre_results)
+      plan = items.map do |i|
+        { "subject" => i.mutation.subject.name, "description" => i.mutation.description,
+          "file" => i.mutation.subject.file, "line" => i.mutation.line,
+          "lane" => i.lane.to_s, "timeout" => i.timeout.round(2),
+          "examples" => i.example_ids.size }
+      end
+      skipped = pre_results.group_by { |r| r.status.to_s }.transform_values(&:size)
+      puts JSON.pretty_generate("planned" => plan, "pre_resolved" => skipped)
+      0
     end
 
     def warn_stale(ledger, all_fingerprints)

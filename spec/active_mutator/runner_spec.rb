@@ -7,7 +7,8 @@ RSpec.describe ActiveMutator::Runner do
       paths: ["lib"], since: nil, subject_filter: nil, jobs: 2, format: :terminal,
       requires: [], timeout_factor: 4.0, timeout_floor: 2.0, force_baseline: false,
       root: "/project", preload_helper: nil, serial_patterns: ["spec/system/", "spec/features/"],
-      browser_boot_seconds: 15.0, accept_survivors: false, exclude: []
+      browser_boot_seconds: 15.0, accept_survivors: false, exclude: [],
+      max_mutants: nil, debug_plan: false
     )
   end
 
@@ -183,6 +184,66 @@ RSpec.describe ActiveMutator::Runner do
         runner = described_class.new(config.with(root: dir, subject_filter: nil))
         expect(runner.send(:discover_subjects).map(&:name)).to contain_exactly("Keep#a", "Keep#b")
       end
+    end
+  end
+
+  describe "#call" do
+    def stub_call_collaborators(runner, mutations)
+      allow(runner).to receive(:discover_subjects).and_return([subject_])
+      analysis = ActiveMutator::Analysis.new(mutations: mutations, invalid_count: 0)
+      engine = instance_double(ActiveMutator::Engine, analyze: analysis)
+      allow(ActiveMutator::Engine).to receive(:new).and_return(engine)
+      map = instance_double(ActiveMutator::CoverageMap)
+      allow(map).to receive(:examples_for).and_return(["./spec/a_spec.rb[1:1]"])
+      allow(map).to receive(:time_for).and_return(0.1)
+      baseline = instance_double(ActiveMutator::Baseline, coverage_map: map)
+      allow(ActiveMutator::Baseline).to receive(:new).and_return(baseline)
+    end
+
+    it "caps mutations at max_mutants before planning" do
+      Dir.mktmpdir do |dir|
+        mutations = [mutation(line: 1), mutation(line: 2), mutation(line: 3)]
+        cfg = config.with(root: dir, max_mutants: 2)
+        runner = described_class.new(cfg)
+        stub_call_collaborators(runner, mutations)
+        scheduler = instance_double(ActiveMutator::Scheduler, run: [])
+        allow(ActiveMutator::Scheduler).to receive(:new).and_return(scheduler)
+
+        runner.call
+
+        expect(scheduler).to have_received(:run) do |items|
+          expect(items.map { |i| i.mutation.line }).to eq([1, 2])
+        end
+      end
+    end
+
+    it "debug_plan prints planned items as JSON and returns 0 without scheduling" do
+      Dir.mktmpdir do |dir|
+        mutations = [mutation(line: 1), mutation(line: 2)]
+        cfg = config.with(root: dir, debug_plan: true)
+        runner = described_class.new(cfg)
+        stub_call_collaborators(runner, mutations)
+        expect(ActiveMutator::Scheduler).not_to receive(:new)
+
+        result = nil
+        output = capture_stdout { result = runner.call }
+
+        expect(result).to eq(0)
+        parsed = JSON.parse(output)
+        expect(parsed["planned"].size).to eq(2)
+        item = parsed["planned"].first
+        expect(item.keys).to contain_exactly("subject", "description", "file", "line", "lane", "timeout", "examples")
+        expect(parsed["pre_resolved"]).to eq({})
+      end
+    end
+
+    def capture_stdout
+      original = $stdout
+      $stdout = StringIO.new
+      yield
+      $stdout.string
+    ensure
+      $stdout = original
     end
   end
 

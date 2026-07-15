@@ -63,6 +63,22 @@ RSpec.describe ActiveMutator::CLI do
     it "defaults exclude to empty" do
       expect(described_class.parse([]).exclude).to eq([])
     end
+
+    it "parses --max-mutants" do
+      expect(described_class.parse(["--max-mutants", "50"]).max_mutants).to eq(50)
+    end
+
+    it "defaults max_mutants to nil" do
+      expect(described_class.parse([]).max_mutants).to be_nil
+    end
+
+    it "parses --debug-plan" do
+      expect(described_class.parse(["--debug-plan"]).debug_plan).to be true
+    end
+
+    it "defaults debug_plan to false" do
+      expect(described_class.parse([]).debug_plan).to be false
+    end
   end
 
   describe ".run" do
