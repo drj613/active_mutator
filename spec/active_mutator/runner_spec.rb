@@ -204,7 +204,8 @@ RSpec.describe ActiveMutator::Runner do
       Dir.mktmpdir do |dir|
         mutations = [mutation(line: 1), mutation(line: 2), mutation(line: 3)]
         cfg = config.with(root: dir, max_mutants: 2)
-        runner = described_class.new(cfg)
+        reporter = instance_double(ActiveMutator::Reporter::Terminal, on_result: nil, summary: nil)
+        runner = described_class.new(cfg, reporter: reporter)
         stub_call_collaborators(runner, mutations)
         scheduler = instance_double(ActiveMutator::Scheduler, run: [])
         allow(ActiveMutator::Scheduler).to receive(:new).and_return(scheduler)
