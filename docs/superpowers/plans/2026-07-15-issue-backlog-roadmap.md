@@ -24,7 +24,7 @@ Expected: exit 0 (no unaccepted survivors in the code you just wrote). A survivo
 **Dogfood gate (end of each phase):**
 ```bash
 cd ~/Documents/enovis/payint   # branch: active-mutator-poc
-bundle exec active_mutator app/models/document.rb --subject "Document#size_category"   # smoke: known-good subject
+bundle exec active_mutator app/models --subject "Document#size_category"   # smoke: known-good subject
 bundle exec active_mutator --changed                                                    # exercise the new feature on real diff
 ```
 Record wall time + score in `docs/dogfood-log.md` (create in Phase 1, Task 0). Any regression vs the previous phase's entry blocks phase close.
@@ -60,7 +60,7 @@ Phases 2–6: at phase start, run superpowers:writing-plans again to produce `do
 ```bash
 cd ~/Documents/enovis/payint
 git status   # confirm branch active-mutator-poc, note dirty files
-time bundle exec active_mutator app/models/document.rb
+time bundle exec active_mutator app/models
 ```
 
 - [ ] **Step 2: Record it**
@@ -72,7 +72,7 @@ Create `docs/dogfood-log.md` in active_mutator:
 
 | Date | Phase | Command | Wall time | Score | Survivors | Notes |
 |---|---|---|---|---|---|---|
-| 2026-07-15 | pre-1 | active_mutator app/models/document.rb | <fill> | <fill> | <fill> | baseline before fail-fast |
+| 2026-07-15 | pre-1 | active_mutator app/models | <fill> | <fill> | <fill> | baseline before fail-fast |
 ```
 
 - [ ] **Step 3: Commit**
@@ -149,8 +149,8 @@ Expected: PASS (timeout kill via process group unchanged). If the gate var diffe
 - [ ] **Step 6: Self-mutation + dogfood timing**
 
 ```bash
-bundle exec exe/active_mutator lib/active_mutator/worker.rb
-cd ~/Documents/enovis/payint && time bundle exec active_mutator app/models/document.rb
+bundle exec exe/active_mutator lib --changed   # NOTE: positional args are directories, not files
+cd ~/Documents/enovis/payint && time bundle exec active_mutator app/models --subject "Document#size_category"
 ```
 Expected: exit 0; payint wall time ≤ Task 0 baseline (should improve on multi-example covering sets). Log the row in `docs/dogfood-log.md`.
 
@@ -410,7 +410,7 @@ CLI help text: `"Mutate matching subjects: Foo::Bar#baz, Foo::Bar, Foo::Bar*, Fo
 
 - [ ] **Step 4: Full suite + self-mutation** — green, exit 0. Regex-compile mutants (`.+`→`.*`, anchors) are prime survivor candidates; kill any with added examples rather than accepting.
 
-- [ ] **Step 5: Dogfood** — payint: `bundle exec active_mutator app/models/document.rb --subject "Document#*"` runs all instance methods; `--subject "Document"` matches both `#` and `.` subjects.
+- [ ] **Step 5: Dogfood** — payint: `bundle exec active_mutator app/models --subject "Document#*"` runs all instance methods; `--subject "Document"` matches both `#` and `.` subjects.
 
 - [ ] **Step 6: Commit** — `"feat: subject expression language for --subject" / "Closes #8"`.
 
@@ -486,7 +486,7 @@ New private method:
 
 - [ ] **Step 5: Full suite + self-mutation** — green, exit 0.
 
-- [ ] **Step 6: Dogfood** — payint: `bundle exec active_mutator app/models/document.rb --debug-plan` shows plan instantly; `--max-mutants 5` runs exactly 5.
+- [ ] **Step 6: Dogfood** — payint: `bundle exec active_mutator app/models --debug-plan` shows plan instantly; `--max-mutants 5` runs exactly 5.
 
 - [ ] **Step 7: Commit** — `"feat: --max-mutants sampling and --debug-plan dry run" / "Refs #22"` (issue stays open for config file + --fail-at).
 
