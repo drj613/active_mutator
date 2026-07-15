@@ -19,5 +19,12 @@
     "description": "delete `after_fork_hygiene`",
     "original_snippet": "after_fork_hygiene",
     "ordinal": 0
+  },
+  {
+    "file": "lib/active_mutator/subject_finder.rb",
+    "subject": "ActiveMutator::SubjectFinder#initialize",
+    "description": "delete `super()`",
+    "original_snippet": "super()",
+    "ordinal": 0
   }
 ]
