@@ -1,3 +1,5 @@
+require "tmpdir"
+
 RSpec.describe ActiveMutator::CLI do
   describe ".parse" do
     it "builds a default config" do
@@ -132,6 +134,44 @@ RSpec.describe ActiveMutator::CLI do
 
     it "defaults debug_plan to false" do
       expect(described_class.parse([]).debug_plan).to be false
+    end
+  end
+
+  describe "config file layering" do
+    around do |ex|
+      Dir.mktmpdir do |dir|
+        Dir.chdir(dir) { ex.run }
+      end
+    end
+
+    it "seeds defaults from .active_mutator.yml" do
+      File.write(".active_mutator.yml", "jobs: 3\nfail_at: 85\n")
+      config = described_class.parse([])
+      expect(config.jobs).to eq(3)
+      expect(config.fail_at).to eq(85.0)
+    end
+
+    it "lets CLI flags override file values" do
+      File.write(".active_mutator.yml", "jobs: 3\nformat: json\n")
+      config = described_class.parse(["--jobs", "7", "--format", "terminal"])
+      expect(config.jobs).to eq(7)
+      expect(config.format).to eq(:terminal)
+    end
+
+    it "lets --serial-pattern replace file-provided serial_patterns" do
+      File.write(".active_mutator.yml", "serial_patterns:\n  - spec/system/\n")
+      config = described_class.parse(["--serial-pattern", "spec/browser/"])
+      expect(config.serial_patterns).to eq(["spec/browser/"])
+    end
+
+    it "surfaces config file errors as exit code 2 via run" do
+      File.write(".active_mutator.yml", "bogus_key: 1\n")
+      expect { @code = described_class.run([]) }.to output(/unknown config key/).to_stderr
+      expect(@code).to eq(2)
+    end
+
+    it "works with no config file present" do
+      expect(described_class.parse([]).fail_at).to be_nil
     end
   end
 

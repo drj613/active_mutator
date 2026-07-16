@@ -8,7 +8,7 @@ RSpec.describe ActiveMutator::Runner do
       requires: [], timeout_factor: 4.0, timeout_floor: 2.0, force_baseline: false,
       root: "/project", preload_helper: nil, serial_patterns: ["spec/system/", "spec/features/"],
       browser_boot_seconds: 15.0, accept_survivors: false, exclude: [],
-      max_mutants: nil, debug_plan: false
+      max_mutants: nil, debug_plan: false, fail_at: nil
     )
   end
 
