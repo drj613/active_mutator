@@ -36,11 +36,9 @@ jobs:
           ACTIVE_MUTATOR_E2E: "1"
 
   mutation:
-    # Dogfood: mutate the code changed by this PR. Advisory until the
-    # pre-existing survivor backlog is triaged (issue #25) — --since sweeps
-    # whole touched methods into scope, so old gaps would fail PRs that
-    # merely brush those methods. Survivors surface as a warning annotation;
-    # drop the soft-fail (`|| { ... }`) once #25 is closed to make it blocking.
+    # Dogfood: mutate the code changed by this PR. Blocking since #25 closed
+    # the pre-existing survivor backlog (killed with tests or accepted into
+    # the ledger) — any survivor here is a fresh test gap in this PR.
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     steps:
@@ -51,8 +49,5 @@ jobs:
         with:
           ruby-version: "3.4"
           bundler-cache: true
-      - name: Self-mutation on PR diff (advisory)
-        run: |
-          bundle exec exe/active_mutator lib --format github --since "origin/${{ github.base_ref }}" || {
-            echo "::warning title=Surviving mutants::Self-mutation found unaccepted survivors in this PR's diff (advisory until #25 is triaged). See job log."
-          }
+      - name: Self-mutation on PR diff
+        run: bundle exec exe/active_mutator lib --format github --since "origin/${{ github.base_ref }}"
