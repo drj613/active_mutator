@@ -45,7 +45,7 @@ module ActiveMutator
           pre_results << Result.new(mutation: mutation, status: :accepted, details: nil)
           next
         end
-        example_ids = map.examples_for(mutation.subject.file, mutation.lines)
+        example_ids = map.examples_for(mutation.subject.file, coverage_lines(mutation))
         if example_ids.empty?
           pre_results << Result.new(mutation: mutation, status: :uncovered, details: nil)
         else
@@ -63,6 +63,14 @@ module ActiveMutator
     end
 
     private
+
+    # Line coverage attributes multi-line expressions to their statement anchor
+    # line (version-dependently), so a sub-expression mutant's own lines may
+    # carry no coverage at all. Look up the whole subject instead: a mutant must
+    # run against every example covering any line of its method.
+    def coverage_lines(mutation)
+      mutation.lines.to_a | mutation.subject.line_range.to_a
+    end
 
     def build_reporter
       case @config.format

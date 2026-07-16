@@ -31,8 +31,8 @@ RSpec.describe ActiveMutator::Runner do
     covered = mutation(line: 2)
     uncovered = mutation(line: 3)
     map = instance_double(ActiveMutator::CoverageMap)
-    allow(map).to receive(:examples_for).with("/project/lib/a.rb", 2..2).and_return(["./spec/a_spec.rb[1:1]"])
-    allow(map).to receive(:examples_for).with("/project/lib/a.rb", 3..3).and_return([])
+    allow(map).to receive(:examples_for).with("/project/lib/a.rb", [2, 1, 3]).and_return(["./spec/a_spec.rb[1:1]"])
+    allow(map).to receive(:examples_for).with("/project/lib/a.rb", [3, 1, 2]).and_return([])
     allow(map).to receive(:time_for).and_return(0.5)
 
     items, uncovered_results = described_class.new(config).plan_work([covered, uncovered], map)
@@ -53,6 +53,38 @@ RSpec.describe ActiveMutator::Runner do
     items, = described_class.new(config).plan_work([m], map)
     expect(items.first.lane).to eq(:serial)
     expect(items.first.timeout).to eq(1.0 * 4.0 + 2.0 + 15.0)
+  end
+
+  it "plans a mutant whose own line is uncovered when the subject's line range is covered" do
+    # Line coverage attributes multi-line expressions to their anchor line, so
+    # a sub-expression mutant's own line may have no coverage entry at all.
+    m = mutation(line: 2)
+    map = instance_double(ActiveMutator::CoverageMap)
+    allow(map).to receive(:examples_for) do |_file, lines|
+      lines.include?(1) ? ["./spec/a_spec.rb[1:1]"] : []
+    end
+    allow(map).to receive(:time_for).and_return(0.5)
+
+    items, pre_results = described_class.new(config).plan_work([m], map)
+
+    expect(pre_results).to be_empty
+    expect(items.size).to eq(1)
+    expect(items.first.example_ids).to eq(["./spec/a_spec.rb[1:1]"])
+  end
+
+  it "looks up examples for the union of the mutation's lines and the subject's line range" do
+    m = mutation(line: 2)
+    map = instance_double(ActiveMutator::CoverageMap)
+    looked_up = nil
+    allow(map).to receive(:examples_for) do |_file, lines|
+      looked_up = lines.to_a
+      ["./spec/a_spec.rb[1:1]"]
+    end
+    allow(map).to receive(:time_for).and_return(0.5)
+
+    described_class.new(config).plan_work([m], map)
+
+    expect(looked_up).to match_array([1, 2, 3])
   end
 
   it "builds a StrykerJson reporter for :stryker_json format" do
