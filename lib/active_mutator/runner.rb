@@ -103,6 +103,7 @@ module ActiveMutator
       paths = @config.paths.empty? ? default_paths : @config.paths
       subjects = paths
         .flat_map { |p| expand_path_arg(p) }
+        .uniq
         .reject { |file| excluded?(file) }
         .sort.flat_map { |file| SubjectFinder.call(file) }
       if @config.subject_filter
@@ -122,6 +123,8 @@ module ActiveMutator
     def expand_path_arg(path)
       full = File.expand_path(path, @config.root)
       if File.file?(full)
+        raise Error, "not a Ruby file: #{path}" unless full.end_with?(".rb")
+
         [full]
       elsif Dir.exist?(full)
         Dir[File.join(full, "**", "*.rb")]

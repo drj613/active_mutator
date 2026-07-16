@@ -464,6 +464,26 @@ RSpec.describe ActiveMutator::Runner do
       end
     end
 
+    it "raises for a directly named non-Ruby file" do
+      Dir.mktmpdir do |dir|
+        File.write(File.join(dir, "README.md"), "# readme")
+
+        runner = described_class.new(config.with(root: dir, paths: ["README.md"]))
+        expect { runner.send(:discover_subjects) }
+          .to raise_error(ActiveMutator::Error, /not a Ruby file/)
+      end
+    end
+
+    it "yields each subject once when a file arg overlaps a directory arg" do
+      Dir.mktmpdir do |dir|
+        FileUtils.mkdir_p(File.join(dir, "lib"))
+        File.write(File.join(dir, "lib", "foo.rb"), "class Foo; def a; 1; end; end")
+
+        runner = described_class.new(config.with(root: dir, paths: ["lib", "lib/foo.rb"]))
+        expect(runner.send(:discover_subjects).map(&:name)).to eq(["Foo#a"])
+      end
+    end
+
     it "applies exclude patterns to directly named files" do
       Dir.mktmpdir do |dir|
         FileUtils.mkdir_p(File.join(dir, "lib", "generated"))
