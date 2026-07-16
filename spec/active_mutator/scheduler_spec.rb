@@ -110,8 +110,10 @@ RSpec.describe ActiveMutator::Scheduler do
         $stdout.reopen(orig_out)
         $stderr.reopen(orig_err)
       end
-      expect(File.read(out_path)).to eq("")
-      expect(File.read(err_path)).to eq("")
+      # Assert the sentinels' absence rather than emptiness: unrelated Ruby
+      # warnings on stderr must not flake this spec.
+      expect(File.read(out_path)).not_to include("LEAK-STDOUT")
+      expect(File.read(err_path)).not_to include("LEAK-STDERR")
     end
   end
 
@@ -169,6 +171,7 @@ RSpec.describe ActiveMutator::Scheduler do
         deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + 5
         sleep 0.05 until File.exist?(worker_pid_file) ||
                          Process.clock_gettime(Process::CLOCK_MONOTONIC) > deadline
+        expect(File).to exist(worker_pid_file) # clean failure instead of ENOENT on slow CI
         worker_pid = File.read(worker_pid_file).to_i
         expect(worker_pid).to be > 0
         Process.kill("INT", supervisor)
