@@ -4,7 +4,7 @@
 
 **Goal:** Ship a deterministic benchmark harness (#21), replace the purely static timeout budget with runtime-calibrated budgets (#9), and close the incremental baseline's newly-covering-example blind spot for the constant-reference case (#11).
 
-**Architecture:** The harness lives entirely under `bench/` + `bin/` (pure stdlib, never required by the gem's runtime); it runs `exe/active_mutator` against the committed `spec/fixtures/` corpus, records per-stage wall times and mutant counts, and a `ReportDiff` compares two Stryker JSONs for regressions. #9 introduces a `TimeoutCalibrator` that the `Scheduler` consults at spawn time (deadline) and feeds at reap time (observed wall time), scaling the variable part of each remaining budget by the clamped median observed/budget ratio. #11 extends `BaselineDelta.compute` to also re-run spec files that textually reference a constant defined in a changed source file but currently contribute zero coverage to it.
+**Architecture:** The harness lives entirely under `bench/` + `bin/` (pure stdlib, never required by the gem's runtime); it runs `exe/active_mutator` against the committed `spec/fixtures/` corpus, records per-stage wall times and mutant counts, and a `ReportDiff` compares two Stryker JSONs for regressions. #9 introduces per-lane `TimeoutCalibrator`s that the `Scheduler` consults at spawn time (deadline) and feeds at reap time (killed forks only, wall time measured against the effective budget the fork ran under), scaling the variable part of each remaining budget by the clamped median utilization; bench cells opt out (`--no-adaptive-timeout`) so the regression gate stays deterministic. #11 extends `BaselineDelta.compute` to also re-run spec files that textually reference a constant defined in a changed source file but currently contribute zero coverage to it.
 
 **Tech Stack:** Ruby (stdlib `json`, `optparse`, `open3`, `fileutils`), Prism, RSpec, fork-based workers. No new gem dependencies anywhere.
 
@@ -448,6 +448,8 @@ Refs #21"
 
 Per cell: prepare the target (git targets: clone + `git checkout <sha>` into `bench/.cache/<name>`; path targets: use in place), `bundle install` once per target, then **two timed stages**: (1) `--force-baseline --max-mutants 0` measures the baseline stage in isolation (`--max-mutants 0` plans zero mutants, so the run is baseline-only); (2) the cell's real argv against the warm cache measures the mutation stage. Save per cell: the Stryker report, captured stdout+stderr, and a `bench.json` summary. The shell-out is isolated in one injectable lambda so the orchestration logic is unit-testable without forking real runs.
 
+**Determinism contract:** `bin/bench-diff` exit 0 is a regression gate, so cell runs must be status-deterministic. The `--no-adaptive-timeout` flag does not exist until Task 7; the moment it does, Task 7 Step 4 makes `Bench::Plan` append it to every cell by default (adaptive behavior is then opt-in per matrix row). Until Task 7, static budgets are the only behavior, so the gate is deterministic as-is.
+
 - [ ] **Step 1: Write the failing spec**
 
 Create `spec/bench/runner_spec.rb`:
@@ -802,12 +804,23 @@ Refs #9 #21"
 - Create: `lib/active_mutator/timeout_calibrator.rb`
 - Modify: `lib/active_mutator.rb` (add the require, alongside the existing requires)
 - Create: `spec/active_mutator/timeout_calibrator_spec.rb`
+- Create: `spec/active_mutator/work_item_spec.rb`
+- Modify: `lib/active_mutator/work_item.rb`
 
-**Design.** The calibrator owns two operations:
-- `record(item, elapsed_seconds)` — called by the Scheduler when a fork finishes normally. It computes the item's *utilization* `elapsed / item.timeout` and appends it to a running window.
-- `budget_for(item)` — called at spawn. Before `WARMUP = 5` recordings it returns the static budget unchanged. After warm-up it returns `variable * scale + fixed`, where `fixed = item.boot_extra + timeout_floor-equivalent` is **not** scaled (roadmap: serial lane keeps `browser_boot_seconds` additive) and `scale = clamp(median_utilization / TARGET_UTILIZATION, 0.5, 4.0)` with `TARGET_UTILIZATION = 0.25`.
+**Design.** The calibrator owns three operations:
+- `record(elapsed_seconds, budget)` — called by the Scheduler when a fork finishes as a **kill** (and only then — see below). It appends the *utilization* `elapsed / budget` to a running window, where `budget` is the **effective budget the fork actually ran under** (the value `budget_for` returned at spawn time), NOT the static `item.timeout`. This kills the ratchet failure mode: if the scale is pinned at 4× and an honest kill takes 3× its static budget, its utilization against the 4×-scaled budget reads 0.75 — the median falls back toward the target and the scale recovers, instead of reading 3.0 against the static budget and pinning the scale at max forever. At equilibrium utilization self-stabilizes around `TARGET_UTILIZATION`.
+- `budget_for(item)` — called at spawn. Before `WARMUP = 5` recordings it returns the static budget unchanged. After warm-up it returns `variable * scale + fixed`, where `fixed = item.timeout - item.variable` (floor + browser boot) is **not** scaled (roadmap: serial lane keeps `browser_boot_seconds` additive) and `scale = clamp(median_utilization / TARGET_UTILIZATION, 0.5, 4.0)` with `TARGET_UTILIZATION = 0.25`.
+- `warmed?` / `scale` — read by the Scheduler for the once-per-change scale log line (Task 6).
 
-Rationale for the formula: with the static default (`factor 8`) a warm, unloaded kill uses roughly 1/8 of its budget, i.e. utilization ≈ 0.125–0.25. If the median observed utilization creeps toward 1.0 (parallel load), honest kills are about to be misclassified as timeouts, so remaining budgets grow by up to 4×. If utilization is tiny, budgets shrink (never below half, and never below the unscaled fixed part), reclaiming wall time from dead workers. `WorkItem` gains two fields in Task 6: `variable` (the `estimate * factor` part) and `boot_extra` (0.0 parallel / `browser_boot_seconds` serial); `timeout` stays the static total so `--debug-plan` output and every existing caller are unchanged.
+**Which finishes feed the sample (decided, not optional):** *kills only*.
+- `:timeout` — never recorded (the fork was SIGKILLed; its true wall time is unknowable).
+- `:error` — never recorded: a crash (NameError in the mutant, boot failure) exits in a fraction of the budget; a batch of fast errors would drag the median down, shrink budgets, and *manufacture* the very false timeouts #9 exists to remove.
+- `:survived` — never recorded: a survivor runs its **entire** covering set (nothing fails), while `fail_fast = 1` means a kill stops at the first failure; survivor wall times systematically overshoot kill wall times and would inflate budgets without bound.
+- `:killed` — recorded: kills are the population the deadline exists to protect (issue #9's misclassified "slow-but-honest kills"), and they dominate any healthy run.
+
+**Lane isolation (decided, not optional):** one calibrator instance **per lane**. The parallel lane finishes first and under a totally different load regime (N concurrent forks) than the serial lane (1 fork, browser + app server); pooling their samples would scale serial budgets by a parallel-derived median. The Runner builds `{ parallel: TimeoutCalibrator.new, serial: TimeoutCalibrator.new }` (Task 7) and the Scheduler routes by `item.lane` (Task 6). A serial lane that never warms up (fewer than 5 serial kills) simply keeps its static budgets — correct and conservative.
+
+Rationale for the formula: with the static default (`factor 8`) a warm, unloaded kill uses roughly 1/8 of its budget, i.e. utilization ≈ 0.125–0.25. If the median observed utilization creeps toward 1.0 (parallel load), honest kills are about to be misclassified as timeouts, so remaining budgets grow by up to 4×. If utilization is tiny, budgets shrink (never below half, and never below the unscaled fixed part), reclaiming wall time from dead workers. `WorkItem` gains two fields in this task: `variable` (the `estimate * factor` part) and `boot_extra` (0.0 parallel / `browser_boot_seconds` serial), both defaulted to `0.0` and pinned by spec here; `timeout` stays the static total so `--debug-plan` output and every existing caller are unchanged.
 
 - [ ] **Step 1: Write the failing spec**
 
@@ -820,51 +833,85 @@ RSpec.describe ActiveMutator::TimeoutCalibrator do
                                 lane: :parallel, variable: variable, boot_extra: boot_extra)
   end
 
-  it "returns the static budget before warm-up completes" do
+  it "returns the static budget before warm-up completes, and reports warmed? accordingly" do
     cal = described_class.new
-    4.times { cal.record(item, 19.0) } # 4 < WARMUP
+    4.times { cal.record(19.0, 20.0) } # 4 < WARMUP
+    expect(cal.warmed?).to be false
     expect(cal.budget_for(item)).to eq(20.0)
+    cal.record(19.0, 20.0)
+    expect(cal.warmed?).to be true
   end
 
   it "grows remaining budgets when observed utilization exceeds the target" do
     cal = described_class.new
-    5.times { cal.record(item(timeout: 20.0), 15.0) } # utilization 0.75, scale 3.0
+    5.times { cal.record(15.0, 20.0) } # utilization 0.75, scale 3.0
     # variable 8.0 * 3.0 + fixed (20.0 - 8.0) = 36.0
     expect(cal.budget_for(item(timeout: 20.0, variable: 8.0))).to eq(36.0)
   end
 
   it "shrinks budgets when utilization is far below the target, clamped at 0.5x" do
     cal = described_class.new
-    5.times { cal.record(item(timeout: 20.0), 0.2) } # utilization 0.01 -> clamp 0.5
+    5.times { cal.record(0.2, 20.0) } # utilization 0.01 -> clamp 0.5
     # variable 8.0 * 0.5 + fixed 12.0 = 16.0
     expect(cal.budget_for(item(timeout: 20.0, variable: 8.0))).to eq(16.0)
   end
 
   it "clamps growth at 4x" do
     cal = described_class.new
-    5.times { cal.record(item(timeout: 20.0), 20.0) } # utilization 1.0 -> 4.0 capped
+    5.times { cal.record(20.0, 20.0) } # utilization 1.0 -> 4.0 capped
     expect(cal.budget_for(item(timeout: 20.0, variable: 8.0))).to eq(44.0)
+  end
+
+  it "recovers from a pinned-high scale because utilization is measured against the effective budget" do
+    cal = described_class.new
+    5.times { cal.record(20.0, 20.0) }   # load spike: utilization 1.0 -> scale 4.0
+    expect(cal.scale).to eq(4.0)
+    # Subsequent forks ran under 4x-scaled budgets (80.0); the same honest
+    # 20s kills now record utilization 0.25 against the budget they ACTUALLY
+    # had. Median: sorted [0.25 x6, 1.0 x5] -> 0.25 -> scale back to 1.0.
+    6.times { cal.record(20.0, 80.0) }
+    expect(cal.scale).to eq(1.0)
   end
 
   it "uses the median, so one outlier does not swing the scale" do
     cal = described_class.new
-    4.times { cal.record(item(timeout: 20.0), 5.0) } # utilization 0.25 -> scale 1.0
-    cal.record(item(timeout: 20.0), 20.0)            # single outlier
+    4.times { cal.record(5.0, 20.0) } # utilization 0.25 -> scale 1.0
+    cal.record(20.0, 20.0)            # single outlier
     expect(cal.budget_for(item(timeout: 20.0, variable: 8.0))).to eq(20.0)
   end
 
   it "never scales the fixed part (floor + browser boot stay additive)" do
     cal = described_class.new
-    5.times { cal.record(item(timeout: 20.0), 15.0) } # scale 3.0
+    5.times { cal.record(15.0, 20.0) } # scale 3.0
     serial = item(timeout: 35.0, variable: 8.0, boot_extra: 15.0)
     # 8.0 * 3.0 + (35.0 - 8.0) = 51.0 : the 15s browser boot and 12s floor untouched
     expect(cal.budget_for(serial)).to eq(51.0)
   end
 
-  it "ignores recordings with a non-positive timeout" do
+  it "ignores recordings with a non-positive budget" do
     cal = described_class.new
-    5.times { cal.record(item(timeout: 0.0), 5.0) }
+    5.times { cal.record(5.0, 0.0) }
+    expect(cal.warmed?).to be false
     expect(cal.budget_for(item(timeout: 20.0))).to eq(20.0)
+  end
+end
+```
+
+And pin the new `WorkItem` defaults (they are load-bearing for every pre-existing construction site until Task 6 populates them — without this spec, default-value mutants would survive this task's gate). Add to a new `spec/active_mutator/work_item_spec.rb`:
+
+```ruby
+RSpec.describe ActiveMutator::WorkItem do
+  it "defaults variable and boot_extra to 0.0 so existing call sites are unchanged" do
+    item = described_class.new(mutation: nil, example_ids: [], timeout: 5.0, lane: :parallel)
+    expect(item.variable).to eq(0.0)
+    expect(item.boot_extra).to eq(0.0)
+  end
+
+  it "accepts explicit variable and boot_extra" do
+    item = described_class.new(mutation: nil, example_ids: [], timeout: 5.0, lane: :serial,
+                               variable: 2.0, boot_extra: 15.0)
+    expect(item.variable).to eq(2.0)
+    expect(item.boot_extra).to eq(15.0)
   end
 end
 ```
@@ -872,9 +919,9 @@ end
 - [ ] **Step 2: Run, expect FAIL**
 
 ```bash
-bundle exec rspec spec/active_mutator/timeout_calibrator_spec.rb
+bundle exec rspec spec/active_mutator/timeout_calibrator_spec.rb spec/active_mutator/work_item_spec.rb
 ```
-Expected: NameError (uninitialized constant) — and NoMethodError on `WorkItem` kwargs; the WorkItem fields arrive in this same task's Step 3 so the spec compiles (WorkItem change is one line, tested through runner_spec in Task 6).
+Expected: NameError (uninitialized constant `TimeoutCalibrator`) and ArgumentError on the `WorkItem` kwargs (`variable`/`boot_extra` don't exist yet); both arrive in Step 3.
 
 - [ ] **Step 3: Implement**
 
@@ -902,10 +949,18 @@ module ActiveMutator
   # Adaptive timeout budgets (#9). Static budgets derive from baseline times
   # measured warm and unloaded; under parallel load they misclassify
   # slow-but-honest kills as timeouts. The Scheduler feeds this with the
-  # observed wall time of every finished fork; once WARMUP observations
-  # exist, remaining budgets' variable part is scaled by the clamped median
-  # observed utilization. The fixed part (timeout_floor + browser boot) is
-  # never scaled: fork boot cost does not shrink because examples run fast.
+  # observed wall time of every KILLED fork (errors exit artificially fast,
+  # survivors run their whole covering set — both would bias the median;
+  # timed-out forks have no known wall time at all). One instance per lane:
+  # parallel and serial run under different load regimes.
+  #
+  # Utilization is elapsed / the EFFECTIVE budget the fork ran under (the
+  # value budget_for returned at its spawn), not the static item.timeout —
+  # otherwise a pinned-high scale could never observe recovery (ratchet).
+  # Once WARMUP observations exist, remaining budgets' variable part is
+  # scaled by the clamped median utilization. The fixed part (timeout_floor
+  # + browser boot) is never scaled: fork boot cost does not shrink because
+  # examples run fast.
   class TimeoutCalibrator
     WARMUP = 5
     TARGET_UTILIZATION = 0.25
@@ -916,14 +971,16 @@ module ActiveMutator
       @utilizations = []
     end
 
-    def record(item, elapsed_seconds)
-      return unless item.timeout.positive?
+    def record(elapsed_seconds, budget)
+      return unless budget.positive?
 
-      @utilizations << elapsed_seconds / item.timeout
+      @utilizations << elapsed_seconds / budget
     end
 
+    def warmed? = @utilizations.size >= WARMUP
+
     def budget_for(item)
-      return item.timeout if @utilizations.size < WARMUP
+      return item.timeout unless warmed?
 
       fixed = item.timeout - item.variable
       item.variable * scale + fixed
@@ -954,10 +1011,10 @@ require "active_mutator/timeout_calibrator"
 - [ ] **Step 4: Run, expect PASS**
 
 ```bash
-bundle exec rspec spec/active_mutator/timeout_calibrator_spec.rb
+bundle exec rspec spec/active_mutator/timeout_calibrator_spec.rb spec/active_mutator/work_item_spec.rb
 bundle exec rspec
 ```
-Expected: all green — the WorkItem defaults keep every existing `WorkItem.new(...)` call site compiling.
+Expected: all green — the WorkItem defaults keep every existing `WorkItem.new(...)` call site compiling, and `work_item_spec.rb` pins those defaults so default-value mutants (`0.0`→`1.0`) die in this task's gate, not Task 6's.
 
 - [ ] **Step 5: Self-mutation gate**
 
@@ -970,7 +1027,8 @@ Expected: exit 0. Prime survivor candidates: `clamp` bound mutants (`0.5`→`0.5
 
 ```bash
 git add lib/active_mutator/timeout_calibrator.rb lib/active_mutator/work_item.rb \
-        lib/active_mutator.rb spec/active_mutator/timeout_calibrator_spec.rb
+        lib/active_mutator.rb spec/active_mutator/timeout_calibrator_spec.rb \
+        spec/active_mutator/work_item_spec.rb
 git commit -m "feat: TimeoutCalibrator — median-utilization budget scaling
 
 Refs #9"
@@ -1027,46 +1085,98 @@ Run the runner spec → PASS. (The arithmetic is identical to the old formula; `
 
 - [ ] **Step 3: Failing Scheduler specs**
 
-Add to `spec/active_mutator/scheduler_spec.rb` (reuse the file's `item`/`scheduler` helpers; extend the `scheduler` helper to pass `calibrator:` through):
+Add to `spec/active_mutator/scheduler_spec.rb` (reuse the file's `item`/`scheduler` helpers; extend the `scheduler` helper to pass `calibrators:` through). Add a stub-builder at the top of the new describe block:
 
 ```ruby
 describe "adaptive timeouts" do
-  it "asks the calibrator for the effective budget at spawn time" do
+  def fake_calibrator(budget: nil, scale: 1.0, warmed: false)
+    cal = instance_double(ActiveMutator::TimeoutCalibrator,
+                          scale: scale, warmed?: warmed)
+    if budget
+      allow(cal).to receive(:budget_for).and_return(budget)
+    else
+      allow(cal).to receive(:budget_for) { |i| i.timeout }
+    end
+    allow(cal).to receive(:record)
+    cal
+  end
+
+  def killed_worker
+    ->(_m, _e, writer) { writer.puts(JSON.generate("status" => "killed", "details" => nil)) }
+  end
+
+  it "asks the lane's calibrator for the effective budget at spawn time" do
     # Static timeout is generous, but the calibrator returns a tiny budget:
     # the sleeping worker must be reaped as a timeout.
-    calibrator = instance_double(ActiveMutator::TimeoutCalibrator)
-    allow(calibrator).to receive(:budget_for).and_return(0.2)
-    allow(calibrator).to receive(:record)
+    cal = fake_calibrator(budget: 0.2)
     worker = ->(_m, _e, _w) { sleep 30 }
-    results = scheduler(worker: worker, calibrator: calibrator).run([item(timeout: 60.0)])
+    results = scheduler(worker: worker, calibrators: { parallel: cal, serial: cal })
+              .run([item(timeout: 60.0)])
     expect(results.map(&:status)).to eq([:timeout])
   end
 
-  it "records observed wall time for every normally finished fork" do
+  it "records killed forks with their elapsed time AND the effective budget they ran under" do
     recordings = []
-    calibrator = instance_double(ActiveMutator::TimeoutCalibrator)
-    allow(calibrator).to receive(:budget_for) { |i| i.timeout }
-    allow(calibrator).to receive(:record) { |i, elapsed| recordings << [i, elapsed] }
-    worker = ->(_m, _e, writer) { writer.puts(JSON.generate("status" => "killed", "details" => nil)) }
-    scheduler(worker: worker, calibrator: calibrator).run([item, item])
+    cal = fake_calibrator(budget: 5.0)
+    allow(cal).to receive(:record) { |elapsed, budget| recordings << [elapsed, budget] }
+    scheduler(worker: killed_worker, calibrators: { parallel: cal, serial: cal })
+      .run([item(timeout: 60.0), item(timeout: 60.0)])
     expect(recordings.size).to eq(2)
-    expect(recordings).to all(satisfy { |(_i, elapsed)| elapsed.positive? })
+    # The denominator is the scaled budget (5.0), never the static 60.0 —
+    # recording against the static budget would ratchet the scale to max.
+    expect(recordings).to all(satisfy { |(elapsed, budget)| elapsed.positive? && budget == 5.0 })
+  end
+
+  it "routes recordings to the calibrator of the item's lane" do
+    parallel_cal = fake_calibrator
+    serial_cal = fake_calibrator
+    scheduler(worker: killed_worker, calibrators: { parallel: parallel_cal, serial: serial_cal })
+      .run([item(lane: :parallel), item(lane: :serial)])
+    expect(parallel_cal).to have_received(:record).once
+    expect(serial_cal).to have_received(:record).once
+  end
+
+  it "does not record survived or errored forks (they would bias the median)" do
+    cal = fake_calibrator
+    survived = ->(_m, _e, writer) { writer.puts(JSON.generate("status" => "survived", "details" => nil)) }
+    errored  = ->(_m, _e, writer) { writer.puts(JSON.generate("status" => "error", "details" => "boom")) }
+    scheduler(worker: survived, calibrators: { parallel: cal, serial: cal }).run([item])
+    scheduler(worker: errored, calibrators: { parallel: cal, serial: cal }).run([item])
+    expect(cal).not_to have_received(:record)
   end
 
   it "does not record timed-out forks (their true wall time is unknown)" do
-    recordings = []
-    calibrator = instance_double(ActiveMutator::TimeoutCalibrator)
-    allow(calibrator).to receive(:budget_for).and_return(0.2)
-    allow(calibrator).to receive(:record) { |i, elapsed| recordings << [i, elapsed] }
+    cal = fake_calibrator(budget: 0.2)
     worker = ->(_m, _e, _w) { sleep 30 }
-    scheduler(worker: worker, calibrator: calibrator).run([item(timeout: 60.0)])
-    expect(recordings).to be_empty
+    scheduler(worker: worker, calibrators: { parallel: cal, serial: cal }).run([item(timeout: 60.0)])
+    expect(cal).not_to have_received(:record)
   end
 
-  it "runs on static budgets when no calibrator is given" do
+  it "runs on static budgets when no calibrators are given" do
     worker = ->(_m, _e, _w) { sleep 30 }
     results = scheduler(worker: worker).run([item(timeout: 0.2)])
     expect(results.map(&:status)).to eq([:timeout])
+  end
+
+  it "logs the scale to stderr once per change, not once per spawn" do
+    cal = fake_calibrator(warmed: true, scale: 2.4)
+    expect do
+      scheduler(worker: killed_worker, calibrators: { parallel: cal, serial: cal })
+        .run([item, item, item])
+    end.to output(/active_mutator: adaptive timeout scale 2\.4\n/).to_stderr_from_any_process
+    # exactly once: the regex above plus a negative count check
+    # (capture stderr into a StringIO if the file has a helper for it; otherwise:)
+    expect do
+      scheduler(worker: killed_worker, calibrators: { parallel: cal, serial: cal })
+        .run([item, item])
+    end.to output(satisfy { |s| s.scan("adaptive timeout scale").size == 1 }).to_stderr_from_any_process
+  end
+
+  it "does not log the scale before warm-up" do
+    cal = fake_calibrator(warmed: false)
+    expect do
+      scheduler(worker: killed_worker, calibrators: { parallel: cal, serial: cal }).run([item])
+    end.not_to output(/adaptive timeout scale/).to_stderr_from_any_process
   end
 end
 ```
@@ -1074,44 +1184,71 @@ end
 Update the file's helper:
 
 ```ruby
-  def scheduler(worker:, jobs: 2, on_result: nil, calibrator: nil)
-    described_class.new(jobs: jobs, worker: worker, on_result: on_result, calibrator: calibrator)
+  def scheduler(worker:, jobs: 2, on_result: nil, calibrators: nil)
+    described_class.new(jobs: jobs, worker: worker, on_result: on_result, calibrators: calibrators)
   end
 ```
 
-Run: `bundle exec rspec spec/active_mutator/scheduler_spec.rb` → FAIL (unknown keyword `calibrator`).
+Run: `bundle exec rspec spec/active_mutator/scheduler_spec.rb` → FAIL (unknown keyword `calibrators`).
 
 - [ ] **Step 4: Implement in Scheduler**
 
-`initialize` gains the collaborator:
+`initialize` gains the collaborator — a `{parallel:, serial:}` hash of per-lane calibrators (lane isolation, see Task 5 design):
 
 ```ruby
     def initialize(jobs:, worker: Worker.method(:run), on_result: nil,
-                   calibrator: nil, orphaned: -> { Process.ppid == 1 })
+                   calibrators: nil, orphaned: -> { Process.ppid == 1 })
       @jobs = jobs
       @worker = worker
       @on_result = on_result
-      @calibrator = calibrator
+      @calibrators = calibrators
       @orphaned = orphaned
+      @last_logged_scale = nil
     end
 ```
 
-`#spawn` — budget via the calibrator, and remember the start time:
+`#spawn` — budget via the lane's calibrator; remember start time AND the effective budget (the record denominator):
 
 ```ruby
       writer.close
-      budget = @calibrator ? @calibrator.budget_for(item) : item.timeout
+      calibrator = calibrator_for(item)
+      budget = calibrator ? calibrator.budget_for(item) : item.timeout
+      log_scale(calibrator)
       started = now
-      running[pid] = { reader: reader, item: item, started: started, deadline: started + budget }
+      running[pid] = { reader: reader, item: item, started: started,
+                       budget: budget, deadline: started + budget }
 ```
 
-`#reap` — feed the calibrator only on a normal finish (a timed-out fork's true wall time is unknowable — it was killed):
+`#reap` — feed the calibrator only when the fork reports a **kill** (see Task 5 design: errors finish artificially fast, survivors run the whole covering set, timeouts have no known wall time). `finish` must therefore run before the recording decision:
 
 ```ruby
         if done
           running.delete(pid)
-          @calibrator&.record(entry[:item], now - entry[:started])
-          results << finish(entry)
+          result = finish(entry)
+          if result.status == :killed
+            calibrator_for(entry[:item])&.record(now - entry[:started], entry[:budget])
+          end
+          results << result
+```
+
+New private methods:
+
+```ruby
+    def calibrator_for(item)
+      @calibrators && @calibrators[item.lane]
+    end
+
+    # Effective budgets are otherwise invisible (--debug-plan shows static
+    # ones by design). One stderr line per scale CHANGE, not per spawn.
+    def log_scale(calibrator)
+      return unless calibrator&.warmed?
+
+      scale = calibrator.scale.round(2)
+      return if scale == @last_logged_scale
+
+      @last_logged_scale = scale
+      warn "active_mutator: adaptive timeout scale #{scale}"
+    end
 ```
 
 Run the scheduler spec → PASS.
@@ -1170,9 +1307,33 @@ end
 
 Run both spec files → FAIL.
 
-- [ ] **Step 2: Implement**
+- [ ] **Step 2: Implement — including every `Config.new` call site**
 
 `config.rb` — append `:adaptive_timeout` to the `Data.define` list.
+
+**`Data.define` has no defaults: every existing `Config.new(...)` with an explicit keyword list now raises `ArgumentError: missing keyword: :adaptive_timeout` until updated.** Audit first, and re-verify (the list below is current as of this plan):
+
+```bash
+grep -rn "Config.new" lib spec
+```
+
+Exactly two call sites exist:
+1. `lib/active_mutator/cli.rb:59` — `Config.new(paths: paths, root: Dir.pwd, **options)`: **no edit needed**; the defaults hash gains `adaptive_timeout: true` above, so `**options` always carries the key.
+2. `spec/active_mutator/runner_spec.rb:5-13` — the base `let(:config)`: **must be edited**. Exact change:
+
+```ruby
+  let(:config) do
+    ActiveMutator::Config.new(
+      paths: ["lib"], since: nil, subject_filter: nil, jobs: 2, format: :terminal,
+      requires: [], timeout_factor: 4.0, timeout_floor: 2.0, force_baseline: false,
+      root: "/project", preload_helper: nil, serial_patterns: ["spec/system/", "spec/features/"],
+      browser_boot_seconds: 15.0, accept_survivors: false, exclude: [],
+      max_mutants: nil, debug_plan: false, fail_at: nil, adaptive_timeout: true
+    )
+  end
+```
+
+If your grep finds any call site not listed here (added by an earlier phase task), give it `adaptive_timeout: true` the same way. Run `bundle exec rspec spec/active_mutator/runner_spec.rb` immediately after this edit — every example in the file must compile again before you continue.
 
 `cli.rb` — defaults hash gains `adaptive_timeout: true`; add the option next to the timeout flags:
 
@@ -1197,18 +1358,31 @@ Run both spec files → PASS.
 In `spec/active_mutator/runner_spec.rb`, near the existing `Runner#call` collaborator-stubbing specs (reuse their config/stub scaffolding):
 
 ```ruby
-it "passes a TimeoutCalibrator to the scheduler when adaptive_timeout is on" do
+it "passes per-lane TimeoutCalibrators to the scheduler when adaptive_timeout is on" do
   # config with adaptive_timeout: true (the default); stub Scheduler
   expect(ActiveMutator::Scheduler).to receive(:new)
-    .with(hash_including(calibrator: kind_of(ActiveMutator::TimeoutCalibrator)))
+    .with(hash_including(calibrators: {
+      parallel: kind_of(ActiveMutator::TimeoutCalibrator),
+      serial: kind_of(ActiveMutator::TimeoutCalibrator)
+    }))
     .and_return(instance_double(ActiveMutator::Scheduler, run: []))
   runner.call
 end
 
-it "passes no calibrator when adaptive_timeout is off" do
+it "builds distinct calibrator instances per lane (no cross-lane sample pooling)" do
+  captured = nil
+  expect(ActiveMutator::Scheduler).to receive(:new) do |**kwargs|
+    captured = kwargs[:calibrators]
+    instance_double(ActiveMutator::Scheduler, run: [])
+  end
+  runner.call
+  expect(captured[:parallel]).not_to be(captured[:serial])
+end
+
+it "passes no calibrators when adaptive_timeout is off" do
   # config with adaptive_timeout: false
   expect(ActiveMutator::Scheduler).to receive(:new)
-    .with(hash_including(calibrator: nil))
+    .with(hash_including(calibrators: nil))
     .and_return(instance_double(ActiveMutator::Scheduler, run: []))
   runner.call
 end
@@ -1217,14 +1391,77 @@ end
 Run → FAIL. Implement in `Runner#call` (line ~31):
 
 ```ruby
-      calibrator = @config.adaptive_timeout ? TimeoutCalibrator.new : nil
+      calibrators = if @config.adaptive_timeout
+                      { parallel: TimeoutCalibrator.new, serial: TimeoutCalibrator.new }
+                    end
       scheduler = Scheduler.new(jobs: @config.jobs, on_result: @reporter.method(:on_result),
-                                calibrator: calibrator)
+                                calibrators: calibrators)
 ```
 
 Run → PASS.
 
-- [ ] **Step 4: README + guide**
+- [ ] **Step 4: Bench stays deterministic — cells opt out of adaptive timeouts**
+
+The bench-diff exit-0 gate (Task 4's pinned baseline) is a regression detector; adaptive budgets are load-dependent and could flip Killed↔Timeout between runs, turning the gate intermittently red. Bench cells therefore always run `--no-adaptive-timeout`; adaptive behavior is benchmarked only when a target's matrix explicitly asks for it.
+
+Failing spec — update `spec/bench/plan_spec.rb`: change the two `argv` expectations to
+
+```ruby
+      expect(cells.first.argv).to eq(
+        ["lib", "--jobs", "1", "--timeout-factor", "8.0",
+         "--no-adaptive-timeout", "--format", "stryker-json"]
+      )
+```
+and
+```ruby
+      expect(cells.first.argv).to eq(["lib", "--no-adaptive-timeout", "--format", "stryker-json"])
+```
+and add:
+```ruby
+  it "lets a matrix row opt back in to adaptive timeouts as a boolean flag" do
+    Dir.mktmpdir do |dir|
+      path = write_targets(dir, "targets" => [
+        { "name" => "tiny", "type" => "path", "path" => "spec/fixtures/tiny_project",
+          "paths" => ["lib"], "matrix" => { "adaptive_timeout" => [true, false] } }
+      ])
+      argvs = described_class.load(path).cells.map(&:argv)
+      expect(argvs[0]).to eq(["lib", "--adaptive-timeout", "--format", "stryker-json"])
+      expect(argvs[1]).to eq(["lib", "--no-adaptive-timeout", "--format", "stryker-json"])
+    end
+  end
+```
+
+Run → FAIL. Implement in `bench/lib/bench/plan.rb`: `expand`'s argv line becomes
+
+```ruby
+          argv: target.fetch("paths", []) + flag_argv(combo) +
+                adaptive_default(combo) + ["--format", "stryker-json"]
+```
+
+with two new private methods (booleans render as `--flag`/`--no-flag`, and the default opt-out is skipped when the matrix pins the flag itself):
+
+```ruby
+    # Deterministic by default: adaptive budgets are load-dependent and would
+    # make the bench-diff regression gate flaky. Matrix rows may override.
+    def adaptive_default(combo)
+      combo.key?("adaptive_timeout") ? [] : ["--no-adaptive-timeout"]
+    end
+
+    def flag_argv(combo)
+      combo.flat_map do |flag, v|
+        name = flag.tr("_", "-")
+        case v
+        when true  then ["--#{name}"]
+        when false then ["--no-#{name}"]
+        else ["--#{name}", v.to_s]
+        end
+      end
+    end
+```
+
+(This replaces Task 2's simpler `flag_argv`; the cell ids from `cell_id` are unaffected for non-boolean flags — boolean matrix values produce ids like `tiny-adaptivetimeouttrue` via the `abbrev` fallback, which is fine.) Run `bundle exec rspec spec/bench` → PASS. Re-pin is NOT needed: the pinned baseline was produced pre-adaptive, and cells now run with adaptive off — statuses are unchanged by construction.
+
+- [ ] **Step 5: README + guide**
 
 `README.md` flag table: add
 
@@ -1232,9 +1469,9 @@ Run → PASS.
 | `--[no-]adaptive-timeout` | on | scale timeout budgets from observed worker wall times (median utilization, clamped 0.5x–4x; `--timeout-factor`/`--timeout-floor` set the starting budget) |
 ```
 
-and add `adaptive_timeout` to the `.active_mutator.yml` key list. In `docs/guides/how-it-works.md`, in the scheduler/timeout section, add one paragraph describing the calibrator (warm-up of 5, median utilization vs target 0.25, clamp 0.5–4, fixed part never scaled, timed-out forks never recorded).
+and add `adaptive_timeout` to the `.active_mutator.yml` key list. In `docs/guides/how-it-works.md`, in the scheduler/timeout section, add one paragraph describing the calibrator: warm-up of 5 **killed** forks per lane (errors/survivors/timeouts never sampled), median utilization measured against the effective budget each fork ran under, target 0.25, clamp 0.5–4, fixed part (floor + browser boot) never scaled, one calibrator per lane, and the `active_mutator: adaptive timeout scale N.NN` stderr line emitted whenever the applied scale changes (that log line is how users see effective budgets; `--debug-plan` intentionally keeps showing the static ones).
 
-- [ ] **Step 5: e2e sanity + bench regression check**
+- [ ] **Step 6: e2e sanity + bench regression check**
 
 ```bash
 ACTIVE_MUTATOR_E2E=1 bundle exec rspec spec/e2e
@@ -1242,15 +1479,16 @@ bin/bench --out /tmp/bench-post9
 bin/bench-diff bench/baselines/tiny_project-jobs2.mutation-report.json \
                /tmp/bench-post9/tiny_project-jobs2/mutation-report.json
 ```
-Expected: e2e green; bench-diff exit 0 (**no status transitions** — adaptive budgets must not create false kills or new timeouts on the fixture corpus). Log the post-#9 `mutation_seconds` next to the Task 4 row in `docs/dogfood-log.md`.
+Expected: e2e green; bench-diff exit 0. The bench cells run `--no-adaptive-timeout` (Step 4), so this check proves the *plumbing* changed nothing when adaptive is off — the deterministic gate stays deterministic. To eyeball adaptive behavior itself, run one fixture manually: `cd spec/fixtures/tiny_project && BUNDLE_GEMFILE=$PWD/Gemfile bundle exec ../../../exe/active_mutator lib --jobs 2` and confirm statuses match the pinned baseline and any `adaptive timeout scale` stderr lines look sane. Log the post-#9 `mutation_seconds` next to the Task 4 row in `docs/dogfood-log.md`.
 
-- [ ] **Step 6: Full gates + commit**
+- [ ] **Step 7: Full gates + commit**
 
 ```bash
 bundle exec rspec
 bundle exec exe/active_mutator lib --changed
 git add lib/active_mutator/config.rb lib/active_mutator/cli.rb lib/active_mutator/config_file.rb \
-        lib/active_mutator/runner.rb spec/active_mutator/cli_spec.rb \
+        lib/active_mutator/runner.rb bench/lib/bench/plan.rb spec/bench/plan_spec.rb \
+        spec/active_mutator/cli_spec.rb \
         spec/active_mutator/config_file_spec.rb spec/active_mutator/runner_spec.rb \
         README.md docs/guides/how-it-works.md docs/dogfood-log.md
 git commit -m "feat: adaptive timeout calibration on by default, --no-adaptive-timeout opt-out
@@ -1267,13 +1505,19 @@ Closes #9"
 - Modify: `lib/active_mutator.rb` (require)
 - Create: `spec/active_mutator/defined_constants_spec.rb`
 
+**Design — qualified names only, deliberately.** An earlier draft also emitted bare leaf names (`"Config"` for `ActiveMutator::Config`). That is a trap: common leaves (`Config`, `Base`, `Client`, `Error`) appear in half of any real suite's spec files, which would trip Task 9's >50% full-run fallback on nearly every edit to such files — silently defeating incremental mode. Rule: emit every *fully qualified* scope path (`"Billing"`, `"Billing::Invoice"`) and nothing else. A top-level `class Invoice` naturally yields `"Invoice"` (its qualified name IS the leaf), so the common `RSpec.describe Invoice` case still matches. Recall tradeoff accepted and documented in Task 10: a spec referencing a nested constant by bare leaf only (inside its own matching namespace nesting) is missed — that residual falls to nightly `--force-baseline`.
+
+**Parse-failure boundary, pinned:** the guard is `result.errors.any?` — parse **errors** (truncated input, `class Oops`) blank the result to `[]`; parse **warnings** (e.g. `if a = 2` assignment-in-condition) do not, because Prism still produces a complete AST for them. Residual case: Prism's error *recovery* can produce a partial AST for badly broken input in which some definitions are still visible — we return whatever definitions survive recovery only when `errors` is empty, i.e. never for broken input; a file that is mid-edit and unparseable simply contributes no reference candidates until it parses again (and `--force-baseline` remains the backstop).
+
 - [ ] **Step 1: Failing spec**
 
 Create `spec/active_mutator/defined_constants_spec.rb`:
 
 ```ruby
+require "prism"
+
 RSpec.describe ActiveMutator::DefinedConstants do
-  it "collects nested class and module names, fully qualified and leaf" do
+  it "collects nested class and module names, fully qualified only" do
     names = described_class.in_source(<<~RUBY)
       module Billing
         class Invoice
@@ -1281,16 +1525,47 @@ RSpec.describe ActiveMutator::DefinedConstants do
         end
       end
     RUBY
-    expect(names).to contain_exactly("Billing", "Billing::Invoice", "Invoice")
+    expect(names).to contain_exactly("Billing", "Billing::Invoice")
+  end
+
+  it "keeps a top-level class name as-is" do
+    expect(described_class.in_source("class Invoice; end\n")).to eq(["Invoice"])
   end
 
   it "handles compact constant paths" do
     names = described_class.in_source("class Billing::Invoice; end\n")
-    expect(names).to contain_exactly("Billing::Invoice", "Invoice")
+    expect(names).to contain_exactly("Billing::Invoice")
   end
 
-  it "returns [] for unparseable source" do
-    expect(described_class.in_source("class Oops")).to eq([])
+  it "never emits a bare common leaf for a nested definition (the Config problem)" do
+    names = described_class.in_source(<<~RUBY)
+      module MyApp
+        class Config
+        end
+      end
+    RUBY
+    expect(names).to contain_exactly("MyApp", "MyApp::Config")
+    expect(names).not_to include("Config")
+  end
+
+  it "returns [] when the parse has errors (truncated / mid-edit input)" do
+    src = "class Oops"
+    expect(Prism.parse(src).errors).not_to be_empty # pin the fixture's nature
+    expect(described_class.in_source(src)).to eq([])
+  end
+
+  it "still returns names when the parse only has warnings" do
+    src = <<~RUBY
+      class Invoice
+        def f(a)
+          1 if a = 2
+        end
+      end
+    RUBY
+    result = Prism.parse(src)
+    expect(result.errors).to be_empty          # pin the boundary:
+    expect(result.warnings).not_to be_empty    # warnings-only input must not blank the result
+    expect(described_class.in_source(src)).to eq(["Invoice"])
   end
 
   it "returns [] for source defining no constants" do
@@ -1298,6 +1573,8 @@ RSpec.describe ActiveMutator::DefinedConstants do
   end
 end
 ```
+
+(If the `a = 2` fixture stops producing a Prism warning on a future Prism version, the two `expect(result...)` precondition lines fail loudly — swap in another warnings-only construct rather than deleting the boundary spec.)
 
 Run: `bundle exec rspec spec/active_mutator/defined_constants_spec.rb` → NameError.
 
@@ -1309,14 +1586,20 @@ Create `lib/active_mutator/defined_constants.rb`:
 require "prism"
 
 module ActiveMutator
-  # Names of classes/modules a source file defines, both fully qualified
-  # ("Billing::Invoice") and leaf ("Invoice"). Leaf names buy recall for
-  # spec files that reference the constant unqualified; false positives
-  # only cost an extra spec re-run, never correctness.
+  # Fully qualified names of classes/modules a source file defines
+  # ("Billing", "Billing::Invoice"). Deliberately NO bare leaf shorthand for
+  # nested definitions: common leaves like "Config"/"Base" textually match
+  # half of any real spec suite and would trip BaselineDelta's full-run
+  # fallback on every edit, silently defeating incremental mode. Top-level
+  # definitions keep their (leaf == qualified) name, so `RSpec.describe Foo`
+  # still matches for the common flat-namespace case.
+  #
+  # Guard is errors.any?, not warnings: Prism produces a complete AST for
+  # warnings-only input (`if a = 2`), and those definitions are real.
   module DefinedConstants
     def self.in_source(source)
       result = Prism.parse(source)
-      return [] unless result.success?
+      return [] if result.errors.any?
 
       names = []
       walk(result.value, [], names)
@@ -1325,11 +1608,8 @@ module ActiveMutator
 
     def self.walk(node, scope, names)
       if node.is_a?(Prism::ClassNode) || node.is_a?(Prism::ModuleNode)
-        path = node.constant_path.slice
-        scope = scope + [path]
+        scope = scope + [node.constant_path.slice]
         names << scope.join("::")
-        leaf = path.split("::").last
-        names << leaf
       end
       node.compact_child_nodes.each { |child| walk(child, scope, names) }
     end
@@ -1361,7 +1641,7 @@ Refs #11"
 - Modify: `lib/active_mutator/baseline_delta.rb`
 - Modify: `spec/active_mutator/baseline_delta_spec.rb`
 
-**Design.** For every changed (or added) source file that exists on disk: extract its defined constants; find spec files under `spec/**/*_spec.rb` whose text matches any of those names (word-boundary regex); keep only spec files that currently contribute **zero** coverage to the changed file (spec files with covering examples are already handled by `rerun_example_ids`, and re-running them wholesale would regress incremental speed); add the survivors to `rerun_spec_files` (merge_partial! already drops-and-replaces their records by prefix). Safety valve: if the candidates exceed `REFERENCE_FULL_RATIO = 0.5` of all spec files, a full re-run is cheaper — return FULL. Everything is disk-guarded, so the existing pure-hash specs (root `"/project"`, no real files) are untouched.
+**Design.** For every changed (or added) source file that exists on disk: extract its defined constants (Task 8's **qualified-only** names — this is what keeps common leaves like `Config` from matching everything); find spec files under `spec/**/*_spec.rb` whose text matches any of those names (word-boundary regex); keep only spec files that currently contribute **zero** coverage to the changed file (spec files with covering examples are already handled by `rerun_example_ids`, and re-running them wholesale would regress incremental speed); add the survivors to `rerun_spec_files` (merge_partial! already drops-and-replaces their records by prefix). Safety valve: if the candidates exceed `REFERENCE_FULL_RATIO = 0.5` of all spec files, a full re-run is cheaper — return FULL **and warn on stderr** (a silent fallback would look like incremental mode hanging). Everything is disk-guarded, so the existing pure-hash specs (root `"/project"`, no real files) are untouched.
 
 - [ ] **Step 1: Failing specs**
 
@@ -1451,6 +1731,42 @@ Add to `spec/active_mutator/baseline_delta_spec.rb`:
         expect(delta.rerun_spec_files).to eq([])
       end
     end
+
+    it "warns when the reference scan trips the full-run fallback (never silent)" do
+      project(
+        "lib/invoice.rb" => "class Invoice; end\n",
+        "spec/a_spec.rb" => "RSpec.describe Invoice do; end\n",
+        "spec/b_spec.rb" => "RSpec.describe Invoice do; end\n"
+      ) do |root|
+        expect do
+          described_class.compute(
+            old_digests: { "lib/invoice.rb" => "x" }, new_digests: { "lib/invoice.rb" => "y" },
+            coverage_map: coverage_map({}), root: root
+          )
+        end.to output(/constant-reference scan matched 2 of 2 spec files.*falling back to full baseline/)
+          .to_stderr
+      end
+    end
+
+    it "does not blow up incremental mode for files defining common nested leaf names" do
+      # MyApp::Config is nested: DefinedConstants (Task 8) must not emit bare
+      # "Config", so the many spec files mentioning "Config" unqualified do
+      # NOT become candidates and the full-run fallback does not trip.
+      project(
+        "lib/my_app/config.rb" => "module MyApp; class Config; end; end\n",
+        "spec/a_spec.rb" => "RSpec.describe \"a\" do; end # Config mentioned bare\n",
+        "spec/b_spec.rb" => "RSpec.describe \"b\" do; end # Config mentioned bare\n",
+        "spec/c_spec.rb" => "RSpec.describe MyApp::Config do; end\n"
+      ) do |root|
+        delta = described_class.compute(
+          old_digests: { "lib/my_app/config.rb" => "x" },
+          new_digests: { "lib/my_app/config.rb" => "y" },
+          coverage_map: coverage_map({}), root: root
+        )
+        expect(delta.full?).to be(false)
+        expect(delta.rerun_spec_files).to eq(["spec/c_spec.rb"])
+      end
+    end
   end
 ```
 
@@ -1511,7 +1827,13 @@ Add the class methods (below `full_trigger?`):
         next if covering_specs.include?(spec_rel)
         spec_rel if File.read(spec_abs).match?(pattern)
       end
-      return :full if candidates.size > all_specs.size * REFERENCE_FULL_RATIO
+      if candidates.size > all_specs.size * REFERENCE_FULL_RATIO
+        # Never silently degrade: a full baseline where the user expected an
+        # incremental refresh must be explained, or it looks like a hang.
+        warn "active_mutator: constant-reference scan matched #{candidates.size} of " \
+             "#{all_specs.size} spec files for #{rel}; falling back to full baseline"
+        return :full
+      end
 
       candidates
     end
@@ -1523,12 +1845,31 @@ Add the class methods (below `full_trigger?`):
 
 Run the delta spec → PASS. Also confirm every pre-existing example in the file still passes (the fake root `"/project"` has no files on disk, so `newly_covering_candidates` returns `[]` there — behavior unchanged).
 
-- [ ] **Step 3: Full gates + commit**
+- [ ] **Step 3: Measure and bound the hot-path cost**
+
+The scan runs on the incremental path for every changed source file — bench (force-baseline + warm cache) never exercises it, so measure it directly on this repo's own suite, which is the largest corpus at hand:
+
+```bash
+ruby -Ilib -e '
+  require "active_mutator"
+  rel = "lib/active_mutator/runner.rb"
+  t0 = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+  constants = ActiveMutator::DefinedConstants.in_source(File.read(rel))
+  pattern = /\b(?:#{constants.map { |c| Regexp.escape(c) }.join("|")})\b/
+  hits = Dir["spec/**/*_spec.rb"].count { |f| File.read(f).match?(pattern) }
+  ms = ((Process.clock_gettime(Process::CLOCK_MONOTONIC) - t0) * 1000).round(1)
+  puts "#{hits} referencing spec files, scan took #{ms}ms"
+'
+```
+
+Acceptance bound: **< 50ms** on this repo (~25 spec files; the cost is one read + one regex match per spec file, linear in total spec bytes and independent of suite runtime). Record the measured number in `docs/dogfood-log.md` alongside the Task 4 row. Then confirm the same order of magnitude on payint (thousands of spec files) by running the same one-liner from the payint root with `rel` set to any `app/models` file — expect tens-to-hundreds of ms, i.e. noise next to the multi-second partial `bundle exec rspec` boot the delta triggers anyway. If payint measures > 1s, add an mtime-keyed content cache as a follow-up issue rather than blocking this task — but record the number either way.
+
+- [ ] **Step 4: Full gates + commit**
 
 ```bash
 bundle exec rspec
 bundle exec exe/active_mutator lib --changed
-git add lib/active_mutator/baseline_delta.rb spec/active_mutator/baseline_delta_spec.rb
+git add lib/active_mutator/baseline_delta.rb spec/active_mutator/baseline_delta_spec.rb docs/dogfood-log.md
 git commit -m "feat: delta refresh re-runs constant-referencing non-covering spec files
 
 Refs #11"
@@ -1612,7 +1953,7 @@ Expected now (Task 9 merged): PASS. If it fails, debug Task 9 — do not weaken 
 
 - [ ] **Step 2: Update the docs**
 
-`docs/guides/how-it-works.md` — rewrite the blind-spot passage (lines ~142–158) to say: the delta refresh now *also* re-runs unchanged spec files that reference a constant defined in the changed source file but currently contribute zero coverage to it (word-boundary text match on Prism-extracted class/module names, full-run fallback above 50% of spec files). State the **residual** gap precisely: an example that newly covers the change *without any textual reference to its constants* (pure indirection), or a partially-covering spec file whose other examples newly cover — still recovered by nightly `--force-baseline`. Update the summary bullet at line ~320 the same way. Update the two `README.md` mentions (lines ~241 and ~302) from "recovers the blind spot" to "recovers the residual blind spot (constant-reference detection handles the common case since 0.2)".
+`docs/guides/how-it-works.md` — rewrite the blind-spot passage (lines ~142–158) to say: the delta refresh now *also* re-runs unchanged spec files that reference a constant defined in the changed source file but currently contribute zero coverage to it (word-boundary text match on Prism-extracted **fully qualified** class/module names, full-run fallback above 50% of spec files with a stderr warning when it trips). State the **residual** gap precisely — three cases, all still recovered by nightly `--force-baseline`: an example that newly covers the change *without any textual reference to its constants* (pure indirection); a partially-covering spec file whose other examples newly cover; and a spec file referencing a *nested* constant by bare leaf name only (leaf shorthand is deliberately not matched — see `DefinedConstants`). Update the summary bullet at line ~320 the same way. Update the two `README.md` mentions (lines ~241 and ~302) from "recovers the blind spot" to "recovers the residual blind spot (constant-reference detection handles the common case since 0.2)".
 
 - [ ] **Step 3: Full gates + bench + commit**
 
@@ -1671,11 +2012,13 @@ git commit -m "docs: phase 4 dogfood results"
 
 **Coverage vs the three issues:**
 - **#21** — pinned corpus (committed fixtures + git/SHA target type), matrix over `--jobs` (and any flag, e.g. `timeout_factor`) per `targets.json`, Stryker JSON + terminal capture (`exec.log`, per-cell stdout in the log) saved per cell, per-stage wall times (baseline vs mutation via the `--max-mutants 0` trick) and mutant counts (in the Stryker report), cross-run differ with score delta, status transitions, added/removed mutants. Deviation (external SHA-pinned repos not seeded) is declared in the header with rationale. Per-operator wall-time delta from the issue is **not** delivered: per-mutant timing does not exist in the Stryker report or anywhere in the runtime today; adding it is runtime work out of #21's "no runtime path changes" lane — flagged here honestly, follow-up candidate once #17's report carries timing extras.
-- **#9** — observed actual-vs-estimate ratio from finished workers (issue text), warm-up N=5, running median, clamp 0.5–4 (roadmap), serial-lane `browser_boot_seconds` stays additive (roadmap), static flags remain as the starting budget and `--no-adaptive-timeout` restores exact pre-#9 behavior (backward compat), acceptance measured on the bench harness (Task 7 Step 5) and payint dogfood (Task 11).
-- **#11** — "cheap detection of coverage-set growth" delivered as constant-reference scanning of currently-non-covering spec files, with a >50% full-run safety valve, zero disk work when nothing changed, integration proof that the pre-fix behavior fails (Task 10 spec is the exact blind-spot scenario from how-it-works.md), residual gap documented, `--force-baseline` guidance updated rather than removed.
+- **#9** — observed actual-vs-estimate ratio from finished workers (issue text), sampled from **killed forks only** (errors finish artificially fast, survivors run the whole covering set, timeouts have no known wall time — each exclusion stated and spec'd), utilization measured against the **effective budget the fork ran under** (ratchet-proof; recovery spec'd in Task 5), **one calibrator per lane** so parallel-load medians never scale serial budgets, warm-up N=5, running median, clamp 0.5–4 (roadmap), serial-lane `browser_boot_seconds` stays additive (roadmap), static flags remain as the starting budget and `--no-adaptive-timeout` restores exact pre-#9 behavior (backward compat), effective budgets surfaced via the once-per-change `adaptive timeout scale` stderr line (spec'd), acceptance measured on the deterministic bench gate (cells run `--no-adaptive-timeout`, Task 7 Steps 4/6) plus a manual adaptive fixture run, and payint dogfood (Task 11).
+- **#11** — "cheap detection of coverage-set growth" delivered as constant-reference scanning of currently-non-covering spec files using **fully qualified names only** (common bare leaves like `Config` deliberately excluded, with a delta-level spec for exactly that case), a >50% full-run safety valve that **warns on stderr** when it trips (spec'd), zero disk work when nothing changed, hot-path cost measured and bounded on this repo and payint (Task 9 Step 3), integration proof that the pre-fix behavior fails (Task 10 spec is the exact blind-spot scenario from how-it-works.md), the three residual gaps documented, `--force-baseline` guidance updated rather than removed. Parse boundary pinned: errors blank `DefinedConstants` output, warnings do not (both spec'd with in-spec preconditions on the fixture).
 
 **Placeholder scan:** no "TBD"/"similar to Task N". Two intentional soft spots, both bounded and justified: Task 6 Step 1 and Task 10 Step 1 tell the worker to reuse the existing spec file's helpers/scaffolding instead of pasting duplicates — the assertions, fixture semantics, and expected values are fully specified; only the helper names come from the file being edited. Task 4's dogfood-log row has `<fill from bench.json>` for measured wall times, which cannot be known before the run by definition.
 
-**Type/name consistency:** `TimeoutCalibrator` (`record(item, elapsed_seconds)`, `budget_for(item)`, `scale`) used identically in Tasks 5–7. `WorkItem` fields `variable`/`boot_extra` introduced in Task 5, populated in Task 6 Step 2, consumed in Task 5's math and Task 6's scheduler specs; defaults (0.0) keep Task 5's spec and all pre-existing call sites valid before Task 6 lands. Config field `adaptive_timeout` spelled identically in `Config`, CLI defaults, option, config-file key, and Runner. `Bench::Plan::Cell` fields (`id, target_name, type, path, git_url, git_sha, argv`) match between Task 2's implementation and Task 3's specs. `DefinedConstants.in_source` name matches Tasks 8 and 9. `newly_covering_candidates` returns `[]` / list / `:full`, and `compute` handles all three.
+**Type/name consistency:** `TimeoutCalibrator` API is `record(elapsed_seconds, budget)`, `budget_for(item)`, `warmed?`, `scale` — used with exactly these signatures in Task 5's specs/implementation, Task 6's scheduler (`calibrator_for(item)&.record(now - entry[:started], entry[:budget])`), and Task 6's `fake_calibrator` stub. The Scheduler keyword is `calibrators:` (a `{parallel:, serial:}` hash) everywhere: Task 6 helper, Task 6 implementation, Task 7 Runner wiring and its three specs. `WorkItem` fields `variable`/`boot_extra` introduced and default-pinned in Task 5 (`work_item_spec.rb`), populated in Task 6 Step 2, consumed by the calibrator math. Config field `adaptive_timeout` spelled identically in `Config`, CLI defaults, `--[no-]adaptive-timeout`, config-file `:boolean` key, Runner, and the bench matrix key. **Config.new call sites audited in Task 7 Step 2** (exactly two; the one with explicit keywords gets the exact edit shown). `Bench::Plan::Cell` fields (`id, target_name, type, path, git_url, git_sha, argv`) match between Task 2's implementation and Task 3's specs; Task 7 Step 4's `flag_argv`/`adaptive_default` revision updates Task 2's argv expectations in the same step. `DefinedConstants.in_source` name matches Tasks 8 and 9. `newly_covering_candidates` returns `[]` / list / `:full`, and `compute` handles all three.
 
-**Ordering:** #21 lands first and pins a baseline (Task 4) precisely so #9 (Task 7 Step 5) and #11 (Task 10 Step 3) are gated by a regression diff — the roadmap's rationale ("#21 gates the other two") is preserved.
+**Determinism audit:** the bench-diff exit-0 gate only ever runs cells with static budgets (`--no-adaptive-timeout` appended by default from Task 7 Step 4 onward; before Task 7 the flag doesn't exist and static is the only behavior) — Killed↔Timeout flips cannot make the gate intermittently red. Adaptive behavior is exercised by unit/scheduler specs with stubbed calibrators (no wall-clock dependence) and eyeballed via the manual fixture run in Task 7 Step 6.
+
+**Ordering:** #21 lands first and pins a baseline (Task 4) precisely so #9 (Task 7 Step 6) and #11 (Task 10 Step 3) are gated by a regression diff — the roadmap's rationale ("#21 gates the other two") is preserved.
