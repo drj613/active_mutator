@@ -644,7 +644,9 @@ RSpec.describe ActiveMutator::Runner do
         File.write(File.join(root, "lib", "a.rb"), "class A\n  def x\n    1 > 0\n  end\nend\n")
         FileUtils.mkdir_p(File.join(root, "spec"))
         File.write(File.join(root, "spec", "spec_helper.rb"), "$am_call_helper_loaded = true\n")
-        ex.run
+        # cwd inside the tmp root: these examples write a real ledger, and a
+        # gate mutant that relativizes its path must not hit the repo root.
+        Dir.chdir(root) { ex.run }
       end
     ensure
       ENV.delete("ACTIVE_MUTATOR")

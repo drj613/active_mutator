@@ -2,6 +2,16 @@ require "tmpdir"
 require "json"
 
 RSpec.describe ActiveMutator::AcceptedLedger do
+  # Run each example with cwd inside the tmpdir: under the self-mutation gate
+  # a mutant can collapse the ledger path to a cwd-relative one, and workers
+  # run with cwd = repo root — without this, AtomicFile's .lock/.tmp siblings
+  # (and worse, the ledger itself) would land in the real repo root.
+  def with_ledger_root
+    Dir.mktmpdir do |root|
+      Dir.chdir(root) { yield root }
+    end
+  end
+
   def fp(ordinal: 0, file: "lib/calc.rb", subject: "Calc#go")
     ActiveMutator::Fingerprint.new(file: file, subject: subject,
                                  description: "replace `>` with `>=`",
@@ -9,14 +19,14 @@ RSpec.describe ActiveMutator::AcceptedLedger do
   end
 
   it "loads an empty ledger when the file is absent" do
-    Dir.mktmpdir do |root|
+    with_ledger_root do |root|
       ledger = described_class.load(root)
       expect(ledger.accepted?(fp)).to be(false)
     end
   end
 
   it "round-trips acceptance" do
-    Dir.mktmpdir do |root|
+    with_ledger_root do |root|
       described_class.load(root).accept!([fp], [fp, fp(ordinal: 1)], scanned_files: ["lib/calc.rb"])
       reloaded = described_class.load(root)
       expect(reloaded.accepted?(fp)).to be(true)
@@ -26,7 +36,7 @@ RSpec.describe ActiveMutator::AcceptedLedger do
   end
 
   it "prunes entries that no longer match any current mutant on accept!" do
-    Dir.mktmpdir do |root|
+    with_ledger_root do |root|
       described_class.load(root).accept!([fp], [fp], scanned_files: ["lib/calc.rb"])
       # Next accept with a current set that no longer contains fp:
       described_class.load(root).accept!([fp(ordinal: 1)], [fp(ordinal: 1)], scanned_files: ["lib/calc.rb"])
@@ -37,7 +47,7 @@ RSpec.describe ActiveMutator::AcceptedLedger do
   end
 
   it "keeps out-of-scope entries while adding new ones when scanned_files is nil" do
-    Dir.mktmpdir do |root|
+    with_ledger_root do |root|
       other = fp(file: "lib/other.rb", subject: "Other#go")
       described_class.load(root).accept!([other], [other], scanned_files: ["lib/other.rb"])
       # Scoped run: `other` matches no current mutant, but nothing was fully scanned.
@@ -49,7 +59,7 @@ RSpec.describe ActiveMutator::AcceptedLedger do
   end
 
   it "prunes stale entries only within the scanned files on accept!" do
-    Dir.mktmpdir do |root|
+    with_ledger_root do |root|
       stale_in_scope = fp(ordinal: 1)
       out_of_scope = fp(file: "lib/other.rb", subject: "Other#go")
       described_class.load(root)
@@ -65,14 +75,14 @@ RSpec.describe ActiveMutator::AcceptedLedger do
   end
 
   it "returns nil from accept! rather than leaking the writer's return value" do
-    Dir.mktmpdir do |root|
+    with_ledger_root do |root|
       allow(ActiveMutator::AtomicFile).to receive(:write).and_return(:written)
       expect(described_class.load(root).accept!([fp], [fp], scanned_files: ["lib/calc.rb"])).to be_nil
     end
   end
 
   it "reports stale entries without mutating the file" do
-    Dir.mktmpdir do |root|
+    with_ledger_root do |root|
       described_class.load(root).accept!([fp], [fp], scanned_files: ["lib/calc.rb"])
       ledger = described_class.load(root)
       expect(ledger.stale_entries([fp(ordinal: 1)], scanned_files: ["lib/calc.rb"]).size).to eq(1)
@@ -81,7 +91,7 @@ RSpec.describe ActiveMutator::AcceptedLedger do
   end
 
   it "reports only in-scope stale entries from stale_entries" do
-    Dir.mktmpdir do |root|
+    with_ledger_root do |root|
       out_of_scope = fp(file: "lib/other.rb", subject: "Other#go")
       described_class.load(root).accept!([fp, out_of_scope], [fp, out_of_scope],
                                          scanned_files: ["lib/calc.rb", "lib/other.rb"])
@@ -91,7 +101,7 @@ RSpec.describe ActiveMutator::AcceptedLedger do
   end
 
   it "reports entries whose file is missing from missing_file_entries" do
-    Dir.mktmpdir do |root|
+    with_ledger_root do |root|
       FileUtils.mkdir_p(File.join(root, "lib"))
       File.write(File.join(root, "lib", "calc.rb"), "# present")
       gone = fp(file: "lib/gone.rb", subject: "Gone#away")
@@ -101,7 +111,7 @@ RSpec.describe ActiveMutator::AcceptedLedger do
   end
 
   it "keeps missing-file entries across an unscoped accept! (deletion is the user's call)" do
-    Dir.mktmpdir do |root|
+    with_ledger_root do |root|
       gone = fp(file: "lib/gone.rb", subject: "Gone#away")
       described_class.load(root).accept!([gone], [gone], scanned_files: ["lib/gone.rb"])
       # Unscoped run over the whole (now gone.rb-less) tree:
@@ -113,7 +123,7 @@ RSpec.describe ActiveMutator::AcceptedLedger do
   end
 
   it "reports no stale entries when scanned_files is nil" do
-    Dir.mktmpdir do |root|
+    with_ledger_root do |root|
       described_class.load(root).accept!([fp], [fp], scanned_files: ["lib/calc.rb"])
       ledger = described_class.load(root)
       expect(ledger.stale_entries([], scanned_files: nil)).to eq([])
