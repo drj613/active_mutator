@@ -128,8 +128,10 @@ Each character on the progress line is one mutant, printed as it finishes:
 
 `invalid` mutants (edits that don't even re-parse as valid Ruby) are
 discarded before scheduling and reported as a count only. Exit code is `1`
-if unaccepted survivors exist, `0` otherwise, including when there are
-only `uncovered`, `accepted`, or `error` results.
+if unaccepted survivors exist (or, with `--fail-at`, if the score is below
+the threshold), `0` otherwise, including when there are only `uncovered`,
+`accepted`, or `error` results. The JSON report's `exit_reason` field
+reflects survivor presence, independent of the `--fail-at` gate.
 
 When survivors exist, the summary also prints a per-operator table showing
 how often each operator's mutants survive, to help spot likely-equivalent
@@ -159,7 +161,8 @@ the serial lane for browser specs, timeout budgets, and every status, is in
 
 ```bash
 active_mutator                          # mutate app/ and lib/, full run
-active_mutator app/models               # scope by path
+active_mutator app/models               # scope by path (directory)
+active_mutator app/models/document.rb   # scope to a single file
 active_mutator --changed                # uncommitted work only (dev loop)
 active_mutator --since origin/main      # PR scope (CI)
 active_mutator --subject 'Foo::Bar#baz' # one method
@@ -190,7 +193,10 @@ Statuses: `killed` (test failed, this is good), `survived` (test gap),
 `timeout` (counts as detected), `uncovered` (no covering example, this is
 coverage debt), `accepted` (known-equivalent, see ledger), `error`,
 `invalid` (discarded).
-Exit code 1 if unaccepted survivors exist.
+Exit code is 1 if unaccepted survivors exist (or, with `--fail-at`, if the
+score is below the threshold). Mistyped positional paths (a file that
+doesn't exist, or a non-`.rb` file) are an error (exit 2) instead of a
+vacuous green run.
 
 Score = (killed + timeout) / (killed + timeout + survived).
 
@@ -210,6 +216,9 @@ git add .active_mutator_accepted.json                     # committed state
 ```
 
 Acceptance takes effect on the next run. The accepting run still exits 1.
+Scoped accepting runs (`--changed`, `--subject`, path args) are safe: the
+ledger only prunes entries in files fully scanned by non-narrowed runs, so
+out-of-scope acceptances are never dropped.
 Agent workflow: see [`docs/skills/mutation-check.md`](docs/skills/mutation-check.md).
 
 ## Reports
@@ -251,6 +260,7 @@ survivors show inline on the PR diff. Pairs with the CI recipe:
 | `--browser-boot-seconds S` | 15 | serial-lane timeout bump |
 | `--timeout-factor F` / `--timeout-floor S` | 8 / 10 | mutation timeout budget |
 | `--require FILE` | none | preload files (repeatable) |
+| `--fail-at SCORE` | none (strict) | exit 0 if score >= SCORE even with survivors (opt-in relaxation for gradual adoption; 0 = report-only) |
 
 `--debug-plan` prints the planned mutant list as one JSON document
 (`{"planned": [...], "pre_resolved": {...}}`) and exits without running
@@ -262,6 +272,26 @@ guard SimpleCov or other tooling in your spec helper:
 
 ```ruby
 SimpleCov.start "rails" unless ENV["ACTIVE_MUTATOR"]
+```
+
+## Configuration file
+
+Put team-wide settings in `.active_mutator.yml` at the project root; CLI
+flags override file values (`--require` and `--exclude` add to the file's
+lists; the first `--serial-pattern` replaces them). Recognized keys:
+`jobs`, `format`, `timeout_factor`, `timeout_floor`,
+`browser_boot_seconds`, `fail_at`, `exclude`, `serial_patterns`,
+`requires`, `preload_helper` (a path, or `false` to skip preload).
+Unknown keys and wrong types are errors, not silent no-ops.
+
+```yaml
+# .active_mutator.yml
+jobs: 4
+exclude:
+  - lib/generated
+serial_patterns:
+  - spec/system/
+fail_at: 90   # legacy suite: gate on score instead of zero-survivors
 ```
 
 ## Known limits (v1.1)

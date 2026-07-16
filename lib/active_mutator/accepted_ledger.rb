@@ -5,6 +5,10 @@ module ActiveMutator
   # Committed, repo-root ledger of accepted (equivalent) survivors.
   # Deliberately NOT inside .active_mutator/: that dir is gitignored and
   # disposable, while acceptance decisions are durable team/CI state.
+  #
+  # Entries whose file no longer exists are kept, not pruned: the file may
+  # still exist on another branch, so deletion is the user's call. The runner
+  # warns about them on every run instead (see #missing_file_entries).
   class AcceptedLedger
     FILENAME = ".active_mutator_accepted.json"
 
@@ -28,16 +32,27 @@ module ActiveMutator
 
     def accepted?(fingerprint) = @entries.include?(fingerprint)
 
-    def stale_entries(all_current_fingerprints)
+    # Entries outside the scanned files can't be judged by this run, so they
+    # are never stale here. scanned_files: nil means "no file was fully
+    # scanned" (subject-level filtering active) — union only, prune nothing.
+    # See #24: a scoped accept run once deleted every out-of-scope entry.
+    def stale_entries(all_current_fingerprints, scanned_files:)
+      return [] if scanned_files.nil?
+
       current = all_current_fingerprints.to_set
-      @entries.reject { |e| current.include?(e) }
+      scanned = scanned_files.to_set
+      @entries.reject { |e| current.include?(e) || !scanned.include?(e.file) }
     end
 
-    # Union new acceptances in, prune anything no longer matching a current
-    # mutant, write atomically.
-    def accept!(new_fingerprints, all_current_fingerprints)
-      current = all_current_fingerprints.to_set
-      @entries = (@entries + new_fingerprints).uniq.select { |e| current.include?(e) }
+    # Missing is objective regardless of run scope: such entries can never
+    # appear in scanned_files, so without this they'd be immortal AND silent.
+    def missing_file_entries(root)
+      @entries.reject { |e| File.exist?(File.join(root, e.file)) }
+    end
+
+    def accept!(new_fingerprints, all_current_fingerprints, scanned_files:)
+      stale = stale_entries(all_current_fingerprints, scanned_files: scanned_files).to_set
+      @entries = (@entries + new_fingerprints).uniq.reject { |e| stale.include?(e) }
       AtomicFile.write(@path, JSON.pretty_generate(@entries.map(&:to_h)))
       nil
     end

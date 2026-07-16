@@ -1,8 +1,16 @@
 require "tmpdir"
 
 RSpec.describe ActiveMutator::AtomicFile do
-  it "writes content atomically" do
+  # cwd inside the tmpdir for the same reason as the ledger specs: a gate
+  # mutant that relativizes the target path must not write into the repo root.
+  def with_tmp_root
     Dir.mktmpdir do |dir|
+      Dir.chdir(dir) { yield dir }
+    end
+  end
+
+  it "writes content atomically" do
+    with_tmp_root do |dir|
       path = File.join(dir, "data.json")
       described_class.write(path, "{}")
       expect(File.read(path)).to eq("{}")
@@ -11,13 +19,13 @@ RSpec.describe ActiveMutator::AtomicFile do
   end
 
   it "returns nil rather than the rename result" do
-    Dir.mktmpdir do |dir|
+    with_tmp_root do |dir|
       expect(described_class.write(File.join(dir, "data.json"), "{}")).to be_nil
     end
   end
 
   it "creates the lock file with 0644 permissions" do
-    Dir.mktmpdir do |dir|
+    with_tmp_root do |dir|
       path = File.join(dir, "data.json")
       described_class.write(path, "{}")
       expect(File.stat("#{path}.lock").mode & 0o777).to eq(0o644)
@@ -25,7 +33,7 @@ RSpec.describe ActiveMutator::AtomicFile do
   end
 
   it "holds an exclusive flock on the lock file while writing" do
-    Dir.mktmpdir do |dir|
+    with_tmp_root do |dir|
       path = File.join(dir, "data.json")
       locked_during_write = nil
       allow(File).to receive(:write).and_wrap_original do |original, *args|
@@ -40,7 +48,7 @@ RSpec.describe ActiveMutator::AtomicFile do
   end
 
   it "serializes concurrent writers via the lock file" do
-    Dir.mktmpdir do |dir|
+    with_tmp_root do |dir|
       path = File.join(dir, "data.txt")
       pids = 4.times.map do |i|
         fork { 50.times { described_class.write(path, "writer-#{i}-" * 100) } }

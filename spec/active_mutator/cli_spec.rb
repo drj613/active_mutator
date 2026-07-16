@@ -1,3 +1,5 @@
+require "tmpdir"
+
 RSpec.describe ActiveMutator::CLI do
   describe ".parse" do
     it "builds a default config" do
@@ -83,7 +85,8 @@ RSpec.describe ActiveMutator::CLI do
         "Mutate matching subjects: Foo::Bar#baz, Foo::Bar, Foo::Bar*, Foo::Bar#*",
         "Concurrent workers (default: half the CPU count)",
         "Output format",
-        "File to require before mutating (repeatable)",
+        "File to require before mutating (repeatable; adds to config-file requires)",
+        "Exit 0 if mutation score >= SCORE even with survivors (default: any survivor fails)",
         "Ignore cached coverage map",
         "Timeout = baseline time * F + floor",
         "Minimum timeout seconds",
@@ -132,6 +135,70 @@ RSpec.describe ActiveMutator::CLI do
 
     it "defaults debug_plan to false" do
       expect(described_class.parse([]).debug_plan).to be false
+    end
+
+    it "parses --fail-at as a float" do
+      expect(described_class.parse(["--fail-at", "92.5"]).fail_at).to eq(92.5)
+    end
+
+    it "accepts --fail-at at the range boundaries" do
+      expect(described_class.parse(["--fail-at", "0"]).fail_at).to eq(0.0)
+      expect(described_class.parse(["--fail-at", "100"]).fail_at).to eq(100.0)
+    end
+
+    it "rejects --fail-at outside 0..100" do
+      expect { described_class.parse(["--fail-at", "101"]) }
+        .to raise_error(OptionParser::InvalidArgument, /must be within 0\.\.100/)
+      expect { described_class.parse(["--fail-at", "-1"]) }
+        .to raise_error(OptionParser::InvalidArgument, /must be within 0\.\.100/)
+    end
+
+    it "defaults fail_at to nil" do
+      expect(described_class.parse([]).fail_at).to be_nil
+    end
+  end
+
+  describe "config file layering" do
+    around do |ex|
+      Dir.mktmpdir do |dir|
+        Dir.chdir(dir) { ex.run }
+      end
+    end
+
+    it "seeds defaults from .active_mutator.yml" do
+      File.write(".active_mutator.yml", "jobs: 3\nfail_at: 85\n")
+      config = described_class.parse([])
+      expect(config.jobs).to eq(3)
+      expect(config.fail_at).to eq(85.0)
+    end
+
+    it "lets CLI flags override file values" do
+      File.write(".active_mutator.yml", "jobs: 3\nformat: json\n")
+      config = described_class.parse(["--jobs", "7", "--format", "terminal"])
+      expect(config.jobs).to eq(7)
+      expect(config.format).to eq(:terminal)
+    end
+
+    it "lets --serial-pattern replace file-provided serial_patterns" do
+      File.write(".active_mutator.yml", "serial_patterns:\n  - spec/system/\n")
+      config = described_class.parse(["--serial-pattern", "spec/browser/"])
+      expect(config.serial_patterns).to eq(["spec/browser/"])
+    end
+
+    it "surfaces config file errors as exit code 2 via run" do
+      File.write(".active_mutator.yml", "bogus_key: 1\n")
+      expect { @code = described_class.run([]) }.to output(/unknown config key/).to_stderr
+      expect(@code).to eq(2)
+    end
+
+    it "accumulates --require flags onto file-provided requires" do
+      File.write(".active_mutator.yml", "requires:\n  - a.rb\n")
+      config = described_class.parse(["--require", "b.rb"])
+      expect(config.requires).to eq(["a.rb", "b.rb"])
+    end
+
+    it "works with no config file present" do
+      expect(described_class.parse([]).fail_at).to be_nil
     end
   end
 

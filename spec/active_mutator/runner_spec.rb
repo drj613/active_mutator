@@ -8,7 +8,7 @@ RSpec.describe ActiveMutator::Runner do
       requires: [], timeout_factor: 4.0, timeout_floor: 2.0, force_baseline: false,
       root: "/project", preload_helper: nil, serial_patterns: ["spec/system/", "spec/features/"],
       browser_boot_seconds: 15.0, accept_survivors: false, exclude: [],
-      max_mutants: nil, debug_plan: false
+      max_mutants: nil, debug_plan: false, fail_at: nil
     )
   end
 
@@ -104,6 +104,40 @@ RSpec.describe ActiveMutator::Runner do
     killed = ActiveMutator::Result.new(mutation: mutation, status: :killed, details: nil)
     expect(described_class.new(config).exit_code([killed, survived])).to eq(1)
     expect(described_class.new(config).exit_code([killed])).to eq(0)
+  end
+
+  describe "#exit_code with fail_at" do
+    def result(status)
+      ActiveMutator::Result.new(mutation: mutation, status: status, details: nil)
+    end
+
+    def results(**counts)
+      counts.flat_map { |status, n| Array.new(n) { result(status) } }
+    end
+
+    it "exits 1 on any survivor when fail_at is nil" do
+      expect(described_class.new(config).exit_code(results(killed: 99, survived: 1))).to eq(1)
+    end
+
+    it "exits 0 when the score meets the threshold exactly" do
+      runner = described_class.new(config.with(fail_at: 90.0))
+      expect(runner.exit_code(results(killed: 9, survived: 1))).to eq(0)
+    end
+
+    it "exits 1 when the score is below the threshold" do
+      runner = described_class.new(config.with(fail_at: 90.0))
+      expect(runner.exit_code(results(killed: 8, survived: 2))).to eq(1)
+    end
+
+    it "counts timeouts as detected" do
+      runner = described_class.new(config.with(fail_at: 90.0))
+      expect(runner.exit_code(results(timeout: 9, survived: 1))).to eq(0)
+    end
+
+    it "exits 0 with no survivors regardless of other statuses" do
+      runner = described_class.new(config.with(fail_at: 100.0))
+      expect(runner.exit_code(results(uncovered: 3))).to eq(0)
+    end
   end
 
   describe "#preload_spec_helper!" do
@@ -261,7 +295,7 @@ RSpec.describe ActiveMutator::Runner do
       ledger = instance_double(ActiveMutator::AcceptedLedger)
       expect(ledger).not_to receive(:accept!)
       killed = ActiveMutator::Result.new(mutation: mutation, status: :killed, details: nil)
-      described_class.new(config).send(:accept_survivors!, ledger, [killed], { mutation => "fp" })
+      described_class.new(config).send(:accept_survivors!, ledger, [killed], { mutation => "fp" }, ["lib/a.rb"])
     end
 
     it "accepts surviving fingerprints into the ledger" do
@@ -269,8 +303,8 @@ RSpec.describe ActiveMutator::Runner do
       m = mutation
       survived = ActiveMutator::Result.new(mutation: m, status: :survived, details: nil)
       fingerprints = { m => "fp1" }
-      expect(ledger).to receive(:accept!).with(["fp1"], ["fp1"])
-      described_class.new(config).send(:accept_survivors!, ledger, [survived], fingerprints)
+      expect(ledger).to receive(:accept!).with(["fp1"], ["fp1"], scanned_files: ["lib/a.rb"])
+      described_class.new(config).send(:accept_survivors!, ledger, [survived], fingerprints, ["lib/a.rb"])
     end
   end
 
@@ -397,6 +431,67 @@ RSpec.describe ActiveMutator::Runner do
 
         runner = described_class.new(config.with(root: dir, paths: []))
         expect(runner.send(:discover_subjects).map(&:name)).to contain_exactly("AppKeep#a", "LibKeep#a")
+      end
+    end
+
+    it "uses a positional file path directly, yielding only that file's subjects" do
+      Dir.mktmpdir do |dir|
+        FileUtils.mkdir_p(File.join(dir, "lib"))
+        File.write(File.join(dir, "lib", "wanted.rb"), "class Wanted; def a; 1; end; end")
+        File.write(File.join(dir, "lib", "decoy.rb"), "class Decoy; def a; 1; end; end")
+
+        runner = described_class.new(config.with(root: dir, paths: ["lib/wanted.rb"]))
+        expect(runner.send(:discover_subjects).map(&:name)).to eq(["Wanted#a"])
+      end
+    end
+
+    it "still globs a positional directory recursively" do
+      Dir.mktmpdir do |dir|
+        FileUtils.mkdir_p(File.join(dir, "lib", "nested"))
+        File.write(File.join(dir, "lib", "top.rb"), "class Top; def a; 1; end; end")
+        File.write(File.join(dir, "lib", "nested", "deep.rb"), "class Deep; def a; 1; end; end")
+
+        runner = described_class.new(config.with(root: dir, paths: ["lib"]))
+        expect(runner.send(:discover_subjects).map(&:name)).to contain_exactly("Top#a", "Deep#a")
+      end
+    end
+
+    it "raises for a nonexistent positional path instead of silently matching nothing" do
+      Dir.mktmpdir do |dir|
+        runner = described_class.new(config.with(root: dir, paths: ["app/models/typo.rb"]))
+        expect { runner.send(:discover_subjects) }
+          .to raise_error(ActiveMutator::Error, /app\/models\/typo\.rb/)
+      end
+    end
+
+    it "raises for a directly named non-Ruby file" do
+      Dir.mktmpdir do |dir|
+        File.write(File.join(dir, "README.md"), "# readme")
+
+        runner = described_class.new(config.with(root: dir, paths: ["README.md"]))
+        expect { runner.send(:discover_subjects) }
+          .to raise_error(ActiveMutator::Error, /not a Ruby file/)
+      end
+    end
+
+    it "yields each subject once when a file arg overlaps a directory arg" do
+      Dir.mktmpdir do |dir|
+        FileUtils.mkdir_p(File.join(dir, "lib"))
+        File.write(File.join(dir, "lib", "foo.rb"), "class Foo; def a; 1; end; end")
+
+        runner = described_class.new(config.with(root: dir, paths: ["lib", "lib/foo.rb"]))
+        expect(runner.send(:discover_subjects).map(&:name)).to eq(["Foo#a"])
+      end
+    end
+
+    it "applies exclude patterns to directly named files" do
+      Dir.mktmpdir do |dir|
+        FileUtils.mkdir_p(File.join(dir, "lib", "generated"))
+        File.write(File.join(dir, "lib", "generated", "skip.rb"), "class Skip; def a; 1; end; end")
+
+        runner = described_class.new(config.with(root: dir, paths: ["lib/generated/skip.rb"],
+                                                 exclude: ["lib/generated/**"]))
+        expect(runner.send(:discover_subjects)).to eq([])
       end
     end
 
@@ -549,7 +644,9 @@ RSpec.describe ActiveMutator::Runner do
         File.write(File.join(root, "lib", "a.rb"), "class A\n  def x\n    1 > 0\n  end\nend\n")
         FileUtils.mkdir_p(File.join(root, "spec"))
         File.write(File.join(root, "spec", "spec_helper.rb"), "$am_call_helper_loaded = true\n")
-        ex.run
+        # cwd inside the tmp root: these examples write a real ledger, and a
+        # gate mutant that relativizes its path must not hit the repo root.
+        Dir.chdir(root) { ex.run }
       end
     ensure
       ENV.delete("ACTIVE_MUTATOR")
@@ -609,10 +706,86 @@ RSpec.describe ActiveMutator::Runner do
 
     it "warns about stale accepted fingerprints" do
       allow(map).to receive(:examples_for).and_return([])
-      stale = { "file" => "lib/gone.rb", "subject" => "Gone#away", "description" => "d",
+      # Stale entry inside a fully scanned file; entries in unscanned files
+      # are out of scope and never warned about (#24).
+      stale = { "file" => "lib/a.rb", "subject" => "Gone#away", "description" => "d",
                 "original_snippet" => "x", "ordinal" => 0 }
       File.write(File.join(@root, ActiveMutator::AcceptedLedger::FILENAME), JSON.generate([stale]))
       expect { call_runner }.to output(/stale accepted fingerprint.*Gone#away/).to_stderr
+    end
+
+    it "warns about accepted fingerprints referencing missing files" do
+      allow(map).to receive(:examples_for).and_return([])
+      gone = { "file" => "lib/gone.rb", "subject" => "Gone#away", "description" => "d",
+               "original_snippet" => "x", "ordinal" => 0 }
+      File.write(File.join(@root, ActiveMutator::AcceptedLedger::FILENAME), JSON.generate([gone]))
+      expect { call_runner }
+        .to output(/accepted fingerprint references missing file: lib\/gone\.rb \(Gone#away\)/).to_stderr
+    end
+
+    it "warns about missing-file entries even on a scoped run" do
+      allow(map).to receive(:examples_for).and_return([])
+      gone = { "file" => "lib/gone.rb", "subject" => "Gone#away", "description" => "d",
+               "original_snippet" => "x", "ordinal" => 0 }
+      File.write(File.join(@root, ActiveMutator::AcceptedLedger::FILENAME), JSON.generate([gone]))
+      expect { call_runner(subject_filter: "A#x") }
+        .to output(/accepted fingerprint references missing file: lib\/gone\.rb/).to_stderr
+    end
+
+    describe "prune scope wiring" do
+      let(:ledger) do
+        instance_double(ActiveMutator::AcceptedLedger, accepted?: false, stale_entries: [],
+                                                       missing_file_entries: [], accept!: nil)
+      end
+
+      before do
+        allow(ActiveMutator::AcceptedLedger).to receive(:load).and_return(ledger)
+        allow(map).to receive(:examples_for).and_return(["./spec/a_spec.rb[1:1]"])
+      end
+
+      def surviving_scheduler!
+        allow(ActiveMutator::Scheduler).to receive(:new) do |**|
+          instance_double(ActiveMutator::Scheduler).tap do |s|
+            allow(s).to receive(:run) do |items|
+              items.map { |i| ActiveMutator::Result.new(mutation: i.mutation, status: :survived, details: nil) }
+            end
+          end
+        end
+      end
+
+      it "passes the root-relative scanned files to accept! on an unfiltered run" do
+        surviving_scheduler!
+        call_runner(accept_survivors: true)
+        expect(ledger).to have_received(:accept!).with(anything, anything, scanned_files: ["lib/a.rb"])
+      end
+
+      it "passes the scanned files to stale_entries on an unfiltered run" do
+        call_runner
+        expect(ledger).to have_received(:stale_entries).with(anything, scanned_files: ["lib/a.rb"])
+      end
+
+      it "passes scanned_files: nil when a subject filter is active" do
+        surviving_scheduler!
+        call_runner(accept_survivors: true, subject_filter: "A#x")
+        expect(ledger).to have_received(:accept!).with(anything, anything, scanned_files: nil)
+        expect(ledger).to have_received(:stale_entries).with(anything, scanned_files: nil)
+      end
+
+      it "passes scanned_files: nil when --since is active" do
+        filter = instance_double(ActiveMutator::SinceFilter, cover?: true)
+        allow(ActiveMutator::SinceFilter).to receive(:new).and_return(filter)
+        surviving_scheduler!
+        call_runner(accept_survivors: true, since: "main")
+        expect(ledger).to have_received(:accept!).with(anything, anything, scanned_files: nil)
+        expect(ledger).to have_received(:stale_entries).with(anything, scanned_files: nil)
+      end
+
+      it "passes scanned_files: nil when max_mutants truncates the run" do
+        surviving_scheduler!
+        call_runner(accept_survivors: true, max_mutants: 1)
+        expect(ledger).to have_received(:accept!).with(anything, anything, scanned_files: nil)
+        expect(ledger).to have_received(:stale_entries).with(anything, scanned_files: nil)
+      end
     end
 
     it "prints the plan and skips execution with --debug-plan" do

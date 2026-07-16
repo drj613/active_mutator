@@ -21,7 +21,8 @@ module ActiveMutator
 
       fingerprints = Fingerprint.for_mutations(mutations, root: @config.root)
       ledger = AcceptedLedger.load(@config.root)
-      warn_stale(ledger, fingerprints.values)
+      scanned_files = prune_scope(subjects)
+      warn_stale(ledger, fingerprints.values, scanned_files)
 
       items, pre_results = plan_work(mutations, map, ledger: ledger, fingerprints: fingerprints)
       return debug_plan(items, pre_results) if @config.debug_plan
@@ -30,7 +31,7 @@ module ActiveMutator
       scheduler = Scheduler.new(jobs: @config.jobs, on_result: @reporter.method(:on_result))
       results = scheduler.run(items) + pre_results
 
-      accept_survivors!(ledger, results, fingerprints) if @config.accept_survivors
+      accept_survivors!(ledger, results, fingerprints, scanned_files) if @config.accept_survivors
 
       @reporter.summary(results, invalid_count: invalid_count)
       exit_code(results)
@@ -59,7 +60,13 @@ module ActiveMutator
     end
 
     def exit_code(results)
-      results.any? { |r| r.status == :survived } ? 1 : 0
+      survived = results.count { |r| r.status == :survived }
+      return 0 if survived.zero?
+      return 1 unless @config.fail_at
+
+      detected = results.count { |r| %i[killed timeout].include?(r.status) }
+      score = detected * 100.0 / (detected + survived)
+      score >= @config.fail_at ? 0 : 1
     end
 
     private
@@ -96,7 +103,8 @@ module ActiveMutator
     def discover_subjects
       paths = @config.paths.empty? ? default_paths : @config.paths
       subjects = paths
-        .flat_map { |p| Dir[File.join(@config.root, p, "**", "*.rb")] }
+        .flat_map { |p| expand_path_arg(p) }
+        .uniq
         .reject { |file| excluded?(file) }
         .sort.flat_map { |file| SubjectFinder.call(file) }
       if @config.subject_filter
@@ -108,6 +116,22 @@ module ActiveMutator
         subjects = subjects.select { |s| filter.cover?(s) }
       end
       subjects
+    end
+
+    # Positional args may be files or directories. Anything else is an error:
+    # a mistyped path that silently matched nothing produced a false green
+    # (0 subjects, exit 0) — see #23.
+    def expand_path_arg(path)
+      full = File.expand_path(path, @config.root)
+      if File.file?(full)
+        raise Error, "not a Ruby file: #{path}" unless full.end_with?(".rb")
+
+        [full]
+      elsif Dir.exist?(full)
+        Dir[File.join(full, "**", "*.rb")]
+      else
+        raise Error, "no such file or directory: #{path}"
+      end
     end
 
     def excluded?(file)
@@ -162,11 +186,22 @@ module ActiveMutator
       SimpleCov.at_exit {} if defined?(SimpleCov)
     end
 
-    def accept_survivors!(ledger, results, fingerprints)
+    # Only a run with no subject-level narrowing has fully scanned a file;
+    # anything narrower must not prune (or warn about) out-of-scope entries.
+    # MAINTENANCE: any future flag that narrows the mutant set below "every
+    # subject in the scanned files" MUST be added to this nil-trigger list,
+    # or scoped accept runs will clobber out-of-scope ledger entries (#24).
+    def prune_scope(subjects)
+      return nil if @config.subject_filter || @config.since || @config.max_mutants
+
+      subjects.map { |s| s.file.delete_prefix("#{@config.root}/") }.uniq
+    end
+
+    def accept_survivors!(ledger, results, fingerprints, scanned_files)
       survivors = results.select { |r| r.status == :survived }.map { |r| fingerprints[r.mutation] }
       return if survivors.empty?
 
-      ledger.accept!(survivors, fingerprints.values)
+      ledger.accept!(survivors, fingerprints.values, scanned_files: scanned_files)
     end
 
     def debug_plan(items, pre_results)
@@ -181,9 +216,12 @@ module ActiveMutator
       0
     end
 
-    def warn_stale(ledger, all_fingerprints)
-      ledger.stale_entries(all_fingerprints).each do |entry|
+    def warn_stale(ledger, all_fingerprints, scanned_files)
+      ledger.stale_entries(all_fingerprints, scanned_files: scanned_files).each do |entry|
         warn "active_mutator: stale accepted fingerprint (no matching mutant): #{entry.subject}, #{entry.description}"
+      end
+      ledger.missing_file_entries(@config.root).each do |entry|
+        warn "active_mutator: accepted fingerprint references missing file: #{entry.file} (#{entry.subject})"
       end
     end
   end
