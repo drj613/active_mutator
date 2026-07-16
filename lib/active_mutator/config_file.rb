@@ -16,7 +16,7 @@ module ActiveMutator
       "timeout_factor" => :number,
       "timeout_floor" => :number,
       "browser_boot_seconds" => :number,
-      "fail_at" => :number,
+      "fail_at" => :score,
       "exclude" => :string_list,
       "serial_patterns" => :string_list,
       "requires" => :string_list,
@@ -52,6 +52,10 @@ module ActiveMutator
         value
       when :number
         raise Error, "#{FILENAME}: #{key} must be a number" unless value.is_a?(Numeric)
+        value.to_f
+      when :score
+        raise Error, "#{FILENAME}: #{key} must be a number" unless value.is_a?(Numeric)
+        raise Error, "#{FILENAME}: #{key} must be within 0..100" unless (0..100).cover?(value)
         value.to_f
       when :format
         unless FORMATS.include?(value)

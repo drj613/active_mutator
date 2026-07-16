@@ -56,9 +56,34 @@ RSpec.describe ActiveMutator::ConfigFile do
   end
 
   it "raises when a number key is not numeric" do
+    write_config("timeout_factor: fast\n")
+    expect { described_class.load(root) }
+      .to raise_error(ActiveMutator::Error, /timeout_factor must be a number/)
+  end
+
+  it "raises when fail_at is not numeric" do
     write_config("fail_at: fast\n")
     expect { described_class.load(root) }
       .to raise_error(ActiveMutator::Error, /fail_at must be a number/)
+  end
+
+  it "raises when fail_at is outside 0..100" do
+    write_config("fail_at: 150\n")
+    expect { described_class.load(root) }
+      .to raise_error(ActiveMutator::Error, /fail_at must be within 0\.\.100/)
+    write_config("fail_at: 100.5\n")
+    expect { described_class.load(root) }
+      .to raise_error(ActiveMutator::Error, /fail_at must be within 0\.\.100/)
+    write_config("fail_at: -0.5\n")
+    expect { described_class.load(root) }
+      .to raise_error(ActiveMutator::Error, /fail_at must be within 0\.\.100/)
+  end
+
+  it "accepts fail_at at the range boundaries" do
+    write_config("fail_at: 0\n")
+    expect(described_class.load(root)).to eq(fail_at: 0.0)
+    write_config("fail_at: 100\n")
+    expect(described_class.load(root)).to eq(fail_at: 100.0)
   end
 
   it "lists the valid formats in the format error" do

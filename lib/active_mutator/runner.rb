@@ -59,7 +59,13 @@ module ActiveMutator
     end
 
     def exit_code(results)
-      results.any? { |r| r.status == :survived } ? 1 : 0
+      survived = results.count { |r| r.status == :survived }
+      return 0 if survived.zero?
+      return 1 unless @config.fail_at
+
+      detected = results.count { |r| %i[killed timeout].include?(r.status) }
+      score = detected * 100.0 / (detected + survived)
+      score >= @config.fail_at ? 0 : 1
     end
 
     private

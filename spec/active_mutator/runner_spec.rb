@@ -106,6 +106,40 @@ RSpec.describe ActiveMutator::Runner do
     expect(described_class.new(config).exit_code([killed])).to eq(0)
   end
 
+  describe "#exit_code with fail_at" do
+    def result(status)
+      ActiveMutator::Result.new(mutation: mutation, status: status, details: nil)
+    end
+
+    def results(**counts)
+      counts.flat_map { |status, n| Array.new(n) { result(status) } }
+    end
+
+    it "exits 1 on any survivor when fail_at is nil" do
+      expect(described_class.new(config).exit_code(results(killed: 99, survived: 1))).to eq(1)
+    end
+
+    it "exits 0 when the score meets the threshold exactly" do
+      runner = described_class.new(config.with(fail_at: 90.0))
+      expect(runner.exit_code(results(killed: 9, survived: 1))).to eq(0)
+    end
+
+    it "exits 1 when the score is below the threshold" do
+      runner = described_class.new(config.with(fail_at: 90.0))
+      expect(runner.exit_code(results(killed: 8, survived: 2))).to eq(1)
+    end
+
+    it "counts timeouts as detected" do
+      runner = described_class.new(config.with(fail_at: 90.0))
+      expect(runner.exit_code(results(timeout: 9, survived: 1))).to eq(0)
+    end
+
+    it "exits 0 with no survivors regardless of other statuses" do
+      runner = described_class.new(config.with(fail_at: 100.0))
+      expect(runner.exit_code(results(uncovered: 3))).to eq(0)
+    end
+  end
+
   describe "#preload_spec_helper!" do
     it "requires rails_helper when present, in preference order" do
       Dir.mktmpdir do |dir|

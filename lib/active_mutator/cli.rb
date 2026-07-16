@@ -33,7 +33,7 @@ module ActiveMutator
         o.on("--subject NAME", "Mutate matching subjects: Foo::Bar#baz, Foo::Bar, Foo::Bar*, Foo::Bar#*") { |v| options[:subject_filter] = v }
         o.on("--jobs N", Integer, "Concurrent workers (default: half the CPU count)") { |v| options[:jobs] = v }
         o.on("--format FMT", ConfigFile::FORMATS, "Output format") { |v| options[:format] = v.tr("-", "_").to_sym }
-        o.on("--require FILE", "File to require before mutating (repeatable)") { |v| options[:requires] << v }
+        o.on("--require FILE", "File to require before mutating (repeatable; adds to config-file requires)") { |v| options[:requires] << v }
         o.on("--force-baseline", "Ignore cached coverage map") { options[:force_baseline] = true }
         o.on("--timeout-factor F", Float, "Timeout = baseline time * F + floor") { |v| options[:timeout_factor] = v }
         o.on("--timeout-floor S", Float, "Minimum timeout seconds") { |v| options[:timeout_floor] = v }
@@ -49,6 +49,10 @@ module ActiveMutator
         o.on("--exclude PAT", "Skip files matching glob, relative to root (repeatable)") { |v| options[:exclude] << v }
         o.on("--max-mutants N", Integer, "Deterministically sample the first N mutants") { |v| options[:max_mutants] = v }
         o.on("--debug-plan", "Print the planned mutant list as JSON and exit") { options[:debug_plan] = true }
+        o.on("--fail-at SCORE", Float, "Exit 0 if mutation score >= SCORE even with survivors (default: any survivor fails)") do |v|
+          raise OptionParser::InvalidArgument, "--fail-at must be within 0..100" unless (0..100).cover?(v)
+          options[:fail_at] = v
+        end
       end.parse(argv)
       options.delete(:serial_patterns_replaced)
 

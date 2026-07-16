@@ -85,7 +85,8 @@ RSpec.describe ActiveMutator::CLI do
         "Mutate matching subjects: Foo::Bar#baz, Foo::Bar, Foo::Bar*, Foo::Bar#*",
         "Concurrent workers (default: half the CPU count)",
         "Output format",
-        "File to require before mutating (repeatable)",
+        "File to require before mutating (repeatable; adds to config-file requires)",
+        "Exit 0 if mutation score >= SCORE even with survivors (default: any survivor fails)",
         "Ignore cached coverage map",
         "Timeout = baseline time * F + floor",
         "Minimum timeout seconds",
@@ -135,6 +136,26 @@ RSpec.describe ActiveMutator::CLI do
     it "defaults debug_plan to false" do
       expect(described_class.parse([]).debug_plan).to be false
     end
+
+    it "parses --fail-at as a float" do
+      expect(described_class.parse(["--fail-at", "92.5"]).fail_at).to eq(92.5)
+    end
+
+    it "accepts --fail-at at the range boundaries" do
+      expect(described_class.parse(["--fail-at", "0"]).fail_at).to eq(0.0)
+      expect(described_class.parse(["--fail-at", "100"]).fail_at).to eq(100.0)
+    end
+
+    it "rejects --fail-at outside 0..100" do
+      expect { described_class.parse(["--fail-at", "101"]) }
+        .to raise_error(OptionParser::InvalidArgument, /must be within 0\.\.100/)
+      expect { described_class.parse(["--fail-at", "-1"]) }
+        .to raise_error(OptionParser::InvalidArgument, /must be within 0\.\.100/)
+    end
+
+    it "defaults fail_at to nil" do
+      expect(described_class.parse([]).fail_at).to be_nil
+    end
   end
 
   describe "config file layering" do
@@ -168,6 +189,12 @@ RSpec.describe ActiveMutator::CLI do
       File.write(".active_mutator.yml", "bogus_key: 1\n")
       expect { @code = described_class.run([]) }.to output(/unknown config key/).to_stderr
       expect(@code).to eq(2)
+    end
+
+    it "accumulates --require flags onto file-provided requires" do
+      File.write(".active_mutator.yml", "requires:\n  - a.rb\n")
+      config = described_class.parse(["--require", "b.rb"])
+      expect(config.requires).to eq(["a.rb", "b.rb"])
     end
 
     it "works with no config file present" do
