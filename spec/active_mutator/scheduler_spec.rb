@@ -1,5 +1,6 @@
 require "json"
 require "tempfile"
+require "tmpdir"
 
 RSpec.describe ActiveMutator::Scheduler do
   def item(timeout: 5.0, lane: :parallel)
@@ -26,6 +27,18 @@ RSpec.describe ActiveMutator::Scheduler do
     end
   end
 
+  # Poll waitpid2 so a child that never exits fails the spec instead of hanging it.
+  def wait_with_deadline(pid, seconds)
+    deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + seconds
+    loop do
+      done, status = Process.waitpid2(pid, Process::WNOHANG)
+      return status if done
+      return nil if Process.clock_gettime(Process::CLOCK_MONOTONIC) > deadline
+
+      sleep 0.05
+    end
+  end
+
   it "collects statuses reported by workers" do
     worker = ->(_m, _e, writer) { writer.puts(JSON.generate("status" => "killed", "details" => nil)) }
     results = scheduler(worker: worker).run([item, item, item])
@@ -46,6 +59,138 @@ RSpec.describe ActiveMutator::Scheduler do
     expect(Dir.children("/dev/fd").size).to eq(baseline)
   ensure
     GC.enable
+  end
+
+  it "closes the parent's reader copy inside the child" do
+    GC.disable
+    pipe_count = lambda do
+      Dir.children("/dev/fd").count do |fd|
+        # Skip std streams: the child reopens them to /dev/null, and they may
+        # be pipes in the parent (e.g. when rspec output is piped).
+        fd.to_i > 2 && File.stat("/dev/fd/#{fd}").pipe?
+      rescue StandardError
+        false
+      end
+    end
+    baseline = pipe_count.call
+    worker = ->(_m, _e, writer) { writer.puts(JSON.generate("status" => "killed", "details" => pipe_count.call)) }
+    results = scheduler(worker: worker).run([item])
+    expect(results.first.details).to eq(baseline + 1) # writer only; inherited reader closed
+  ensure
+    GC.enable
+  end
+
+  it "puts each worker in its own process group so a group kill reaps grandchildren" do
+    worker = lambda do |_m, _e, writer|
+      status = Process.getpgrp == Process.pid ? "killed" : "survived"
+      writer.puts(JSON.generate("status" => status, "details" => nil))
+    end
+    results = scheduler(worker: worker).run([item])
+    expect(results.map(&:status)).to eq([:killed])
+  end
+
+  it "silences worker stdout and stderr so app noise cannot corrupt the parent's streams" do
+    Dir.mktmpdir do |dir|
+      out_path = File.join(dir, "out")
+      err_path = File.join(dir, "err")
+      orig_out = $stdout.dup
+      orig_err = $stderr.dup
+      begin
+        $stdout.reopen(out_path, "w")
+        $stderr.reopen(err_path, "w")
+        worker = lambda do |_m, _e, writer|
+          $stdout.puts "LEAK-STDOUT"
+          $stderr.puts "LEAK-STDERR"
+          $stdout.flush
+          $stderr.flush
+          writer.puts(JSON.generate("status" => "killed", "details" => nil))
+        end
+        scheduler(worker: worker).run([item])
+      ensure
+        $stdout.reopen(orig_out)
+        $stderr.reopen(orig_err)
+      end
+      expect(File.read(out_path)).to eq("")
+      expect(File.read(err_path)).to eq("")
+    end
+  end
+
+  it "flushes buffered worker output by closing the writer in the child" do
+    worker = lambda do |_m, _e, writer|
+      writer.sync = false
+      writer.write(JSON.generate("status" => "killed", "details" => nil))
+    end
+    results = scheduler(worker: worker).run([item])
+    expect(results.map(&:status)).to eq([:killed]) # exit! without close would drop the buffer
+  end
+
+  it "terminates workers with exit! so child at_exit hooks never run" do
+    Dir.mktmpdir do |dir|
+      flag = File.join(dir, "flag")
+      worker = lambda do |_m, _e, writer|
+        at_exit { File.write(flag, "ran") }
+        writer.puts(JSON.generate("status" => "killed", "details" => nil))
+      end
+      scheduler(worker: worker).run([item])
+      expect(File.exist?(flag)).to be(false)
+    end
+  end
+
+  it "falls back to a direct SIGKILL when the worker has no process group of its own" do
+    pid = fork { sleep 30 }
+    sched = scheduler(worker: ->(_m, _e, _w) {})
+    expect { sched.send(:kill, pid) }.not_to raise_error
+    expect_process_gone(pid)
+  ensure
+    begin
+      Process.kill("KILL", pid)
+      Process.waitpid(pid)
+    rescue StandardError
+      nil
+    end
+  end
+
+  it "kills running workers and exits with status 130 on SIGINT" do
+    # Touch install_signal_handlers in THIS process too: the real assertion runs
+    # in a fork, and forked coverage never reaches the baseline coverage map, so
+    # without this the example is never selected to run against these mutants.
+    scheduler(worker: ->(_m, _e, _w) {}).run([])
+    Dir.mktmpdir do |dir|
+      worker_pid_file = File.join(dir, "worker_pid")
+      supervisor = fork do
+        sched = described_class.new(jobs: 1, worker: lambda do |_m, _e, _w|
+          File.write(worker_pid_file, Process.pid.to_s)
+          sleep 30
+        end)
+        sched.run([item])
+        Process.exit!(99) # unreachable: the INT trap must exit the process first
+      end
+      begin
+        deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + 5
+        sleep 0.05 until File.exist?(worker_pid_file) ||
+                         Process.clock_gettime(Process::CLOCK_MONOTONIC) > deadline
+        worker_pid = File.read(worker_pid_file).to_i
+        expect(worker_pid).to be > 0
+        Process.kill("INT", supervisor)
+        status = wait_with_deadline(supervisor, 5)
+        expect(status&.exitstatus).to eq(130)
+        expect_process_gone(worker_pid)
+      ensure
+        begin
+          Process.kill("KILL", supervisor)
+          Process.waitpid(supervisor)
+        rescue StandardError
+          nil
+        end
+        if File.exist?(worker_pid_file)
+          [-File.read(worker_pid_file).to_i, File.read(worker_pid_file).to_i].each do |target|
+            Process.kill("KILL", target)
+          rescue StandardError
+            nil
+          end
+        end
+      end
+    end
   end
 
   it "installs INT handling for the duration of the run and restores the previous handler" do

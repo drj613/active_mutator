@@ -10,6 +10,12 @@ RSpec.describe ActiveMutator::AtomicFile do
     end
   end
 
+  it "returns nil rather than the rename result" do
+    Dir.mktmpdir do |dir|
+      expect(described_class.write(File.join(dir, "data.json"), "{}")).to be_nil
+    end
+  end
+
   it "creates the lock file with 0644 permissions" do
     Dir.mktmpdir do |dir|
       path = File.join(dir, "data.json")

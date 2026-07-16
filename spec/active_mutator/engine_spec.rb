@@ -39,6 +39,12 @@ RSpec.describe ActiveMutator::Engine do
     expect(mutation.line).to eq(3)
   end
 
+  it "counts newlines from the very first byte of the file when computing the line" do
+    mutation = analyze("\n#{source}").mutations
+      .find { |m| m.edit.description == "replace `>` with `>=`" }
+    expect(mutation.line).to eq(4) # leading blank line pushes `>` to line 4
+  end
+
   it "only mutates inside the subject's def" do
     two_methods = <<~RUBY
       class Gate

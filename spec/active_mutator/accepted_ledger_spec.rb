@@ -36,6 +36,13 @@ RSpec.describe ActiveMutator::AcceptedLedger do
     end
   end
 
+  it "returns nil from accept! rather than leaking the writer's return value" do
+    Dir.mktmpdir do |root|
+      allow(ActiveMutator::AtomicFile).to receive(:write).and_return(:written)
+      expect(described_class.load(root).accept!([fp], [fp])).to be_nil
+    end
+  end
+
   it "reports stale entries without mutating the file" do
     Dir.mktmpdir do |root|
       described_class.load(root).accept!([fp], [fp])

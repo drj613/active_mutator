@@ -29,7 +29,10 @@ RSpec.describe ActiveMutator::Reporter::Json do
       "status" => "survived",
       "description" => "replace `<` with `<=`",
       "file" => "lib/calculator.rb",
-      "line" => 11
+      "line" => 11,
+      "original" => "<",
+      "replacement" => "<=",
+      "details" => nil
     )
     expect(data["exit_reason"]).to eq("unaccepted_survivors")
   end

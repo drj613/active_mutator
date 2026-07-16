@@ -22,6 +22,11 @@ RSpec.describe ActiveMutator::Inserter do
     expect(InserterFixture.new.value).to eq(99)
   end
 
+  it "returns nil, not the eval result" do
+    expect(inserter.insert(mutation_stub(scope: "InserterFixture", def_source: "def value = 99")))
+      .to be_nil
+  end
+
   it "redefines a singleton method" do
     inserter.insert(mutation_stub(scope: "InserterFixture",
                                   def_source: "def self.build = :mutated", kind: :singleton))
