@@ -18,7 +18,8 @@ module ActiveMutator
       def loc_range(loc) = loc.start_offset...loc.end_offset
 
       def edit(range, replacement, description)
-        Edit.new(range: range, replacement: replacement, description: description)
+        Edit.new(range: range, replacement: replacement, description: description,
+                 operator: self.class.name.split("::").last)
       end
     end
   end

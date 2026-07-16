@@ -53,6 +53,6 @@ jobs:
           bundler-cache: true
       - name: Self-mutation on PR diff (advisory)
         run: |
-          bundle exec exe/active_mutator lib --since "origin/${{ github.base_ref }}" || {
+          bundle exec exe/active_mutator lib --format github --since "origin/${{ github.base_ref }}" || {
             echo "::warning title=Surviving mutants::Self-mutation found unaccepted survivors in this PR's diff (advisory until #25 is triaged). See job log."
           }

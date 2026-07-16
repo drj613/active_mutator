@@ -12,6 +12,7 @@ module ActiveMutator
       preload!
       preload_spec_helper!
       map = Baseline.new(root: @config.root).coverage_map(force: @config.force_baseline)
+      @reporter.coverage_map = map if @reporter.respond_to?(:coverage_map=)
       subjects = discover_subjects
       analyses = subjects.map { |s| Engine.new.analyze(s) }
       mutations = analyses.flat_map(&:mutations)
@@ -64,7 +65,12 @@ module ActiveMutator
     private
 
     def build_reporter
-      @config.format == :json ? Reporter::Json.new : Reporter::Terminal.new
+      case @config.format
+      when :json then Reporter::Json.new
+      when :stryker_json then Reporter::StrykerJson.new(root: @config.root)
+      when :github then Reporter::Github.new(root: @config.root)
+      else Reporter::Terminal.new
+      end
     end
 
     def preload!

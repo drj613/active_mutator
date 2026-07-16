@@ -31,7 +31,7 @@ module ActiveMutator
         o.on("--changed", "Mutate uncommitted work (alias for --since HEAD, plus untracked files)") { options[:since] = "HEAD" }
         o.on("--subject NAME", "Mutate matching subjects: Foo::Bar#baz, Foo::Bar, Foo::Bar*, Foo::Bar#*") { |v| options[:subject_filter] = v }
         o.on("--jobs N", Integer, "Concurrent workers (default: half the CPU count)") { |v| options[:jobs] = v }
-        o.on("--format FMT", %w[terminal json], "Output format") { |v| options[:format] = v.to_sym }
+        o.on("--format FMT", %w[terminal json stryker-json github], "Output format") { |v| options[:format] = v.tr("-", "_").to_sym }
         o.on("--require FILE", "File to require before mutating (repeatable)") { |v| options[:requires] << v }
         o.on("--force-baseline", "Ignore cached coverage map") { options[:force_baseline] = true }
         o.on("--timeout-factor F", Float, "Timeout = baseline time * F + floor") { |v| options[:timeout_factor] = v }
