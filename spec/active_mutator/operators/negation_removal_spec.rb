@@ -12,4 +12,10 @@ RSpec.describe ActiveMutator::Operators::NegationRemoval do
   it "ignores binary operators" do
     expect(mutations_of("a != b", operator)).to eq([])
   end
+
+  it "labels the edit with an exact description" do
+    edits = []
+    each_node(Prism.parse("!ready?").value) { |n| edits.concat(operator.edits(n)) }
+    expect(edits.map(&:description)).to eq(["remove negation"])
+  end
 end

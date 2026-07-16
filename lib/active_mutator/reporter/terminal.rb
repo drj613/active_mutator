@@ -21,6 +21,9 @@ module ActiveMutator
         @out.puts format("Mutation score: %.1f%%", score(counts) * 100)
         survivors = results.select { |r| r.status == :survived }
         print_survivors(survivors) unless survivors.empty?
+        stats = OperatorStats.call(results)
+        noisy = stats.select { |_, s| s["survived"].positive? }
+        print_operator_stats(noisy) unless noisy.empty?
       end
 
       def self.score(counts)
@@ -34,6 +37,14 @@ module ActiveMutator
       private
 
       def score(counts) = self.class.score(counts)
+
+      def print_operator_stats(stats)
+        @out.puts "", "Equivalent-rate by operator (survived / (killed + survived)):"
+        stats.sort_by { |_, s| -s["equivalent_rate"] }.each do |operator, s|
+          @out.puts format("  %-24s %5.1f%%  (%d survived / %d killed)",
+                           operator, s["equivalent_rate"] * 100, s["survived"], s["killed"])
+        end
+      end
 
       def print_survivors(survivors)
         @out.puts "", "Surviving mutants:"

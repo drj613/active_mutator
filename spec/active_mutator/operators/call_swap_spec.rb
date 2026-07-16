@@ -24,4 +24,9 @@ RSpec.describe ActiveMutator::Operators::CallSwap do
   it "ignores unmapped calls" do
     expect(mutations_of("xs.compact", operator)).to eq([])
   end
+
+  it "ignores receiverless calls with mapped names" do
+    expect(mutations_of("min", operator)).to eq([])
+    expect(mutations_of("map { |x| x }", operator)).to eq([])
+  end
 end

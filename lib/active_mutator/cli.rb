@@ -22,15 +22,16 @@ module ActiveMutator
         # boot cost (RSpec setup + spec file loading).
         requires: [], timeout_factor: 8.0, timeout_floor: 10.0, force_baseline: false,
         preload_helper: nil, serial_patterns: ["spec/system/", "spec/features/"],
-        browser_boot_seconds: 15.0, accept_survivors: false
+        browser_boot_seconds: 15.0, accept_survivors: false, exclude: [],
+        max_mutants: nil, debug_plan: false
       }
       paths = OptionParser.new do |o|
         o.banner = "Usage: active_mutator [paths] [options]"
         o.on("--since REF", "Mutate only methods changed since git REF") { |v| options[:since] = v }
         o.on("--changed", "Mutate uncommitted work (alias for --since HEAD, plus untracked files)") { options[:since] = "HEAD" }
-        o.on("--subject NAME", "Mutate only the named subject, e.g. Foo::Bar#baz") { |v| options[:subject_filter] = v }
+        o.on("--subject NAME", "Mutate matching subjects: Foo::Bar#baz, Foo::Bar, Foo::Bar*, Foo::Bar#*") { |v| options[:subject_filter] = v }
         o.on("--jobs N", Integer, "Concurrent workers (default: half the CPU count)") { |v| options[:jobs] = v }
-        o.on("--format FMT", %w[terminal json], "Output format") { |v| options[:format] = v.to_sym }
+        o.on("--format FMT", %w[terminal json stryker-json github], "Output format") { |v| options[:format] = v.tr("-", "_").to_sym }
         o.on("--require FILE", "File to require before mutating (repeatable)") { |v| options[:requires] << v }
         o.on("--force-baseline", "Ignore cached coverage map") { options[:force_baseline] = true }
         o.on("--timeout-factor F", Float, "Timeout = baseline time * F + floor") { |v| options[:timeout_factor] = v }
@@ -44,6 +45,9 @@ module ActiveMutator
         end
         o.on("--browser-boot-seconds S", Float, "Extra timeout budget for serial-lane mutants") { |v| options[:browser_boot_seconds] = v }
         o.on("--accept-survivors", "Record surviving mutants into the acceptance ledger") { options[:accept_survivors] = true }
+        o.on("--exclude PAT", "Skip files matching glob, relative to root (repeatable)") { |v| options[:exclude] << v }
+        o.on("--max-mutants N", Integer, "Deterministically sample the first N mutants") { |v| options[:max_mutants] = v }
+        o.on("--debug-plan", "Print the planned mutant list as JSON and exit") { options[:debug_plan] = true }
       end.parse(argv)
       options.delete(:serial_patterns_replaced)
 

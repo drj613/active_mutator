@@ -11,6 +11,12 @@ RSpec.describe ActiveMutator::Operators::LogicalOperator do
       .to contain_exactly("a && b", "a", "b")
   end
 
+  it "labels each operand-dropping variant distinctly" do
+    node = Prism.parse("a && b").value.statements.body.first
+    expect(operator.edits(node).map(&:description))
+      .to contain_exactly("replace `&&` with `||`", "keep only left operand", "keep only right operand")
+  end
+
   it "handles keyword and/or (operator swap keeps symbol form)" do
     expect(mutations_of("a and b", operator)).to include("a || b", "a", "b")
   end

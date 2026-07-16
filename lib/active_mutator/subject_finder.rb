@@ -1,18 +1,26 @@
+require "set"
+
 module ActiveMutator
   class SubjectFinder < Prism::Visitor
+    SKIP_MARKER = /#\s*active_mutator:\s*skip\b/
+
     def self.call(file)
       result = Prism.parse(File.read(file))
       return [] unless result.success?
 
-      finder = new(file)
+      skip_lines = result.comments
+        .select { |c| c.slice.match?(SKIP_MARKER) }
+        .to_set { |c| c.location.start_line }
+      finder = new(file, skip_lines: skip_lines)
       finder.visit(result.value)
       finder.subjects
     end
 
     attr_reader :subjects
 
-    def initialize(file)
+    def initialize(file, skip_lines: Set.new)
       @file = file
+      @skip_lines = skip_lines
       @stack = []
       @subjects = []
       super()
@@ -29,7 +37,16 @@ module ActiveMutator
     # `class << self` bodies are a documented v1 limit: not visited.
     def visit_singleton_class_node(node); end
 
+    # Defs inside blocks (`Data.define do ... end`, `class_eval do ... end`)
+    # do not live on the enclosing constant scope, so Inserter would redefine
+    # them on the wrong constant and every mutant would falsely survive.
+    # Same v1 limit as `class << self`: not visited. Note this also hides
+    # classes/modules defined inside blocks (accepted v1 limit).
+    def visit_block_node(node); end
+
     def visit_def_node(node)
+      return if @skip_lines.include?(node.location.start_line - 1)
+
       singleton = node.receiver.is_a?(Prism::SelfNode)
       scope = @stack.empty? ? nil : @stack.join("::")
       loc = node.location

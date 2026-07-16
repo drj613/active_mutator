@@ -22,10 +22,24 @@ RSpec.describe ActiveMutator::Inserter do
     expect(InserterFixture.new.value).to eq(99)
   end
 
+  it "returns nil, not the eval result" do
+    expect(inserter.insert(mutation_stub(scope: "InserterFixture", def_source: "def value = 99")))
+      .to be_nil
+  end
+
   it "redefines a singleton method" do
     inserter.insert(mutation_stub(scope: "InserterFixture",
                                   def_source: "def self.build = :mutated", kind: :singleton))
     expect(InserterFixture.build).to eq(:mutated)
+  end
+
+  it "evals top-level subjects (nil constant_scope) at main scope" do
+    inserter.insert(mutation_stub(scope: nil,
+                                  def_source: "def am_inserter_spec_toplevel = :toplevel"))
+    expect(Object.new.send(:am_inserter_spec_toplevel)).to eq(:toplevel)
+  ensure
+    Object.send(:undef_method, :am_inserter_spec_toplevel) if
+      Object.method_defined?(:am_inserter_spec_toplevel, true)
   end
 
   it "raises for unknown scopes" do

@@ -1,0 +1,177 @@
+[
+  {
+    "file": "lib/active_mutator/worker.rb",
+    "subject": "ActiveMutator::Worker#run",
+    "description": "delete `require \"rspec/core\"`",
+    "original_snippet": "require \"rspec/core\"",
+    "ordinal": 0
+  },
+  {
+    "file": "lib/active_mutator/worker.rb",
+    "subject": "ActiveMutator::Worker#run",
+    "description": "delete `RSpec.configuration.fail_fast = 1`",
+    "original_snippet": "RSpec.configuration.fail_fast = 1",
+    "ordinal": 0
+  },
+  {
+    "file": "lib/active_mutator/worker.rb",
+    "subject": "ActiveMutator::Worker#run",
+    "description": "delete `after_fork_hygiene`",
+    "original_snippet": "after_fork_hygiene",
+    "ordinal": 0
+  },
+  {
+    "file": "lib/active_mutator/subject_finder.rb",
+    "subject": "ActiveMutator::SubjectFinder#initialize",
+    "description": "delete `super()`",
+    "original_snippet": "super()",
+    "ordinal": 0
+  },
+  {
+    "file": "lib/active_mutator/engine.rb",
+    "subject": "ActiveMutator::Engine#build_mutation",
+    "description": "return nil instead",
+    "original_snippet": "return [nil, false]",
+    "ordinal": 0
+  },
+  {
+    "file": "lib/active_mutator/engine.rb",
+    "subject": "ActiveMutator::Engine#build_mutation",
+    "description": "return nil instead",
+    "original_snippet": "return [nil, false]",
+    "ordinal": 1
+  },
+  {
+    "file": "lib/active_mutator/operators/call_swap.rb",
+    "subject": "ActiveMutator::Operators::CallSwap#edits",
+    "description": "keep only left operand",
+    "original_snippet": "node.is_a?(Prism::CallNode) && node.receiver && node.message_loc",
+    "ordinal": 0
+  },
+  {
+    "file": "lib/active_mutator/operators/conditional_boundary.rb",
+    "subject": "ActiveMutator::Operators::ConditionalBoundary#edits",
+    "description": "keep only right operand",
+    "original_snippet": "node.receiver && node.arguments&.arguments&.size == 1",
+    "ordinal": 0
+  },
+  {
+    "file": "lib/active_mutator/operators/negation_removal.rb",
+    "subject": "ActiveMutator::Operators::NegationRemoval#edits",
+    "description": "keep only left operand",
+    "original_snippet": "node.is_a?(Prism::CallNode) && node.name == :! && node.receiver",
+    "ordinal": 0
+  },
+  {
+    "file": "lib/active_mutator/scheduler.rb",
+    "subject": "ActiveMutator::Scheduler#run",
+    "description": "delete `previous_traps = nil`",
+    "original_snippet": "previous_traps = nil",
+    "ordinal": 0
+  },
+  {
+    "file": "lib/active_mutator/scheduler.rb",
+    "subject": "ActiveMutator::Scheduler#run",
+    "description": "delete `results.concat(run_pool(items.select { |i| i.lane == :serial }, 1, running))`",
+    "original_snippet": "results.concat(run_pool(items.select { |i| i.lane == :serial }, 1, running))",
+    "ordinal": 0
+  },
+  {
+    "file": "lib/active_mutator/scheduler.rb",
+    "subject": "ActiveMutator::Scheduler#run",
+    "description": "delete `results`",
+    "original_snippet": "results",
+    "ordinal": 0
+  },
+  {
+    "file": "lib/active_mutator/scheduler.rb",
+    "subject": "ActiveMutator::Scheduler#run",
+    "description": "replace `1` with `0`",
+    "original_snippet": "1",
+    "ordinal": 0
+  },
+  {
+    "file": "lib/active_mutator/scheduler.rb",
+    "subject": "ActiveMutator::Scheduler#run",
+    "description": "replace `1` with `2`",
+    "original_snippet": "1",
+    "ordinal": 0
+  },
+  {
+    "file": "lib/active_mutator/scheduler.rb",
+    "subject": "ActiveMutator::Scheduler#run",
+    "description": "force condition to `true`",
+    "original_snippet": "previous_traps",
+    "ordinal": 0
+  },
+  {
+    "file": "lib/active_mutator/scheduler.rb",
+    "subject": "ActiveMutator::Scheduler#run_pool",
+    "description": "delete `sleep 0.02 unless running.empty?`",
+    "original_snippet": "sleep 0.02 unless running.empty?",
+    "ordinal": 0
+  },
+  {
+    "file": "lib/active_mutator/scheduler.rb",
+    "subject": "ActiveMutator::Scheduler#run_pool",
+    "description": "replace `<` with `<=`",
+    "original_snippet": "<",
+    "ordinal": 0
+  },
+  {
+    "file": "lib/active_mutator/scheduler.rb",
+    "subject": "ActiveMutator::Scheduler#run_pool",
+    "description": "force condition to `true`",
+    "original_snippet": "running.empty?",
+    "ordinal": 0
+  },
+  {
+    "file": "lib/active_mutator/scheduler.rb",
+    "subject": "ActiveMutator::Scheduler#run_pool",
+    "description": "force condition to `false`",
+    "original_snippet": "running.empty?",
+    "ordinal": 0
+  },
+  {
+    "file": "lib/active_mutator/scheduler.rb",
+    "subject": "ActiveMutator::Scheduler#abort_if_orphaned!",
+    "description": "delete `running.clear`",
+    "original_snippet": "running.clear",
+    "ordinal": 0
+  },
+  {
+    "file": "lib/active_mutator/scheduler.rb",
+    "subject": "ActiveMutator::Scheduler#reap",
+    "description": "replace `>` with `>=`",
+    "original_snippet": ">",
+    "ordinal": 0
+  },
+  {
+    "file": "lib/active_mutator/worker.rb",
+    "subject": "ActiveMutator::Worker#covering_groups",
+    "description": "replace `.map` with `.each`",
+    "original_snippet": "map",
+    "ordinal": 0
+  },
+  {
+    "file": "lib/active_mutator/worker.rb",
+    "subject": "ActiveMutator::Worker#covering_groups",
+    "description": "replace `1` with `0`",
+    "original_snippet": "1",
+    "ordinal": 0
+  },
+  {
+    "file": "lib/active_mutator/worker.rb",
+    "subject": "ActiveMutator::Worker#covering_groups",
+    "description": "replace `.select` with `.reject`",
+    "original_snippet": "select",
+    "ordinal": 0
+  },
+  {
+    "file": "lib/active_mutator/scheduler.rb",
+    "subject": "ActiveMutator::Scheduler#spawn",
+    "description": "replace `0` with `1`",
+    "original_snippet": "0",
+    "ordinal": 2
+  }
+]

@@ -29,9 +29,26 @@ RSpec.describe ActiveMutator::Reporter::Json do
       "status" => "survived",
       "description" => "replace `<` with `<=`",
       "file" => "lib/calculator.rb",
-      "line" => 11
+      "line" => 11,
+      "original" => "<",
+      "replacement" => "<=",
+      "details" => nil
     )
     expect(data["exit_reason"]).to eq("unaccepted_survivors")
+  end
+
+  it "includes per-operator stats in the summary" do
+    edit = ActiveMutator::Edit.new(range: 0...1, replacement: "y", description: "d", operator: "CallSwap")
+    subject_ = ActiveMutator::Subject.new(name: "Foo#a", file: "foo.rb", byte_range: 0...10,
+                                          line_range: 1..2, constant_scope: ["Foo"], kind: :instance)
+    mutation = ActiveMutator::Mutation.new(subject: subject_, edit: edit, original_snippet: "x",
+                                           line: 1, mutated_file_source: "", mutated_def_source: "",
+                                           mutated_def_line: 1)
+    results = [ActiveMutator::Result.new(mutation: mutation, status: :killed, details: nil)]
+    reporter.summary(results, invalid_count: 0)
+    parsed = JSON.parse(out.string)
+    expect(parsed["operators"]).to be_a(Hash)
+    expect(parsed["operators"].values).to all(include("killed", "survived", "equivalent_rate"))
   end
 
   it "reports exit_reason clean when nothing survives" do

@@ -131,6 +131,10 @@ discarded before scheduling and reported as a count only. Exit code is `1`
 if unaccepted survivors exist, `0` otherwise, including when there are
 only `uncovered`, `accepted`, or `error` results.
 
+When survivors exist, the summary also prints a per-operator table showing
+how often each operator's mutants survive, to help spot likely-equivalent
+mutant patterns.
+
 ## How it works, compactly
 
 1. **Subject discovery**: a Prism visitor finds every method (`def`) in
@@ -159,6 +163,27 @@ active_mutator app/models               # scope by path
 active_mutator --changed                # uncommitted work only (dev loop)
 active_mutator --since origin/main      # PR scope (CI)
 active_mutator --subject 'Foo::Bar#baz' # one method
+active_mutator --exclude 'lib/generated' # skip a subtree (repeatable)
+```
+
+`--subject` also takes broader expressions: `Foo::Bar` (all methods of
+that constant), `Foo::Bar*` (raw name prefix — matches `Foo::Bar::Qux`
+and also `Foo::Barn`), `Foo::Bar#*` (instance
+methods only), `Foo::Bar.*` (singleton methods only).
+
+`--exclude PAT` is a glob relative to the project root, applied during
+subject discovery, and gitignore-like: `lib/generated`, `lib/generated/`,
+and `lib/generated/**` all exclude the whole subtree. File globs like
+`**/legacy/*` work too.
+
+Skip a single method by putting `# active_mutator:skip` on the line above
+its `def`:
+
+```ruby
+# active_mutator:skip
+def legacy_delegator
+  target.call
+end
 ```
 
 Statuses: `killed` (test failed, this is good), `survived` (test gap),
@@ -187,9 +212,23 @@ git add .active_mutator_accepted.json                     # committed state
 Acceptance takes effect on the next run. The accepting run still exits 1.
 Agent workflow: see [`docs/skills/mutation-check.md`](docs/skills/mutation-check.md).
 
+## Reports
+
+`--format stryker-json` writes `.active_mutator/mutation-report.json` in the
+Stryker [mutation-testing-report-schema](https://github.com/stryker-mutator/mutation-testing-elements)
+v2 format. Open it in the
+[Stryker report viewer](https://microsoft.github.io/mutation-testing-elements/)
+for per-file mutant maps with inline diffs, filterable by status.
+
+`--format github` prints one `::warning` annotation per surviving mutant, so
+survivors show inline on the PR diff. Pairs with the CI recipe:
+
+    bundle exec active_mutator --since origin/main --format github
+
 ## CI recipe
 
-- Per-PR: `active_mutator --since origin/main` (minutes)
+- Per-PR: `active_mutator --since origin/main --format github` (minutes;
+  survivors annotate the PR diff)
 - Nightly: `active_mutator --force-baseline` (full run; also recovers the
   incremental baseline's newly-covering-example blind spot)
 
@@ -200,8 +239,11 @@ Agent workflow: see [`docs/skills/mutation-check.md`](docs/skills/mutation-check
 | `--jobs N` | half the cores | fork-pool width |
 | `--changed` | none | mutate uncommitted + untracked work |
 | `--since REF` | none | mutate methods changed since REF |
-| `--subject NAME` | none | one subject, e.g. `Foo#bar` |
-| `--format terminal\|json` | terminal | report format |
+| `--subject EXPR` | none | subject expression, e.g. `Foo#bar`, `Foo::Bar`, `Foo::Bar*`, `Foo#*`, `Foo.*` |
+| `--exclude PAT` | none | skip files matching glob during subject discovery (repeatable, gitignore-like) |
+| `--max-mutants N` | none | deterministic sample of the first N mutants (quick smoke run on huge scopes; accepted/uncovered mutants count against N) |
+| `--debug-plan` | off | print planned mutants as JSON and exit without running |
+| `--format terminal\|json\|stryker-json\|github` | terminal | report format |
 | `--accept-survivors` | off | record survivors to the acceptance ledger |
 | `--force-baseline` | off | ignore cached coverage map |
 | `--preload-helper FILE` / `--no-preload-helper` | auto-detect | parent spec-helper preload |
@@ -209,6 +251,11 @@ Agent workflow: see [`docs/skills/mutation-check.md`](docs/skills/mutation-check
 | `--browser-boot-seconds S` | 15 | serial-lane timeout bump |
 | `--timeout-factor F` / `--timeout-floor S` | 8 / 10 | mutation timeout budget |
 | `--require FILE` | none | preload files (repeatable) |
+
+`--debug-plan` prints the planned mutant list as one JSON document
+(`{"planned": [...], "pre_resolved": {...}}`) and exits without running
+anything. A coverage baseline is still built or loaded, since timeouts
+and covering examples come from it.
 
 Every active_mutator process sets `ENV["ACTIVE_MUTATOR"] = "1"`. Use it to
 guard SimpleCov or other tooling in your spec helper:

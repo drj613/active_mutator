@@ -1,3 +1,5 @@
+require "json"
+
 module ActiveMutator
   class Runner
     def initialize(config, reporter: nil)
@@ -10,9 +12,11 @@ module ActiveMutator
       preload!
       preload_spec_helper!
       map = Baseline.new(root: @config.root).coverage_map(force: @config.force_baseline)
+      @reporter.coverage_map = map if @reporter.respond_to?(:coverage_map=)
       subjects = discover_subjects
       analyses = subjects.map { |s| Engine.new.analyze(s) }
       mutations = analyses.flat_map(&:mutations)
+      mutations = mutations.first(@config.max_mutants) if @config.max_mutants
       invalid_count = analyses.sum(&:invalid_count)
 
       fingerprints = Fingerprint.for_mutations(mutations, root: @config.root)
@@ -20,6 +24,8 @@ module ActiveMutator
       warn_stale(ledger, fingerprints.values)
 
       items, pre_results = plan_work(mutations, map, ledger: ledger, fingerprints: fingerprints)
+      return debug_plan(items, pre_results) if @config.debug_plan
+
       pre_results.each { |r| @reporter.on_result(r) }
       scheduler = Scheduler.new(jobs: @config.jobs, on_result: @reporter.method(:on_result))
       results = scheduler.run(items) + pre_results
@@ -39,7 +45,7 @@ module ActiveMutator
           pre_results << Result.new(mutation: mutation, status: :accepted, details: nil)
           next
         end
-        example_ids = map.examples_for(mutation.subject.file, mutation.lines)
+        example_ids = map.examples_for(mutation.subject.file, coverage_lines(mutation))
         if example_ids.empty?
           pre_results << Result.new(mutation: mutation, status: :uncovered, details: nil)
         else
@@ -58,8 +64,21 @@ module ActiveMutator
 
     private
 
+    # Line coverage attributes multi-line expressions to their statement anchor
+    # line (version-dependently), so a sub-expression mutant's own lines may
+    # carry no coverage at all. Look up the whole subject instead: a mutant must
+    # run against every example covering any line of its method.
+    def coverage_lines(mutation)
+      mutation.lines.to_a | mutation.subject.line_range.to_a
+    end
+
     def build_reporter
-      @config.format == :json ? Reporter::Json.new : Reporter::Terminal.new
+      case @config.format
+      when :json then Reporter::Json.new
+      when :stryker_json then Reporter::StrykerJson.new(root: @config.root)
+      when :github then Reporter::Github.new(root: @config.root)
+      else Reporter::Terminal.new
+      end
     end
 
     def preload!
@@ -78,13 +97,29 @@ module ActiveMutator
       paths = @config.paths.empty? ? default_paths : @config.paths
       subjects = paths
         .flat_map { |p| Dir[File.join(@config.root, p, "**", "*.rb")] }
+        .reject { |file| excluded?(file) }
         .sort.flat_map { |file| SubjectFinder.call(file) }
-      subjects = subjects.select { |s| s.name == @config.subject_filter } if @config.subject_filter
+      if @config.subject_filter
+        matcher = SubjectMatcher.new(@config.subject_filter)
+        subjects = subjects.select { |s| matcher.match?(s.name) }
+      end
       if @config.since
         filter = SinceFilter.new(ref: @config.since, root: @config.root)
         subjects = subjects.select { |s| filter.cover?(s) }
       end
       subjects
+    end
+
+    def excluded?(file)
+      flags = File::FNM_PATHNAME | File::FNM_EXTGLOB
+      relative = file.delete_prefix(@config.root.chomp("/") + "/")
+      @config.exclude.any? do |pattern|
+        # Gitignore-like ergonomics: "lib/gen", "lib/gen/" and "lib/gen/**"
+        # all exclude the whole subtree, not just direct children.
+        dir = pattern.sub(%r{(/\*\*)?/?\z}, "")
+        File.fnmatch?(pattern, relative, flags) ||
+          File.fnmatch?("#{dir}/**/*", relative, flags)
+      end
     end
 
     def default_paths
@@ -132,6 +167,18 @@ module ActiveMutator
       return if survivors.empty?
 
       ledger.accept!(survivors, fingerprints.values)
+    end
+
+    def debug_plan(items, pre_results)
+      plan = items.map do |i|
+        { "subject" => i.mutation.subject.name, "description" => i.mutation.description,
+          "file" => i.mutation.subject.file, "line" => i.mutation.line,
+          "lane" => i.lane.to_s, "timeout" => i.timeout.round(2),
+          "examples" => i.example_ids.size }
+      end
+      skipped = pre_results.group_by { |r| r.status.to_s }.transform_values(&:size)
+      puts JSON.pretty_generate("planned" => plan, "pre_resolved" => skipped)
+      0
     end
 
     def warn_stale(ledger, all_fingerprints)

@@ -14,6 +14,16 @@ RSpec.describe ActiveMutator::Worker do
     described_class.new(mutation, ["spec/x_spec.rb[1:1]"], writer).run
   end
 
+  # Every test routes through Worker#run, which sets the GLOBAL
+  # RSpec.configuration.fail_fast = 1; restore it so the host suite
+  # keeps its own configuration.
+  around do |example|
+    original = RSpec.configuration.fail_fast
+    example.run
+  ensure
+    RSpec.configuration.fail_fast = original
+  end
+
   before do
     allow(RSpec::Core::Runner).to receive(:new).and_return(rspec_runner)
     allow(rspec_runner).to receive(:setup)
@@ -52,6 +62,69 @@ RSpec.describe ActiveMutator::Worker do
     run_worker
     expect(emitted["status"]).to eq("error")
     expect(emitted["details"]).to include("SyntaxError", "boom")
+  end
+
+  it "sets fail_fast so the first killing example ends the run" do
+    fail_fast_seen = nil
+    allow(rspec_runner).to receive(:run_specs) do
+      fail_fast_seen = RSpec.configuration.fail_fast
+      1
+    end
+
+    run_worker
+
+    expect(fail_fast_seen).to eq(1)
+  end
+
+  it "passes the actual mutation to the inserter" do
+    allow(rspec_runner).to receive(:run_specs).and_return(0)
+    inserted = nil
+    allow_any_instance_of(ActiveMutator::Inserter).to receive(:insert) { |_, m| inserted = m }
+    run_worker
+    expect(inserted).to be(mutation)
+  end
+
+  it "reseeds the RNG after the fork" do
+    allow(rspec_runner).to receive(:run_specs).and_return(0)
+    worker = described_class.new(mutation, ["spec/x_spec.rb[1:1]"], writer)
+    expect(worker).to receive(:srand)
+    worker.run
+  end
+
+  it "clears and reestablishes ActiveRecord connections when AR is loaded" do
+    allow(rspec_runner).to receive(:run_specs).and_return(0)
+    handler = double("connection_handler")
+    base = double("ActiveRecord::Base", connection_handler: handler)
+    stub_const("ActiveRecord::Base", base)
+    expect(handler).to receive(:clear_all_connections!)
+    expect(base).to receive(:establish_connection)
+    run_worker
+  end
+
+  it "flushes the writer when it supports flushing" do
+    allow(rspec_runner).to receive(:run_specs).and_return(0)
+    flushing = Class.new do
+      attr_reader :out, :flushed
+
+      def initialize = (@out = +"")
+      def puts(str) = @out << str << "\n"
+      def flush = @flushed = true
+    end.new
+    described_class.new(mutation, ["spec/x_spec.rb[1:1]"], flushing).run
+    expect(flushing.flushed).to be(true)
+    expect(JSON.parse(flushing.out)["status"]).to eq("survived")
+  end
+
+  it "copes with writers that cannot flush" do
+    allow(rspec_runner).to receive(:run_specs).and_return(0)
+    puts_only = Class.new do
+      attr_reader :out
+
+      def initialize = (@out = +"")
+      def puts(str) = @out << str << "\n"
+    end.new
+    described_class.new(mutation, ["spec/x_spec.rb[1:1]"], puts_only).run
+    expect(JSON.parse(puts_only.out)["status"]).to eq("survived")
   end
 
   it "runs only groups belonging to covering spec files (drops helper-leaked groups)" do

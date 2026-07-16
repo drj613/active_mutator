@@ -1,0 +1,53 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        ruby: ["3.2", "3.3", "3.4"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: ${{ matrix.ruby }}
+          bundler-cache: true
+      - name: Unit specs
+        run: bundle exec rspec
+
+  e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "3.4"
+          bundler-cache: true
+      - name: Integration + e2e specs (fork-based kill pipeline)
+        run: bundle exec rspec
+        env:
+          ACTIVE_MUTATOR_INTEGRATION: "1"
+          ACTIVE_MUTATOR_E2E: "1"
+
+  mutation:
+    # Dogfood: mutate the code changed by this PR. Blocking since #25 closed
+    # the pre-existing survivor backlog (killed with tests or accepted into
+    # the ledger) — any survivor here is a fresh test gap in this PR.
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "3.4"
+          bundler-cache: true
+      - name: Self-mutation on PR diff
+        run: bundle exec exe/active_mutator lib --format github --since "origin/${{ github.base_ref }}"

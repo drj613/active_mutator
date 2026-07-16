@@ -94,8 +94,16 @@ module ActiveMutator
       payload = entry[:reader].read.to_s
       entry[:reader].close
       data = payload.empty? ? nil : JSON.parse(payload)
-      status = data ? data.fetch("status").to_sym : :error
-      details = data ? data["details"] : "worker exited without reporting"
+      # A self-mutation of Worker#emit can produce well-formed JSON without a
+      # "status" key (or with a non-Hash root); treat any unusable payload as
+      # a worker error instead of crashing the whole run.
+      reported = data.is_a?(Hash) && data.key?("status")
+      status = reported ? data["status"].to_sym : :error
+      details = reported ? data["details"] : "worker exited without reporting"
+    rescue JSON::ParserError
+      report(Result.new(mutation: entry[:item].mutation, status: :error,
+                        details: "worker emitted unparseable payload"))
+    else
       report(Result.new(mutation: entry[:item].mutation, status: status, details: details))
     end
 
