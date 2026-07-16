@@ -85,10 +85,16 @@ RSpec.describe ActiveMutator::ConfigFile do
       .to raise_error(ActiveMutator::Error, /preload_helper must be a path or false/)
   end
 
-  it "raises on an invalid format value" do
-    write_config("format: xml\n")
+  it "raises on date-like scalars instead of crashing" do
+    write_config("fail_at: 2020-01-01\n")
     expect { described_class.load(root) }
-      .to raise_error(ActiveMutator::Error, /format/)
+      .to raise_error(ActiveMutator::Error, /\.active_mutator\.yml/)
+  end
+
+  it "allows YAML anchors and aliases" do
+    write_config("serial_patterns: &sp [\"spec/system/\"]\nexclude: *sp\n")
+    expect(described_class.load(root))
+      .to eq(serial_patterns: ["spec/system/"], exclude: ["spec/system/"])
   end
 
   it "raises when the file is not a YAML mapping" do
@@ -101,6 +107,11 @@ RSpec.describe ActiveMutator::ConfigFile do
     write_config("jobs: [unclosed\n")
     expect { described_class.load(root) }
       .to raise_error(ActiveMutator::Error, /\.active_mutator\.yml/)
+  end
+
+  it "raises on an unhandled validator (internal bug guard)" do
+    expect { described_class.coerce("x", :bogus, 1) }
+      .to raise_error(ActiveMutator::Error, /unhandled validator bogus/)
   end
 
   it "treats an empty file as no config" do

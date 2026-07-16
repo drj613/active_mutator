@@ -40,8 +40,8 @@ module ActiveMutator
     end
 
     def self.parse(path)
-      YAML.safe_load_file(path)
-    rescue Psych::SyntaxError => e
+      YAML.safe_load_file(path, aliases: true)
+    rescue Psych::Exception => e
       raise Error, "#{FILENAME}: #{e.message}"
     end
 
@@ -67,6 +67,8 @@ module ActiveMutator
         return :none if value == false
         raise Error, "#{FILENAME}: preload_helper must be a path or false" unless value.is_a?(String)
         value
+      else
+        raise Error, "unhandled validator #{validator}"
       end
     end
   end
