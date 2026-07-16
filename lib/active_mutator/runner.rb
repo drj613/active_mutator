@@ -102,7 +102,7 @@ module ActiveMutator
     def discover_subjects
       paths = @config.paths.empty? ? default_paths : @config.paths
       subjects = paths
-        .flat_map { |p| Dir[File.join(@config.root, p, "**", "*.rb")] }
+        .flat_map { |p| expand_path_arg(p) }
         .reject { |file| excluded?(file) }
         .sort.flat_map { |file| SubjectFinder.call(file) }
       if @config.subject_filter
@@ -114,6 +114,20 @@ module ActiveMutator
         subjects = subjects.select { |s| filter.cover?(s) }
       end
       subjects
+    end
+
+    # Positional args may be files or directories. Anything else is an error:
+    # a mistyped path that silently matched nothing produced a false green
+    # (0 subjects, exit 0) — see #23.
+    def expand_path_arg(path)
+      full = File.expand_path(path, @config.root)
+      if File.file?(full)
+        [full]
+      elsif Dir.exist?(full)
+        Dir[File.join(full, "**", "*.rb")]
+      else
+        raise Error, "no such file or directory: #{path}"
+      end
     end
 
     def excluded?(file)

@@ -434,6 +434,47 @@ RSpec.describe ActiveMutator::Runner do
       end
     end
 
+    it "uses a positional file path directly, yielding only that file's subjects" do
+      Dir.mktmpdir do |dir|
+        FileUtils.mkdir_p(File.join(dir, "lib"))
+        File.write(File.join(dir, "lib", "wanted.rb"), "class Wanted; def a; 1; end; end")
+        File.write(File.join(dir, "lib", "decoy.rb"), "class Decoy; def a; 1; end; end")
+
+        runner = described_class.new(config.with(root: dir, paths: ["lib/wanted.rb"]))
+        expect(runner.send(:discover_subjects).map(&:name)).to eq(["Wanted#a"])
+      end
+    end
+
+    it "still globs a positional directory recursively" do
+      Dir.mktmpdir do |dir|
+        FileUtils.mkdir_p(File.join(dir, "lib", "nested"))
+        File.write(File.join(dir, "lib", "top.rb"), "class Top; def a; 1; end; end")
+        File.write(File.join(dir, "lib", "nested", "deep.rb"), "class Deep; def a; 1; end; end")
+
+        runner = described_class.new(config.with(root: dir, paths: ["lib"]))
+        expect(runner.send(:discover_subjects).map(&:name)).to contain_exactly("Top#a", "Deep#a")
+      end
+    end
+
+    it "raises for a nonexistent positional path instead of silently matching nothing" do
+      Dir.mktmpdir do |dir|
+        runner = described_class.new(config.with(root: dir, paths: ["app/models/typo.rb"]))
+        expect { runner.send(:discover_subjects) }
+          .to raise_error(ActiveMutator::Error, /app\/models\/typo\.rb/)
+      end
+    end
+
+    it "applies exclude patterns to directly named files" do
+      Dir.mktmpdir do |dir|
+        FileUtils.mkdir_p(File.join(dir, "lib", "generated"))
+        File.write(File.join(dir, "lib", "generated", "skip.rb"), "class Skip; def a; 1; end; end")
+
+        runner = described_class.new(config.with(root: dir, paths: ["lib/generated/skip.rb"],
+                                                 exclude: ["lib/generated/**"]))
+        expect(runner.send(:discover_subjects)).to eq([])
+      end
+    end
+
     it "wires SinceFilter when since is set and keeps only covered subjects" do
       Dir.mktmpdir do |dir|
         FileUtils.mkdir_p(File.join(dir, "lib"))
