@@ -166,5 +166,12 @@
     "description": "replace `.select` with `.reject`",
     "original_snippet": "select",
     "ordinal": 0
+  },
+  {
+    "file": "lib/active_mutator/scheduler.rb",
+    "subject": "ActiveMutator::Scheduler#spawn",
+    "description": "replace `0` with `1`",
+    "original_snippet": "0",
+    "ordinal": 2
   }
 ]
