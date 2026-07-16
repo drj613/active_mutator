@@ -28,16 +28,21 @@ module ActiveMutator
 
     def accepted?(fingerprint) = @entries.include?(fingerprint)
 
-    def stale_entries(all_current_fingerprints)
+    # Entries outside the scanned files can't be judged by this run, so they
+    # are never stale here. scanned_files: nil means "no file was fully
+    # scanned" (subject-level filtering active) — union only, prune nothing.
+    # See #24: a scoped accept run once deleted every out-of-scope entry.
+    def stale_entries(all_current_fingerprints, scanned_files:)
+      return [] if scanned_files.nil?
+
       current = all_current_fingerprints.to_set
-      @entries.reject { |e| current.include?(e) }
+      scanned = scanned_files.to_set
+      @entries.reject { |e| current.include?(e) || !scanned.include?(e.file) }
     end
 
-    # Union new acceptances in, prune anything no longer matching a current
-    # mutant, write atomically.
-    def accept!(new_fingerprints, all_current_fingerprints)
-      current = all_current_fingerprints.to_set
-      @entries = (@entries + new_fingerprints).uniq.select { |e| current.include?(e) }
+    def accept!(new_fingerprints, all_current_fingerprints, scanned_files:)
+      stale = stale_entries(all_current_fingerprints, scanned_files: scanned_files).to_set
+      @entries = (@entries + new_fingerprints).uniq.reject { |e| stale.include?(e) }
       AtomicFile.write(@path, JSON.pretty_generate(@entries.map(&:to_h)))
       nil
     end

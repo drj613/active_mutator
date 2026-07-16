@@ -21,7 +21,8 @@ module ActiveMutator
 
       fingerprints = Fingerprint.for_mutations(mutations, root: @config.root)
       ledger = AcceptedLedger.load(@config.root)
-      warn_stale(ledger, fingerprints.values)
+      scanned_files = prune_scope(subjects)
+      warn_stale(ledger, fingerprints.values, scanned_files)
 
       items, pre_results = plan_work(mutations, map, ledger: ledger, fingerprints: fingerprints)
       return debug_plan(items, pre_results) if @config.debug_plan
@@ -30,7 +31,7 @@ module ActiveMutator
       scheduler = Scheduler.new(jobs: @config.jobs, on_result: @reporter.method(:on_result))
       results = scheduler.run(items) + pre_results
 
-      accept_survivors!(ledger, results, fingerprints) if @config.accept_survivors
+      accept_survivors!(ledger, results, fingerprints, scanned_files) if @config.accept_survivors
 
       @reporter.summary(results, invalid_count: invalid_count)
       exit_code(results)
@@ -185,11 +186,19 @@ module ActiveMutator
       SimpleCov.at_exit {} if defined?(SimpleCov)
     end
 
-    def accept_survivors!(ledger, results, fingerprints)
+    # Only a run with no subject-level narrowing has fully scanned a file;
+    # anything narrower must not prune (or warn about) out-of-scope entries.
+    def prune_scope(subjects)
+      return nil if @config.subject_filter || @config.since || @config.max_mutants
+
+      subjects.map { |s| s.file.delete_prefix("#{@config.root}/") }.uniq
+    end
+
+    def accept_survivors!(ledger, results, fingerprints, scanned_files)
       survivors = results.select { |r| r.status == :survived }.map { |r| fingerprints[r.mutation] }
       return if survivors.empty?
 
-      ledger.accept!(survivors, fingerprints.values)
+      ledger.accept!(survivors, fingerprints.values, scanned_files: scanned_files)
     end
 
     def debug_plan(items, pre_results)
@@ -204,8 +213,8 @@ module ActiveMutator
       0
     end
 
-    def warn_stale(ledger, all_fingerprints)
-      ledger.stale_entries(all_fingerprints).each do |entry|
+    def warn_stale(ledger, all_fingerprints, scanned_files)
+      ledger.stale_entries(all_fingerprints, scanned_files: scanned_files).each do |entry|
         warn "active_mutator: stale accepted fingerprint (no matching mutant): #{entry.subject}, #{entry.description}"
       end
     end

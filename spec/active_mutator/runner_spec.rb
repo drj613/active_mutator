@@ -295,7 +295,7 @@ RSpec.describe ActiveMutator::Runner do
       ledger = instance_double(ActiveMutator::AcceptedLedger)
       expect(ledger).not_to receive(:accept!)
       killed = ActiveMutator::Result.new(mutation: mutation, status: :killed, details: nil)
-      described_class.new(config).send(:accept_survivors!, ledger, [killed], { mutation => "fp" })
+      described_class.new(config).send(:accept_survivors!, ledger, [killed], { mutation => "fp" }, ["lib/a.rb"])
     end
 
     it "accepts surviving fingerprints into the ledger" do
@@ -303,8 +303,8 @@ RSpec.describe ActiveMutator::Runner do
       m = mutation
       survived = ActiveMutator::Result.new(mutation: m, status: :survived, details: nil)
       fingerprints = { m => "fp1" }
-      expect(ledger).to receive(:accept!).with(["fp1"], ["fp1"])
-      described_class.new(config).send(:accept_survivors!, ledger, [survived], fingerprints)
+      expect(ledger).to receive(:accept!).with(["fp1"], ["fp1"], scanned_files: ["lib/a.rb"])
+      described_class.new(config).send(:accept_survivors!, ledger, [survived], fingerprints, ["lib/a.rb"])
     end
   end
 
@@ -704,10 +704,67 @@ RSpec.describe ActiveMutator::Runner do
 
     it "warns about stale accepted fingerprints" do
       allow(map).to receive(:examples_for).and_return([])
-      stale = { "file" => "lib/gone.rb", "subject" => "Gone#away", "description" => "d",
+      # Stale entry inside a fully scanned file; entries in unscanned files
+      # are out of scope and never warned about (#24).
+      stale = { "file" => "lib/a.rb", "subject" => "Gone#away", "description" => "d",
                 "original_snippet" => "x", "ordinal" => 0 }
       File.write(File.join(@root, ActiveMutator::AcceptedLedger::FILENAME), JSON.generate([stale]))
       expect { call_runner }.to output(/stale accepted fingerprint.*Gone#away/).to_stderr
+    end
+
+    describe "prune scope wiring" do
+      let(:ledger) do
+        instance_double(ActiveMutator::AcceptedLedger, accepted?: false, stale_entries: [], accept!: nil)
+      end
+
+      before do
+        allow(ActiveMutator::AcceptedLedger).to receive(:load).and_return(ledger)
+        allow(map).to receive(:examples_for).and_return(["./spec/a_spec.rb[1:1]"])
+      end
+
+      def surviving_scheduler!
+        allow(ActiveMutator::Scheduler).to receive(:new) do |**|
+          instance_double(ActiveMutator::Scheduler).tap do |s|
+            allow(s).to receive(:run) do |items|
+              items.map { |i| ActiveMutator::Result.new(mutation: i.mutation, status: :survived, details: nil) }
+            end
+          end
+        end
+      end
+
+      it "passes the root-relative scanned files to accept! on an unfiltered run" do
+        surviving_scheduler!
+        call_runner(accept_survivors: true)
+        expect(ledger).to have_received(:accept!).with(anything, anything, scanned_files: ["lib/a.rb"])
+      end
+
+      it "passes the scanned files to stale_entries on an unfiltered run" do
+        call_runner
+        expect(ledger).to have_received(:stale_entries).with(anything, scanned_files: ["lib/a.rb"])
+      end
+
+      it "passes scanned_files: nil when a subject filter is active" do
+        surviving_scheduler!
+        call_runner(accept_survivors: true, subject_filter: "A#x")
+        expect(ledger).to have_received(:accept!).with(anything, anything, scanned_files: nil)
+        expect(ledger).to have_received(:stale_entries).with(anything, scanned_files: nil)
+      end
+
+      it "passes scanned_files: nil when --since is active" do
+        filter = instance_double(ActiveMutator::SinceFilter, cover?: true)
+        allow(ActiveMutator::SinceFilter).to receive(:new).and_return(filter)
+        surviving_scheduler!
+        call_runner(accept_survivors: true, since: "main")
+        expect(ledger).to have_received(:accept!).with(anything, anything, scanned_files: nil)
+        expect(ledger).to have_received(:stale_entries).with(anything, scanned_files: nil)
+      end
+
+      it "passes scanned_files: nil when max_mutants truncates the run" do
+        surviving_scheduler!
+        call_runner(accept_survivors: true, max_mutants: 1)
+        expect(ledger).to have_received(:accept!).with(anything, anything, scanned_files: nil)
+        expect(ledger).to have_received(:stale_entries).with(anything, scanned_files: nil)
+      end
     end
 
     it "prints the plan and skips execution with --debug-plan" do
