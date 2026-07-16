@@ -808,7 +808,7 @@ Refs #9 #21"
 - Modify: `lib/active_mutator/work_item.rb`
 
 **Design.** The calibrator owns three operations:
-- `record(elapsed_seconds, budget)` — called by the Scheduler when a fork finishes as a **kill** (and only then — see below). It appends the *utilization* `elapsed / budget` to a running window, where `budget` is the **effective budget the fork actually ran under** (the value `budget_for` returned at spawn time), NOT the static `item.timeout`. This kills the ratchet failure mode: if the scale is pinned at 4× and an honest kill takes 3× its static budget, its utilization against the 4×-scaled budget reads 0.75 — the median falls back toward the target and the scale recovers, instead of reading 3.0 against the static budget and pinning the scale at max forever. At equilibrium utilization self-stabilizes around `TARGET_UTILIZATION`.
+- `record(elapsed_seconds, budget)` — called by the Scheduler when a fork finishes as a **kill** (and only then — see below). It appends the *utilization* `elapsed / budget` to a bounded sliding window (`WINDOW = 30` most recent samples — full-run history would let an early load regime anchor the median forever), where `budget` is the **effective budget the fork actually ran under** (the value `budget_for` returned at spawn time), NOT the static `item.timeout`. This kills the ratchet failure mode: if the scale is pinned at 4× and an honest kill takes 3× its static budget, its utilization against the 4×-scaled budget reads 0.75 — the median falls back toward the target and the scale recovers, instead of reading 3.0 against the static budget and pinning the scale at max forever. At equilibrium utilization self-stabilizes around `TARGET_UTILIZATION`.
 - `budget_for(item)` — called at spawn. Before `WARMUP = 5` recordings it returns the static budget unchanged. After warm-up it returns `variable * scale + fixed`, where `fixed = item.timeout - item.variable` (floor + browser boot) is **not** scaled (roadmap: serial lane keeps `browser_boot_seconds` additive) and `scale = clamp(median_utilization / TARGET_UTILIZATION, 0.5, 4.0)` with `TARGET_UTILIZATION = 0.25`.
 - `warmed?` / `scale` — read by the Scheduler for the once-per-change scale log line (Task 6).
 
@@ -871,6 +871,14 @@ RSpec.describe ActiveMutator::TimeoutCalibrator do
     # had. Median: sorted [0.25 x6, 1.0 x5] -> 0.25 -> scale back to 1.0.
     6.times { cal.record(20.0, 80.0) }
     expect(cal.scale).to eq(1.0)
+  end
+
+  it "bounds the sample window so an old load regime ages out completely" do
+    cal = described_class.new
+    30.times { cal.record(20.0, 20.0) } # sustained spike: utilization 1.0 -> scale 4.0
+    expect(cal.scale).to eq(4.0)
+    30.times { cal.record(5.0, 20.0) }  # 30 fresh samples displace the WINDOW entirely
+    expect(cal.scale).to eq(1.0)        # median over the surviving window is 0.25 exactly
   end
 
   it "uses the median, so one outlier does not swing the scale" do
@@ -963,6 +971,11 @@ module ActiveMutator
   # examples run fast.
   class TimeoutCalibrator
     WARMUP = 5
+    # A real sliding window, not full-run history: a 500-mutant run's early
+    # load regime must age out completely instead of anchoring the median
+    # forever. 30 samples is enough for a stable median and small enough to
+    # track load changes within a few dozen finishes.
+    WINDOW = 30
     TARGET_UTILIZATION = 0.25
     MIN_SCALE = 0.5
     MAX_SCALE = 4.0
@@ -975,6 +988,7 @@ module ActiveMutator
       return unless budget.positive?
 
       @utilizations << elapsed_seconds / budget
+      @utilizations.shift while @utilizations.size > WINDOW
     end
 
     def warmed? = @utilizations.size >= WARMUP
@@ -1158,12 +1172,12 @@ describe "adaptive timeouts" do
     expect(results.map(&:status)).to eq([:timeout])
   end
 
-  it "logs the scale to stderr once per change, not once per spawn" do
+  it "logs the scale with its lane to stderr once per change, not once per spawn" do
     cal = fake_calibrator(warmed: true, scale: 2.4)
     expect do
       scheduler(worker: killed_worker, calibrators: { parallel: cal, serial: cal })
         .run([item, item, item])
-    end.to output(/active_mutator: adaptive timeout scale 2\.4\n/).to_stderr_from_any_process
+    end.to output(/active_mutator: adaptive timeout scale \(parallel\): 2\.4\n/).to_stderr_from_any_process
     # exactly once: the regex above plus a negative count check
     # (capture stderr into a StringIO if the file has a helper for it; otherwise:)
     expect do
@@ -1203,7 +1217,7 @@ Run: `bundle exec rspec spec/active_mutator/scheduler_spec.rb` → FAIL (unknown
       @on_result = on_result
       @calibrators = calibrators
       @orphaned = orphaned
-      @last_logged_scale = nil
+      @last_logged_scale = {} # lane => last scale logged for that lane
     end
 ```
 
@@ -1213,7 +1227,7 @@ Run: `bundle exec rspec spec/active_mutator/scheduler_spec.rb` → FAIL (unknown
       writer.close
       calibrator = calibrator_for(item)
       budget = calibrator ? calibrator.budget_for(item) : item.timeout
-      log_scale(calibrator)
+      log_scale(calibrator, item.lane)
       started = now
       running[pid] = { reader: reader, item: item, started: started,
                        budget: budget, deadline: started + budget }
@@ -1239,15 +1253,16 @@ New private methods:
     end
 
     # Effective budgets are otherwise invisible (--debug-plan shows static
-    # ones by design). One stderr line per scale CHANGE, not per spawn.
-    def log_scale(calibrator)
+    # ones by design). One stderr line per scale CHANGE per lane, not per
+    # spawn — the two lanes calibrate independently, so the lane is named.
+    def log_scale(calibrator, lane)
       return unless calibrator&.warmed?
 
       scale = calibrator.scale.round(2)
-      return if scale == @last_logged_scale
+      return if scale == @last_logged_scale[lane]
 
-      @last_logged_scale = scale
-      warn "active_mutator: adaptive timeout scale #{scale}"
+      @last_logged_scale[lane] = scale
+      warn "active_mutator: adaptive timeout scale (#{lane}): #{scale}"
     end
 ```
 
@@ -1469,7 +1484,7 @@ with two new private methods (booleans render as `--flag`/`--no-flag`, and the d
 | `--[no-]adaptive-timeout` | on | scale timeout budgets from observed worker wall times (median utilization, clamped 0.5x–4x; `--timeout-factor`/`--timeout-floor` set the starting budget) |
 ```
 
-and add `adaptive_timeout` to the `.active_mutator.yml` key list. In `docs/guides/how-it-works.md`, in the scheduler/timeout section, add one paragraph describing the calibrator: warm-up of 5 **killed** forks per lane (errors/survivors/timeouts never sampled), median utilization measured against the effective budget each fork ran under, target 0.25, clamp 0.5–4, fixed part (floor + browser boot) never scaled, one calibrator per lane, and the `active_mutator: adaptive timeout scale N.NN` stderr line emitted whenever the applied scale changes (that log line is how users see effective budgets; `--debug-plan` intentionally keeps showing the static ones).
+and add `adaptive_timeout` to the `.active_mutator.yml` key list. In `docs/guides/how-it-works.md`, in the scheduler/timeout section, add one paragraph describing the calibrator: warm-up of 5 **killed** forks per lane (errors/survivors/timeouts never sampled), median utilization measured against the effective budget each fork ran under, target 0.25, clamp 0.5–4, fixed part (floor + browser boot) never scaled, one calibrator per lane, and the `active_mutator: adaptive timeout scale (parallel|serial): N.NN` stderr line emitted whenever a lane's applied scale changes (that log line is how users see effective budgets; `--debug-plan` intentionally keeps showing the static ones).
 
 - [ ] **Step 6: e2e sanity + bench regression check**
 
@@ -1479,7 +1494,7 @@ bin/bench --out /tmp/bench-post9
 bin/bench-diff bench/baselines/tiny_project-jobs2.mutation-report.json \
                /tmp/bench-post9/tiny_project-jobs2/mutation-report.json
 ```
-Expected: e2e green; bench-diff exit 0. The bench cells run `--no-adaptive-timeout` (Step 4), so this check proves the *plumbing* changed nothing when adaptive is off — the deterministic gate stays deterministic. To eyeball adaptive behavior itself, run one fixture manually: `cd spec/fixtures/tiny_project && BUNDLE_GEMFILE=$PWD/Gemfile bundle exec ../../../exe/active_mutator lib --jobs 2` and confirm statuses match the pinned baseline and any `adaptive timeout scale` stderr lines look sane. Log the post-#9 `mutation_seconds` next to the Task 4 row in `docs/dogfood-log.md`.
+Expected: e2e green; bench-diff exit 0. The bench cells run `--no-adaptive-timeout` (Step 4), so this check proves the *plumbing* changed nothing when adaptive is off — the deterministic gate stays deterministic. To eyeball adaptive behavior itself, run one fixture manually: `cd spec/fixtures/tiny_project && BUNDLE_GEMFILE=$PWD/Gemfile bundle exec ../../../exe/active_mutator lib --jobs 2` and confirm statuses match the pinned baseline and any `adaptive timeout scale` stderr lines look sane. **If a Killed↔Timeout flip appears against the pinned baseline:** re-run once (a single flip can be host-load noise). A *persistent* flip means an honest kill's budget scaled below its real wall time — that is an implementation bug in the calibrator's floor/clamp math (`MIN_SCALE`, the unscaled fixed part, or the record denominator), not an environment quirk. Fix it before proceeding; do **not** re-pin the baseline to absorb it. Log the post-#9 `mutation_seconds` next to the Task 4 row in `docs/dogfood-log.md`.
 
 - [ ] **Step 7: Full gates + commit**
 
@@ -1505,7 +1520,13 @@ Closes #9"
 - Modify: `lib/active_mutator.rb` (require)
 - Create: `spec/active_mutator/defined_constants_spec.rb`
 
-**Design — qualified names only, deliberately.** An earlier draft also emitted bare leaf names (`"Config"` for `ActiveMutator::Config`). That is a trap: common leaves (`Config`, `Base`, `Client`, `Error`) appear in half of any real suite's spec files, which would trip Task 9's >50% full-run fallback on nearly every edit to such files — silently defeating incremental mode. Rule: emit every *fully qualified* scope path (`"Billing"`, `"Billing::Invoice"`) and nothing else. A top-level `class Invoice` naturally yields `"Invoice"` (its qualified name IS the leaf), so the common `RSpec.describe Invoice` case still matches. Recall tradeoff accepted and documented in Task 10: a spec referencing a nested constant by bare leaf only (inside its own matching namespace nesting) is missed — that residual falls to nightly `--force-baseline`.
+**Design — deepest qualified names only, deliberately.** Two traps, both closed:
+1. *Bare leaf names* (`"Config"` for `ActiveMutator::Config`): common leaves appear in half of any real suite's spec files and would trip Task 9's >50% full-run fallback on nearly every edit. Never emitted for nested definitions.
+2. *Namespace-wrapper names* (`"MyApp"` for `module MyApp; class Config`): in a namespaced app **every** source file reopens the top module, so `\bMyApp\b` matches nearly every spec — the same fallback-thrash defect relocated to the top-namespace token. Never emitted either.
+
+**The precise rule:** a class/module node's fully qualified name is emitted **unless the node is a pure namespace wrapper** — its direct body is non-empty and consists *only* of nested class/module definitions. So `module MyApp; class Config; end; end` emits only `"MyApp::Config"`; but a `module MyApp` whose body directly contains a `def` (or any other statement — constants, macros, includes) IS a real edit target and emits `"MyApp"`. An empty-bodied `class Invoice; end` is not a wrapper (it nests nothing) and is emitted — def-less macro-only classes (ActiveRecord models) stay detectable. This is the reviewer's "has direct defs" rule relaxed exactly enough to keep def-less leaf classes.
+
+A top-level `class Invoice` yields `"Invoice"` (its qualified name IS the leaf), so the common `RSpec.describe Invoice` case still matches. Recall tradeoffs accepted and documented in Task 10: a spec referencing a nested constant by bare leaf only, or referencing only the pure wrapper namespace, is missed — those residuals fall to nightly `--force-baseline`.
 
 **Parse-failure boundary, pinned:** the guard is `result.errors.any?` — parse **errors** (truncated input, `class Oops`) blank the result to `[]`; parse **warnings** (e.g. `if a = 2` assignment-in-condition) do not, because Prism still produces a complete AST for them. Residual case: Prism's error *recovery* can produce a partial AST for badly broken input in which some definitions are still visible — we return whatever definitions survive recovery only when `errors` is empty, i.e. never for broken input; a file that is mid-edit and unparseable simply contributes no reference candidates until it parses again (and `--force-baseline` remains the backstop).
 
@@ -1517,7 +1538,7 @@ Create `spec/active_mutator/defined_constants_spec.rb`:
 require "prism"
 
 RSpec.describe ActiveMutator::DefinedConstants do
-  it "collects nested class and module names, fully qualified only" do
+  it "emits only the deepest qualified name when the outer module is a pure namespace wrapper" do
     names = described_class.in_source(<<~RUBY)
       module Billing
         class Invoice
@@ -1525,11 +1546,35 @@ RSpec.describe ActiveMutator::DefinedConstants do
         end
       end
     RUBY
-    expect(names).to contain_exactly("Billing", "Billing::Invoice")
+    expect(names).to contain_exactly("Billing::Invoice")
+  end
+
+  it "emits a namespace module that directly defines something of its own" do
+    names = described_class.in_source(<<~RUBY)
+      module MyApp
+        def self.version = "1"
+
+        class Config
+          def flag; end
+        end
+      end
+    RUBY
+    expect(names).to contain_exactly("MyApp", "MyApp::Config")
   end
 
   it "keeps a top-level class name as-is" do
     expect(described_class.in_source("class Invoice; end\n")).to eq(["Invoice"])
+  end
+
+  it "keeps a def-less leaf class (macro-only bodies are real edit targets)" do
+    names = described_class.in_source(<<~RUBY)
+      module Billing
+        class Invoice
+          include Comparable
+        end
+      end
+    RUBY
+    expect(names).to contain_exactly("Billing::Invoice")
   end
 
   it "handles compact constant paths" do
@@ -1537,15 +1582,17 @@ RSpec.describe ActiveMutator::DefinedConstants do
     expect(names).to contain_exactly("Billing::Invoice")
   end
 
-  it "never emits a bare common leaf for a nested definition (the Config problem)" do
+  it "never emits the bare leaf or the wrapper namespace for a nested definition (the Config/MyApp problem)" do
     names = described_class.in_source(<<~RUBY)
       module MyApp
         class Config
+          def flag; end
         end
       end
     RUBY
-    expect(names).to contain_exactly("MyApp", "MyApp::Config")
+    expect(names).to contain_exactly("MyApp::Config")
     expect(names).not_to include("Config")
+    expect(names).not_to include("MyApp")
   end
 
   it "returns [] when the parse has errors (truncated / mid-edit input)" do
@@ -1586,13 +1633,18 @@ Create `lib/active_mutator/defined_constants.rb`:
 require "prism"
 
 module ActiveMutator
-  # Fully qualified names of classes/modules a source file defines
-  # ("Billing", "Billing::Invoice"). Deliberately NO bare leaf shorthand for
-  # nested definitions: common leaves like "Config"/"Base" textually match
-  # half of any real spec suite and would trip BaselineDelta's full-run
-  # fallback on every edit, silently defeating incremental mode. Top-level
-  # definitions keep their (leaf == qualified) name, so `RSpec.describe Foo`
-  # still matches for the common flat-namespace case.
+  # Deepest fully qualified names of classes/modules a source file defines
+  # ("Billing::Invoice"). Two shorthands are deliberately never emitted,
+  # because either would let a single common token match half of any real
+  # spec suite and trip BaselineDelta's full-run fallback on every edit:
+  #   - bare leaves ("Config" for MyApp::Config)
+  #   - pure namespace wrappers ("MyApp" for `module MyApp; class Config`):
+  #     every file in a namespaced app reopens the top module, and every
+  #     spec mentions it.
+  # A wrapper is a node whose non-empty direct body contains ONLY nested
+  # class/module definitions. A module with its own defs/macros/constants is
+  # a real edit target and IS emitted; so is an empty or def-less leaf class
+  # (macro-only ActiveRecord models).
   #
   # Guard is errors.any?, not warnings: Prism produces a complete AST for
   # warnings-only input (`if a = 2`), and those definitions are real.
@@ -1609,11 +1661,18 @@ module ActiveMutator
     def self.walk(node, scope, names)
       if node.is_a?(Prism::ClassNode) || node.is_a?(Prism::ModuleNode)
         scope = scope + [node.constant_path.slice]
-        names << scope.join("::")
+        names << scope.join("::") unless namespace_wrapper?(node)
       end
       node.compact_child_nodes.each { |child| walk(child, scope, names) }
     end
     private_class_method :walk
+
+    def self.namespace_wrapper?(node)
+      statements = node.body.is_a?(Prism::StatementsNode) ? node.body.body : []
+      statements.any? &&
+        statements.all? { |s| s.is_a?(Prism::ClassNode) || s.is_a?(Prism::ModuleNode) }
+    end
+    private_class_method :namespace_wrapper?
   end
 end
 ```
@@ -1748,14 +1807,15 @@ Add to `spec/active_mutator/baseline_delta_spec.rb`:
       end
     end
 
-    it "does not blow up incremental mode for files defining common nested leaf names" do
-      # MyApp::Config is nested: DefinedConstants (Task 8) must not emit bare
-      # "Config", so the many spec files mentioning "Config" unqualified do
-      # NOT become candidates and the full-run fallback does not trip.
+    it "does not blow up incremental mode for common leaf names or ubiquitous namespace tokens" do
+      # DefinedConstants (Task 8) emits only "MyApp::Config" here: neither the
+      # bare leaf "Config" nor the pure wrapper "MyApp" is matched. In a
+      # namespaced app every spec mentions the top module, so matching either
+      # token would trip the full-run fallback on every edit.
       project(
         "lib/my_app/config.rb" => "module MyApp; class Config; end; end\n",
-        "spec/a_spec.rb" => "RSpec.describe \"a\" do; end # Config mentioned bare\n",
-        "spec/b_spec.rb" => "RSpec.describe \"b\" do; end # Config mentioned bare\n",
+        "spec/a_spec.rb" => "RSpec.describe \"a\" do; end # bare Config and MyApp mentioned\n",
+        "spec/b_spec.rb" => "RSpec.describe \"b\" do; end # bare Config and MyApp mentioned\n",
         "spec/c_spec.rb" => "RSpec.describe MyApp::Config do; end\n"
       ) do |root|
         delta = described_class.compute(
@@ -1953,7 +2013,7 @@ Expected now (Task 9 merged): PASS. If it fails, debug Task 9 — do not weaken 
 
 - [ ] **Step 2: Update the docs**
 
-`docs/guides/how-it-works.md` — rewrite the blind-spot passage (lines ~142–158) to say: the delta refresh now *also* re-runs unchanged spec files that reference a constant defined in the changed source file but currently contribute zero coverage to it (word-boundary text match on Prism-extracted **fully qualified** class/module names, full-run fallback above 50% of spec files with a stderr warning when it trips). State the **residual** gap precisely — three cases, all still recovered by nightly `--force-baseline`: an example that newly covers the change *without any textual reference to its constants* (pure indirection); a partially-covering spec file whose other examples newly cover; and a spec file referencing a *nested* constant by bare leaf name only (leaf shorthand is deliberately not matched — see `DefinedConstants`). Update the summary bullet at line ~320 the same way. Update the two `README.md` mentions (lines ~241 and ~302) from "recovers the blind spot" to "recovers the residual blind spot (constant-reference detection handles the common case since 0.2)".
+`docs/guides/how-it-works.md` — rewrite the blind-spot passage (lines ~142–158) to say: the delta refresh now *also* re-runs unchanged spec files that reference a constant defined in the changed source file but currently contribute zero coverage to it (word-boundary text match on Prism-extracted **fully qualified** class/module names, full-run fallback above 50% of spec files with a stderr warning when it trips). State the **residual** gap precisely — four cases, all still recovered by nightly `--force-baseline`: an example that newly covers the change *without any textual reference to its constants* (pure indirection); a partially-covering spec file whose other examples newly cover; a spec file referencing a *nested* constant by bare leaf name only; and a spec file referencing only a *pure namespace wrapper* module of the changed file (neither leaf shorthand nor wrapper tokens are matched — see `DefinedConstants`, which emits only the deepest qualified names precisely because common leaves and ubiquitous namespace tokens would otherwise thrash the full-run fallback). Update the summary bullet at line ~320 the same way. Update the two `README.md` mentions (lines ~241 and ~302) from "recovers the blind spot" to "recovers the residual blind spot (constant-reference detection handles the common case since 0.2)".
 
 - [ ] **Step 3: Full gates + bench + commit**
 
@@ -2012,12 +2072,12 @@ git commit -m "docs: phase 4 dogfood results"
 
 **Coverage vs the three issues:**
 - **#21** — pinned corpus (committed fixtures + git/SHA target type), matrix over `--jobs` (and any flag, e.g. `timeout_factor`) per `targets.json`, Stryker JSON + terminal capture (`exec.log`, per-cell stdout in the log) saved per cell, per-stage wall times (baseline vs mutation via the `--max-mutants 0` trick) and mutant counts (in the Stryker report), cross-run differ with score delta, status transitions, added/removed mutants. Deviation (external SHA-pinned repos not seeded) is declared in the header with rationale. Per-operator wall-time delta from the issue is **not** delivered: per-mutant timing does not exist in the Stryker report or anywhere in the runtime today; adding it is runtime work out of #21's "no runtime path changes" lane — flagged here honestly, follow-up candidate once #17's report carries timing extras.
-- **#9** — observed actual-vs-estimate ratio from finished workers (issue text), sampled from **killed forks only** (errors finish artificially fast, survivors run the whole covering set, timeouts have no known wall time — each exclusion stated and spec'd), utilization measured against the **effective budget the fork ran under** (ratchet-proof; recovery spec'd in Task 5), **one calibrator per lane** so parallel-load medians never scale serial budgets, warm-up N=5, running median, clamp 0.5–4 (roadmap), serial-lane `browser_boot_seconds` stays additive (roadmap), static flags remain as the starting budget and `--no-adaptive-timeout` restores exact pre-#9 behavior (backward compat), effective budgets surfaced via the once-per-change `adaptive timeout scale` stderr line (spec'd), acceptance measured on the deterministic bench gate (cells run `--no-adaptive-timeout`, Task 7 Steps 4/6) plus a manual adaptive fixture run, and payint dogfood (Task 11).
-- **#11** — "cheap detection of coverage-set growth" delivered as constant-reference scanning of currently-non-covering spec files using **fully qualified names only** (common bare leaves like `Config` deliberately excluded, with a delta-level spec for exactly that case), a >50% full-run safety valve that **warns on stderr** when it trips (spec'd), zero disk work when nothing changed, hot-path cost measured and bounded on this repo and payint (Task 9 Step 3), integration proof that the pre-fix behavior fails (Task 10 spec is the exact blind-spot scenario from how-it-works.md), the three residual gaps documented, `--force-baseline` guidance updated rather than removed. Parse boundary pinned: errors blank `DefinedConstants` output, warnings do not (both spec'd with in-spec preconditions on the fixture).
+- **#9** — observed actual-vs-estimate ratio from finished workers (issue text), sampled from **killed forks only** (errors finish artificially fast, survivors run the whole covering set, timeouts have no known wall time — each exclusion stated and spec'd), utilization measured against the **effective budget the fork ran under** (ratchet-proof; recovery spec'd in Task 5), **one calibrator per lane** so parallel-load medians never scale serial budgets, warm-up N=5, median over a **bounded sliding window** (`WINDOW = 30`, so an early load regime ages out completely — spec'd), clamp 0.5–4 (roadmap), serial-lane `browser_boot_seconds` stays additive (roadmap), static flags remain as the starting budget and `--no-adaptive-timeout` restores exact pre-#9 behavior (backward compat), effective budgets surfaced via the once-per-change **lane-tagged** `adaptive timeout scale (parallel|serial)` stderr line (spec'd; last-logged tracked per lane), acceptance measured on the deterministic bench gate (cells run `--no-adaptive-timeout`, Task 7 Steps 4/6) plus a manual adaptive fixture run with an explicit Killed↔Timeout flip protocol (re-run once for noise; persistent flip = calibrator floor/clamp bug, fix — never re-pin), and payint dogfood (Task 11).
+- **#11** — "cheap detection of coverage-set growth" delivered as constant-reference scanning of currently-non-covering spec files using **deepest fully qualified names only**: bare leaves (`Config`) excluded, and **pure namespace wrappers** (`MyApp` around nested definitions) excluded too — a wrapper is a node whose non-empty direct body contains only nested class/module definitions; a module with its own defs/macros IS emitted, and def-less leaf classes stay detectable (all four cases spec'd in Task 8, plus the delta-level common-token spec in Task 9). A >50% full-run safety valve **warns on stderr** when it trips (spec'd), zero disk work when nothing changed, hot-path cost measured and bounded on this repo and payint (Task 9 Step 3), integration proof that the pre-fix behavior fails (Task 10 spec is the exact blind-spot scenario from how-it-works.md), the **four** residual gaps documented, `--force-baseline` guidance updated rather than removed. Parse boundary pinned: errors blank `DefinedConstants` output, warnings do not (both spec'd with in-spec preconditions on the fixture).
 
 **Placeholder scan:** no "TBD"/"similar to Task N". Two intentional soft spots, both bounded and justified: Task 6 Step 1 and Task 10 Step 1 tell the worker to reuse the existing spec file's helpers/scaffolding instead of pasting duplicates — the assertions, fixture semantics, and expected values are fully specified; only the helper names come from the file being edited. Task 4's dogfood-log row has `<fill from bench.json>` for measured wall times, which cannot be known before the run by definition.
 
-**Type/name consistency:** `TimeoutCalibrator` API is `record(elapsed_seconds, budget)`, `budget_for(item)`, `warmed?`, `scale` — used with exactly these signatures in Task 5's specs/implementation, Task 6's scheduler (`calibrator_for(item)&.record(now - entry[:started], entry[:budget])`), and Task 6's `fake_calibrator` stub. The Scheduler keyword is `calibrators:` (a `{parallel:, serial:}` hash) everywhere: Task 6 helper, Task 6 implementation, Task 7 Runner wiring and its three specs. `WorkItem` fields `variable`/`boot_extra` introduced and default-pinned in Task 5 (`work_item_spec.rb`), populated in Task 6 Step 2, consumed by the calibrator math. Config field `adaptive_timeout` spelled identically in `Config`, CLI defaults, `--[no-]adaptive-timeout`, config-file `:boolean` key, Runner, and the bench matrix key. **Config.new call sites audited in Task 7 Step 2** (exactly two; the one with explicit keywords gets the exact edit shown). `Bench::Plan::Cell` fields (`id, target_name, type, path, git_url, git_sha, argv`) match between Task 2's implementation and Task 3's specs; Task 7 Step 4's `flag_argv`/`adaptive_default` revision updates Task 2's argv expectations in the same step. `DefinedConstants.in_source` name matches Tasks 8 and 9. `newly_covering_candidates` returns `[]` / list / `:full`, and `compute` handles all three.
+**Type/name consistency:** `TimeoutCalibrator` API is `record(elapsed_seconds, budget)`, `budget_for(item)`, `warmed?`, `scale` (constants `WARMUP`, `WINDOW`, `TARGET_UTILIZATION`, `MIN_SCALE`, `MAX_SCALE`) — used with exactly these signatures in Task 5's specs/implementation, Task 6's scheduler (`calibrator_for(item)&.record(now - entry[:started], entry[:budget])`, `log_scale(calibrator, item.lane)` with per-lane `@last_logged_scale`), and Task 6's `fake_calibrator` stub. The Scheduler keyword is `calibrators:` (a `{parallel:, serial:}` hash) everywhere: Task 6 helper, Task 6 implementation, Task 7 Runner wiring and its three specs. `WorkItem` fields `variable`/`boot_extra` introduced and default-pinned in Task 5 (`work_item_spec.rb`), populated in Task 6 Step 2, consumed by the calibrator math. Config field `adaptive_timeout` spelled identically in `Config`, CLI defaults, `--[no-]adaptive-timeout`, config-file `:boolean` key, Runner, and the bench matrix key. **Config.new call sites audited in Task 7 Step 2** (exactly two; the one with explicit keywords gets the exact edit shown). `Bench::Plan::Cell` fields (`id, target_name, type, path, git_url, git_sha, argv`) match between Task 2's implementation and Task 3's specs; Task 7 Step 4's `flag_argv`/`adaptive_default` revision updates Task 2's argv expectations in the same step. `DefinedConstants.in_source` name matches Tasks 8 and 9. `newly_covering_candidates` returns `[]` / list / `:full`, and `compute` handles all three.
 
 **Determinism audit:** the bench-diff exit-0 gate only ever runs cells with static budgets (`--no-adaptive-timeout` appended by default from Task 7 Step 4 onward; before Task 7 the flag doesn't exist and static is the only behavior) — Killed↔Timeout flips cannot make the gate intermittently red. Adaptive behavior is exercised by unit/scheduler specs with stubbed calibrators (no wall-clock dependence) and eyeballed via the manual fixture run in Task 7 Step 6.
 
