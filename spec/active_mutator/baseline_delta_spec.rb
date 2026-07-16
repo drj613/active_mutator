@@ -52,6 +52,21 @@ RSpec.describe ActiveMutator::BaselineDelta do
     expect(delta.drop_source_files).to eq(["/project/lib/a.rb"])
   end
 
+  it "does not drop a source file that changed but still exists" do
+    delta = compute({ "lib/a.rb" => "x" }, { "lib/a.rb" => "y" })
+    expect(delta.drop_source_files).to eq([])
+  end
+
+  it "does not re-run examples for an added source file" do
+    delta = compute({}, { "lib/a.rb" => "y" })
+    expect(delta.rerun_example_ids).to eq([])
+  end
+
+  it "treats spec/support paths themselves as full triggers" do
+    expect(described_class.full_trigger?("spec/support/helpers.rb")).to be(true)
+    expect(described_class.full_trigger?("spec/a_spec.rb")).to be(false)
+  end
+
   it "goes full for any spec/support change" do
     expect(compute({ "spec/support/helpers.rb" => "x" }, { "spec/support/helpers.rb" => "y" }).full?).to be(true)
     expect(compute({ "spec/support/helpers.rb" => "x" }, {}).full?).to be(true)

@@ -76,6 +76,57 @@ RSpec.describe ActiveMutator::Worker do
     expect(fail_fast_seen).to eq(1)
   end
 
+  it "passes the actual mutation to the inserter" do
+    allow(rspec_runner).to receive(:run_specs).and_return(0)
+    inserted = nil
+    allow_any_instance_of(ActiveMutator::Inserter).to receive(:insert) { |_, m| inserted = m }
+    run_worker
+    expect(inserted).to be(mutation)
+  end
+
+  it "reseeds the RNG after the fork" do
+    allow(rspec_runner).to receive(:run_specs).and_return(0)
+    worker = described_class.new(mutation, ["spec/x_spec.rb[1:1]"], writer)
+    expect(worker).to receive(:srand)
+    worker.run
+  end
+
+  it "clears and reestablishes ActiveRecord connections when AR is loaded" do
+    allow(rspec_runner).to receive(:run_specs).and_return(0)
+    handler = double("connection_handler")
+    base = double("ActiveRecord::Base", connection_handler: handler)
+    stub_const("ActiveRecord::Base", base)
+    expect(handler).to receive(:clear_all_connections!)
+    expect(base).to receive(:establish_connection)
+    run_worker
+  end
+
+  it "flushes the writer when it supports flushing" do
+    allow(rspec_runner).to receive(:run_specs).and_return(0)
+    flushing = Class.new do
+      attr_reader :out, :flushed
+
+      def initialize = (@out = +"")
+      def puts(str) = @out << str << "\n"
+      def flush = @flushed = true
+    end.new
+    described_class.new(mutation, ["spec/x_spec.rb[1:1]"], flushing).run
+    expect(flushing.flushed).to be(true)
+    expect(JSON.parse(flushing.out)["status"]).to eq("survived")
+  end
+
+  it "copes with writers that cannot flush" do
+    allow(rspec_runner).to receive(:run_specs).and_return(0)
+    puts_only = Class.new do
+      attr_reader :out
+
+      def initialize = (@out = +"")
+      def puts(str) = @out << str << "\n"
+    end.new
+    described_class.new(mutation, ["spec/x_spec.rb[1:1]"], puts_only).run
+    expect(JSON.parse(puts_only.out)["status"]).to eq("survived")
+  end
+
   it "runs only groups belonging to covering spec files (drops helper-leaked groups)" do
     covering = class_double(RSpec::Core::ExampleGroup,
                             metadata: { absolute_file_path: File.expand_path("spec/x_spec.rb") })

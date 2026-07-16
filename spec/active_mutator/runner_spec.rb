@@ -94,6 +94,68 @@ RSpec.describe ActiveMutator::Runner do
       expect { runner.send(:preload_spec_helper!) }.not_to raise_error
     end
 
+    it "prefers an explicitly configured helper over the defaults" do
+      Dir.mktmpdir do |dir|
+        FileUtils.mkdir_p(File.join(dir, "spec"))
+        File.write(File.join(dir, "custom_helper.rb"), "$custom_helper_loaded = true")
+        File.write(File.join(dir, "spec", "spec_helper.rb"), "$default_helper_loaded = true")
+        runner = described_class.new(config.with(root: dir, preload_helper: "custom_helper.rb"))
+        runner.send(:preload_spec_helper!)
+        expect($custom_helper_loaded).to be(true)
+        expect($default_helper_loaded).to be_nil
+      ensure
+        $custom_helper_loaded = $default_helper_loaded = nil
+        $LOAD_PATH.delete(dir)
+      end
+    end
+
+    it "quietly does nothing when the configured helper does not exist" do
+      Dir.mktmpdir do |dir|
+        runner = described_class.new(config.with(root: dir, preload_helper: "missing_helper.rb"))
+        expect { runner.send(:preload_spec_helper!) }.not_to raise_error
+      end
+    end
+
+    it "requires rspec-core before loading the helper" do
+      Dir.mktmpdir do |dir|
+        FileUtils.mkdir_p(File.join(dir, "spec"))
+        File.write(File.join(dir, "spec", "spec_helper.rb"), "# empty")
+        runner = described_class.new(config.with(root: dir))
+        allow(runner).to receive(:require).and_call_original
+        expect(runner).to receive(:require).with("rspec/core").and_call_original
+        runner.send(:preload_spec_helper!)
+      ensure
+        $LOAD_PATH.delete(File.join(dir, "spec"))
+      end
+    end
+
+    it "puts the helper's directory on $LOAD_PATH so bare requires resolve" do
+      Dir.mktmpdir do |dir|
+        FileUtils.mkdir_p(File.join(dir, "spec"))
+        File.write(File.join(dir, "spec", "rails_helper.rb"), 'require "bare_support_shim"')
+        File.write(File.join(dir, "spec", "bare_support_shim.rb"), "$bare_require_worked = true")
+        described_class.new(config.with(root: dir)).send(:preload_spec_helper!)
+        expect($bare_require_worked).to be(true)
+      ensure
+        $bare_require_worked = nil
+        $LOAD_PATH.delete(File.join(dir, "spec"))
+      end
+    end
+
+    it "does not duplicate an already-present $LOAD_PATH entry" do
+      Dir.mktmpdir do |dir|
+        spec_dir = File.join(dir, "spec")
+        FileUtils.mkdir_p(spec_dir)
+        File.write(File.join(spec_dir, "spec_helper.rb"), "# empty")
+        runner = described_class.new(config.with(root: dir))
+        runner.send(:preload_spec_helper!)
+        runner.send(:preload_spec_helper!)
+        expect($LOAD_PATH.count(spec_dir)).to eq(1)
+      ensure
+        $LOAD_PATH.delete(File.join(dir, "spec"))
+      end
+    end
+
     it "disarms SimpleCov after preload" do
       fake = Class.new do
         def self.at_exit_calls = @at_exit_calls ||= []
@@ -106,6 +168,77 @@ RSpec.describe ActiveMutator::Runner do
         described_class.new(config.with(root: dir)).send(:preload_spec_helper!)
       end
       expect(fake.at_exit_calls.size).to eq(1)
+    end
+  end
+
+  describe "#preload!" do
+    it "requires each configured file relative to root" do
+      Dir.mktmpdir do |dir|
+        File.write(File.join(dir, "boot.rb"), "$preload_boot_loaded = true")
+        described_class.new(config.with(root: dir, requires: ["boot.rb"])).send(:preload!)
+        expect($preload_boot_loaded).to be(true)
+      ensure
+        $preload_boot_loaded = nil
+      end
+    end
+
+    it "requires config/environment.rb when no requires are given" do
+      Dir.mktmpdir do |dir|
+        FileUtils.mkdir_p(File.join(dir, "config"))
+        File.write(File.join(dir, "config", "environment.rb"), "$preload_env_loaded = true")
+        described_class.new(config.with(root: dir, requires: [])).send(:preload!)
+        expect($preload_env_loaded).to be(true)
+      ensure
+        $preload_env_loaded = nil
+      end
+    end
+
+    it "eager loads the Rails app after requiring environment.rb" do
+      Dir.mktmpdir do |dir|
+        FileUtils.mkdir_p(File.join(dir, "config"))
+        File.write(File.join(dir, "config", "environment.rb"), <<~RUBY)
+          module Rails
+            def self.application = @application ||= Object.new.tap do |app|
+              def app.eager_load! = $preload_eager_loaded = true
+            end
+          end
+        RUBY
+        described_class.new(config.with(root: dir, requires: [])).send(:preload!)
+        expect($preload_eager_loaded).to be(true)
+      ensure
+        $preload_eager_loaded = nil
+        Object.send(:remove_const, :Rails) if defined?(::Rails)
+      end
+    end
+
+    it "skips config/environment.rb when explicit requires are given" do
+      Dir.mktmpdir do |dir|
+        FileUtils.mkdir_p(File.join(dir, "config"))
+        File.write(File.join(dir, "boot.rb"), "# no-op")
+        File.write(File.join(dir, "config", "environment.rb"), "$preload_env_loaded = true")
+        described_class.new(config.with(root: dir, requires: ["boot.rb"])).send(:preload!)
+        expect($preload_env_loaded).to be_nil
+      ensure
+        $preload_env_loaded = nil
+      end
+    end
+  end
+
+  describe "#accept_survivors!" do
+    it "does not touch the ledger when nothing survived" do
+      ledger = instance_double(ActiveMutator::AcceptedLedger)
+      expect(ledger).not_to receive(:accept!)
+      killed = ActiveMutator::Result.new(mutation: mutation, status: :killed, details: nil)
+      described_class.new(config).send(:accept_survivors!, ledger, [killed], { mutation => "fp" })
+    end
+
+    it "accepts surviving fingerprints into the ledger" do
+      ledger = instance_double(ActiveMutator::AcceptedLedger)
+      m = mutation
+      survived = ActiveMutator::Result.new(mutation: m, status: :survived, details: nil)
+      fingerprints = { m => "fp1" }
+      expect(ledger).to receive(:accept!).with(["fp1"], ["fp1"])
+      described_class.new(config).send(:accept_survivors!, ledger, [survived], fingerprints)
     end
   end
 
@@ -195,6 +328,69 @@ RSpec.describe ActiveMutator::Runner do
 
         runner = described_class.new(config.with(root: dir, subject_filter: nil))
         expect(runner.send(:discover_subjects).map(&:name)).to contain_exactly("Keep#a", "Keep#b")
+      end
+    end
+
+    it "discovers files in nested subdirectories" do
+      Dir.mktmpdir do |dir|
+        FileUtils.mkdir_p(File.join(dir, "lib", "nested", "deeper"))
+        File.write(File.join(dir, "lib", "nested", "deeper", "deep.rb"),
+                   "class Deep; def a; 1; end; end")
+
+        runner = described_class.new(config.with(root: dir))
+        expect(runner.send(:discover_subjects).map(&:name)).to eq(["Deep#a"])
+      end
+    end
+
+    it "scans only the configured paths when paths are given" do
+      Dir.mktmpdir do |dir|
+        FileUtils.mkdir_p(File.join(dir, "custom"))
+        FileUtils.mkdir_p(File.join(dir, "lib"))
+        FileUtils.mkdir_p(File.join(dir, "app"))
+        File.write(File.join(dir, "custom", "wanted.rb"), "class Wanted; def a; 1; end; end")
+        File.write(File.join(dir, "lib", "decoy.rb"), "class LibDecoy; def a; 1; end; end")
+        File.write(File.join(dir, "app", "decoy.rb"), "class AppDecoy; def a; 1; end; end")
+
+        runner = described_class.new(config.with(root: dir, paths: ["custom"]))
+        expect(runner.send(:discover_subjects).map(&:name)).to eq(["Wanted#a"])
+      end
+    end
+
+    it "falls back to default app/lib paths when paths are empty" do
+      Dir.mktmpdir do |dir|
+        FileUtils.mkdir_p(File.join(dir, "lib"))
+        FileUtils.mkdir_p(File.join(dir, "app"))
+        File.write(File.join(dir, "lib", "keep.rb"), "class LibKeep; def a; 1; end; end")
+        File.write(File.join(dir, "app", "keep.rb"), "class AppKeep; def a; 1; end; end")
+
+        runner = described_class.new(config.with(root: dir, paths: []))
+        expect(runner.send(:discover_subjects).map(&:name)).to contain_exactly("AppKeep#a", "LibKeep#a")
+      end
+    end
+
+    it "wires SinceFilter when since is set and keeps only covered subjects" do
+      Dir.mktmpdir do |dir|
+        FileUtils.mkdir_p(File.join(dir, "lib"))
+        File.write(File.join(dir, "lib", "keep.rb"), "class Keep; def a; 1; end; def b; 2; end; end")
+
+        filter = instance_double(ActiveMutator::SinceFilter)
+        expect(ActiveMutator::SinceFilter).to receive(:new)
+          .with(ref: "main", root: dir).and_return(filter)
+        allow(filter).to receive(:cover?) { |s| s.name == "Keep#a" }
+
+        runner = described_class.new(config.with(root: dir, since: "main"))
+        expect(runner.send(:discover_subjects).map(&:name)).to eq(["Keep#a"])
+      end
+    end
+
+    it "does not instantiate SinceFilter when since is nil" do
+      Dir.mktmpdir do |dir|
+        FileUtils.mkdir_p(File.join(dir, "lib"))
+        File.write(File.join(dir, "lib", "keep.rb"), "class Keep; def a; 1; end; end")
+
+        expect(ActiveMutator::SinceFilter).not_to receive(:new)
+        runner = described_class.new(config.with(root: dir, since: nil))
+        expect(runner.send(:discover_subjects).map(&:name)).to eq(["Keep#a"])
       end
     end
   end

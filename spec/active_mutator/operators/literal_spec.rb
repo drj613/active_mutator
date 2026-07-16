@@ -1,6 +1,19 @@
 RSpec.describe ActiveMutator::Operators::Literal do
   subject(:operator) { described_class.new }
 
+  def descriptions_of(source, operator)
+    edits = []
+    each_node(Prism.parse(source).value) { |n| edits.concat(operator.edits(n)) }
+    edits.map(&:description)
+  end
+
+  it "labels each edit with an exact description" do
+    expect(descriptions_of("x = true", operator)).to eq(["replace `true` with `false`"])
+    expect(descriptions_of("x = false", operator)).to eq(["replace `false` with `true`"])
+    expect(descriptions_of(%(x = ""), operator)).to eq([%(replace "" with "active_mutator")])
+    expect(descriptions_of(%(x = "hi"), operator)).to eq([%(replace string with "")])
+  end
+
   it "mutates nonzero integers to 0 and n+1" do
     expect(mutations_of("x = 5", operator)).to contain_exactly("x = 0", "x = 6")
   end

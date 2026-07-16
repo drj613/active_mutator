@@ -37,6 +37,12 @@ module ActiveMutator
     # `class << self` bodies are a documented v1 limit: not visited.
     def visit_singleton_class_node(node); end
 
+    # Defs inside blocks (`Data.define do ... end`, `class_eval do ... end`)
+    # do not live on the enclosing constant scope, so Inserter would redefine
+    # them on the wrong constant and every mutant would falsely survive.
+    # Same v1 limit as `class << self`: not visited.
+    def visit_block_node(node); end
+
     def visit_def_node(node)
       return if @skip_lines.include?(node.location.start_line - 1)
 

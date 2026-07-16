@@ -9,4 +9,8 @@ RSpec.describe ActiveMutator::Operators::StatementDeletion do
   it "leaves single-statement bodies alone" do
     expect(mutations_of("a", operator)).to eq([])
   end
+
+  it "deletes statements from an exactly-two-statement body" do
+    expect(mutations_of("a\nb", operator)).to contain_exactly("\nb", "a\n")
+  end
 end

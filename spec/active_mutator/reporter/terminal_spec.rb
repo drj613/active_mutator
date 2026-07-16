@@ -37,6 +37,18 @@ RSpec.describe ActiveMutator::Reporter::Terminal do
     expect(text).to include("- <", "+ <=")
   end
 
+  it "prints the survivor header and entries with blank-line separators" do
+    reporter.summary([result(:survived)], invalid_count: 0)
+    text = out.string
+    expect(text).to include("\n\nSurviving mutants:\n")
+    expect(text).to include("\n\n  Calculator#discount (lib/calculator.rb:11)\n")
+    expect(text).not_to include("active_mutator")
+  end
+
+  it "scores an empty run as 1.0" do
+    expect(described_class.score({})).to eq(1.0)
+  end
+
   it "prints per-operator equivalent rates when survivors exist" do
     reporter.summary([result(:survived)], invalid_count: 0)
     expect(out.string).to include("\n\nEquivalent-rate by operator (survived / (killed + survived)):\n")

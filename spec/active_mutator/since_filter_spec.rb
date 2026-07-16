@@ -24,6 +24,17 @@ RSpec.describe ActiveMutator::SinceFilter do
       )
     end
 
+    it "ignores hunk headers that appear before any +++ file line" do
+      diff = <<~DIFF
+        @@ -1 +1 @@
+        +stray
+        +++ b/lib/a.rb
+        @@ -2 +2 @@
+        +real
+      DIFF
+      expect(described_class.parse(diff)).to eq("lib/a.rb" => [2])
+    end
+
     it "ignores pure deletions (zero new-side count)" do
       diff = <<~DIFF
         +++ b/lib/a.rb

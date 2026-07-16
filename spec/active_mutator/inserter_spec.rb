@@ -28,6 +28,15 @@ RSpec.describe ActiveMutator::Inserter do
     expect(InserterFixture.build).to eq(:mutated)
   end
 
+  it "evals top-level subjects (nil constant_scope) at main scope" do
+    inserter.insert(mutation_stub(scope: nil,
+                                  def_source: "def am_inserter_spec_toplevel = :toplevel"))
+    expect(Object.new.send(:am_inserter_spec_toplevel)).to eq(:toplevel)
+  ensure
+    Object.send(:undef_method, :am_inserter_spec_toplevel) if
+      Object.method_defined?(:am_inserter_spec_toplevel, true)
+  end
+
   it "raises for unknown scopes" do
     expect { inserter.insert(mutation_stub(scope: "NoSuchScope", def_source: "def x = 1")) }
       .to raise_error(NameError)

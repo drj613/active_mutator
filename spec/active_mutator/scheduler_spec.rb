@@ -10,10 +10,66 @@ RSpec.describe ActiveMutator::Scheduler do
     described_class.new(jobs: jobs, worker: worker, on_result: on_result)
   end
 
+  # SIGKILL delivery is asynchronous; poll briefly before declaring a leak.
+  def expect_process_gone(pid)
+    deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + 3
+    loop do
+      begin
+        Process.kill(0, pid)
+      rescue Errno::ESRCH
+        return
+      end
+      if Process.clock_gettime(Process::CLOCK_MONOTONIC) > deadline
+        raise "expected process #{pid} to be killed, but it is still alive"
+      end
+      sleep 0.05
+    end
+  end
+
   it "collects statuses reported by workers" do
     worker = ->(_m, _e, writer) { writer.puts(JSON.generate("status" => "killed", "details" => nil)) }
     results = scheduler(worker: worker).run([item, item, item])
     expect(results.map(&:status)).to eq(%i[killed killed killed])
+  end
+
+  it "reports worker details alongside the status" do
+    worker = ->(_m, _e, writer) { writer.puts(JSON.generate("status" => "killed", "details" => "boom")) }
+    results = scheduler(worker: worker).run([item])
+    expect(results.first.details).to eq("boom")
+  end
+
+  it "closes the worker pipe reader after a normal finish" do
+    GC.disable
+    baseline = Dir.children("/dev/fd").size
+    worker = ->(_m, _e, writer) { writer.puts(JSON.generate("status" => "killed", "details" => nil)) }
+    scheduler(worker: worker).run([item, item])
+    expect(Dir.children("/dev/fd").size).to eq(baseline)
+  ensure
+    GC.enable
+  end
+
+  it "installs INT handling for the duration of the run and restores the previous handler" do
+    sentinel = proc {}
+    previous_int = trap("INT", sentinel)
+    begin
+      during = nil
+      worker = ->(_m, _e, writer) { writer.puts(JSON.generate("status" => "killed", "details" => nil)) }
+      on_result = lambda do |_r|
+        during = trap("INT", sentinel) # peek at the active handler...
+        trap("INT", during)            # ...and put it straight back
+      end
+      scheduler(worker: worker, on_result: on_result).run([item])
+      expect(during).not_to eq(sentinel) # scheduler's own handler was active mid-run
+      expect(trap("INT", "DEFAULT")).to eq(sentinel) # original handler restored after
+    ensure
+      trap("INT", previous_int || "DEFAULT")
+    end
+  end
+
+  it "restores DEFAULT for signals whose previous handler was nil" do
+    trap("USR1", proc {})
+    scheduler(worker: ->(_m, _e, _w) {}).send(:restore_traps, { "USR1" => nil })
+    expect(trap("USR1", "DEFAULT")).to eq("DEFAULT")
   end
 
   it "aborts and kills workers when the parent is orphaned" do
@@ -23,15 +79,45 @@ RSpec.describe ActiveMutator::Scheduler do
     sched = described_class.new(jobs: 2, worker: worker, orphaned: orphaned)
     started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
     expect { sched.run([item, item, item]) }
-      .to raise_error(ActiveMutator::Scheduler::OrphanedError)
+      .to raise_error(ActiveMutator::Scheduler::OrphanedError, /parent process died/)
     elapsed = Process.clock_gettime(Process::CLOCK_MONOTONIC) - started
     expect(elapsed).to be < 5 # workers were killed, not waited out
+  end
+
+  it "leaves no live worker processes behind after an orphaned abort" do
+    pid_file = Tempfile.new("pids").path
+    worker = lambda do |_m, _e, _w|
+      File.open(pid_file, "a") { |f| f.flock(File::LOCK_EX); f.puts(Process.pid) }
+      sleep 30
+    end
+    orphaned = -> { File.read(pid_file).lines.size >= 2 } # both workers running
+    sched = described_class.new(jobs: 2, worker: worker, orphaned: orphaned)
+    expect { sched.run([item, item]) }
+      .to raise_error(ActiveMutator::Scheduler::OrphanedError)
+    pids = File.readlines(pid_file).map(&:to_i)
+    expect(pids.size).to eq(2)
+    pids.each { |pid| expect_process_gone(pid) }
+  end
+
+  it "marks payloads missing a status key as :error instead of crashing" do
+    worker = ->(_m, _e, writer) { writer.puts(JSON.generate("details" => nil)) }
+    results = scheduler(worker: worker).run([item])
+    expect(results.map(&:status)).to eq([:error])
+    expect(results.first.details).to eq("worker exited without reporting")
+  end
+
+  it "marks unparseable payloads as :error instead of crashing" do
+    worker = ->(_m, _e, writer) { writer.puts("not json{") }
+    results = scheduler(worker: worker).run([item])
+    expect(results.map(&:status)).to eq([:error])
+    expect(results.first.details).to eq("worker emitted unparseable payload")
   end
 
   it "marks silent crashes as :error" do
     worker = ->(_m, _e, _w) { Process.exit!(1) }
     results = scheduler(worker: worker).run([item])
     expect(results.map(&:status)).to eq([:error])
+    expect(results.first.details).to eq("worker exited without reporting")
   end
 
   it "kills over-deadline workers and marks :timeout" do
@@ -41,6 +127,29 @@ RSpec.describe ActiveMutator::Scheduler do
     elapsed = Process.clock_gettime(Process::CLOCK_MONOTONIC) - started
     expect(results.map(&:status)).to eq([:timeout])
     expect(elapsed).to be < 5
+  end
+
+  it "actually kills the timed-out worker process and closes its pipe" do
+    GC.disable
+    pid_file = Tempfile.new("pid").path
+    baseline = Dir.children("/dev/fd").size
+    worker = lambda do |_m, _e, _w|
+      File.write(pid_file, Process.pid.to_s)
+      sleep 30
+    end
+    results = scheduler(worker: worker).run([item(timeout: 0.3)])
+    expect(results.map(&:status)).to eq([:timeout])
+    pid = File.read(pid_file).to_i
+    expect(pid).to be > 0
+    expect_process_gone(pid)
+    expect(Dir.children("/dev/fd").size).to eq(baseline)
+  ensure
+    GC.enable
+    begin
+      Process.kill("KILL", File.read(pid_file).to_i) # cleanup if the mutant leaked it
+    rescue StandardError
+      nil
+    end
   end
 
   it "invokes on_result as each result lands" do

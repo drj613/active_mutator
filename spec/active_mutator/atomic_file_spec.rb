@@ -10,6 +10,29 @@ RSpec.describe ActiveMutator::AtomicFile do
     end
   end
 
+  it "creates the lock file with 0644 permissions" do
+    Dir.mktmpdir do |dir|
+      path = File.join(dir, "data.json")
+      described_class.write(path, "{}")
+      expect(File.stat("#{path}.lock").mode & 0o777).to eq(0o644)
+    end
+  end
+
+  it "holds an exclusive flock on the lock file while writing" do
+    Dir.mktmpdir do |dir|
+      path = File.join(dir, "data.json")
+      locked_during_write = nil
+      allow(File).to receive(:write).and_wrap_original do |original, *args|
+        File.open("#{path}.lock", File::CREAT | File::RDWR) do |probe|
+          locked_during_write = probe.flock(File::LOCK_EX | File::LOCK_NB) == false
+        end
+        original.call(*args)
+      end
+      described_class.write(path, "{}")
+      expect(locked_during_write).to be(true)
+    end
+  end
+
   it "serializes concurrent writers via the lock file" do
     Dir.mktmpdir do |dir|
       path = File.join(dir, "data.txt")

@@ -67,6 +67,19 @@ RSpec.describe ActiveMutator::SubjectFinder do
     expect(subjects.map(&:name)).to eq(["Widget#visible"])
   end
 
+  it "skips defs inside blocks (Data.define, class_eval) — same v1 limit" do
+    subjects = subjects_of(<<~RUBY)
+      module Wrap
+        Point = Data.define(:x) do
+          def norm = x.abs
+          def self.build = new(x: 0)
+        end
+        def visible = 1
+      end
+    RUBY
+    expect(subjects.map(&:name)).to eq(["Wrap#visible"])
+  end
+
   it "records byte_range covering the whole def" do
     source = "class A\n  def b\n    1\n  end\nend\n"
     subject = subjects_of(source).first
