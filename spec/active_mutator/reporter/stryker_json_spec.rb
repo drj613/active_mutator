@@ -70,6 +70,15 @@ RSpec.describe ActiveMutator::Reporter::StrykerJson do
     expect(mutants.map { |m| m["id"] }).to eq(%w[0 1 2 3 4 5])
   end
 
+  it "emits the exact location object and the mutant description" do
+    mutant = report_after([build_result(:killed, file: @file)]).dig("files", "lib/calc.rb", "mutants").first
+    expect(mutant["location"]).to eq(
+      "start" => { "line" => 2, "column" => 5 },
+      "end" => { "line" => 2, "column" => 6 }
+    )
+    expect(mutant["description"]).to eq("replace `>` with `>=`")
+  end
+
   it "omits statusReason for killed mutants" do
     mutant = report_after([build_result(:killed, file: @file)]).dig("files", "lib/calc.rb", "mutants").first
     expect(mutant).not_to have_key("statusReason")

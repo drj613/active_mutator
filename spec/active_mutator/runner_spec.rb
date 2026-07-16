@@ -478,6 +478,13 @@ RSpec.describe ActiveMutator::Runner do
       end
     end
 
+    it "debug_plan rounds timeouts to exactly two decimals" do
+      item = ActiveMutator::WorkItem.new(mutation: mutation(line: 2), example_ids: ["e1"],
+                                         timeout: 1.23456, lane: :parallel)
+      output = capture_stdout { described_class.new(config).send(:debug_plan, [item], []) }
+      expect(JSON.parse(output)["planned"].first["timeout"]).to eq(1.23)
+    end
+
     def capture_stdout
       original = $stdout
       $stdout = StringIO.new
