@@ -11,6 +11,11 @@
 | 2026-07-15 | 2 close | `active_mutator app/models --subject "Document#size_category"` | 2.65s | 100.0% | 0 | smoke run; 20 mutants, all killed |
 | 2026-07-15 | 2 close | `--subject "Document" --format stryker-json` | n/a | n/a | 15 | 115 mutants in report; schemaVersion 2, 1 file, testFiles present, valid JSON; exit 1 (survivors) |
 | 2026-07-15 | 2 close | `--subject "Document" --format github` | n/a | n/a | 15 | 15 `::warning` annotations, one per survivor; exit 1 |
+| 2026-07-16 | 3 close | `active_mutator lib/active_mutator/config_file.rb` | 1.42s | 100.0% | 0 | file-path positional arg works (#23 fix); 64 mutants, all killed, exit 0 |
+| 2026-07-16 | 3 close | same, with `.active_mutator.yml` (`jobs: 2`) | 2.46s | 100.0% | 0 | config file applied: CPU 230% → 116%, wall 1.42s → 2.46s (2 workers); yml deleted after |
+| 2026-07-16 | 3 close | `active_mutator lib/nope.rb` | n/a | n/a | n/a | `no such file or directory: lib/nope.rb`, exit 2 — no more silent false-green |
+| 2026-07-16 | 3 close | `active_mutator README.md` | n/a | n/a | n/a | `not a Ruby file: README.md`, exit 2 |
+| 2026-07-16 | 3 close | `active_mutator lib` (full gate) | n/a | 100.0% | 0 | 1094 killed, 8 timeout, 25 accepted; first pass showed 9 phantom survivors in `Runner#prune_scope` from a stale incremental baseline — one `--force-baseline` refresh killed all of them, exit 0 |
 
 ## Findings
 

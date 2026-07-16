@@ -36,6 +36,14 @@ unreachable). Accept one ONLY with a stated equivalence argument:
 - Then: `bundle exec active_mutator --changed --accept-survivors`
 - The acceptance ledger (`.active_mutator_accepted.json`, repo root) is
   committed state. Include it in your commit.
+- Scoped accepting runs are safe: the ledger never prunes out-of-scope
+  entries (pruning happens only within files fully scanned by
+  non-narrowed runs).
+
+Team-wide defaults (jobs, excludes, serial patterns, etc.) live in
+`.active_mutator.yml` at the project root; CLI flags override it.
+`--fail-at SCORE` can gate on score instead of zero-survivors for legacy
+suites — do not add it to make your own change pass.
 
 Never accept a survivor because killing it is tedious. Never weaken
 active_mutator flags (`--subject` scoping, patterns) to make a run pass.
