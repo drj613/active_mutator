@@ -712,9 +712,28 @@ RSpec.describe ActiveMutator::Runner do
       expect { call_runner }.to output(/stale accepted fingerprint.*Gone#away/).to_stderr
     end
 
+    it "warns about accepted fingerprints referencing missing files" do
+      allow(map).to receive(:examples_for).and_return([])
+      gone = { "file" => "lib/gone.rb", "subject" => "Gone#away", "description" => "d",
+               "original_snippet" => "x", "ordinal" => 0 }
+      File.write(File.join(@root, ActiveMutator::AcceptedLedger::FILENAME), JSON.generate([gone]))
+      expect { call_runner }
+        .to output(/accepted fingerprint references missing file: lib\/gone\.rb \(Gone#away\)/).to_stderr
+    end
+
+    it "warns about missing-file entries even on a scoped run" do
+      allow(map).to receive(:examples_for).and_return([])
+      gone = { "file" => "lib/gone.rb", "subject" => "Gone#away", "description" => "d",
+               "original_snippet" => "x", "ordinal" => 0 }
+      File.write(File.join(@root, ActiveMutator::AcceptedLedger::FILENAME), JSON.generate([gone]))
+      expect { call_runner(subject_filter: "A#x") }
+        .to output(/accepted fingerprint references missing file: lib\/gone\.rb/).to_stderr
+    end
+
     describe "prune scope wiring" do
       let(:ledger) do
-        instance_double(ActiveMutator::AcceptedLedger, accepted?: false, stale_entries: [], accept!: nil)
+        instance_double(ActiveMutator::AcceptedLedger, accepted?: false, stale_entries: [],
+                                                       missing_file_entries: [], accept!: nil)
       end
 
       before do

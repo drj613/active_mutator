@@ -90,6 +90,28 @@ RSpec.describe ActiveMutator::AcceptedLedger do
     end
   end
 
+  it "reports entries whose file is missing from missing_file_entries" do
+    Dir.mktmpdir do |root|
+      FileUtils.mkdir_p(File.join(root, "lib"))
+      File.write(File.join(root, "lib", "calc.rb"), "# present")
+      gone = fp(file: "lib/gone.rb", subject: "Gone#away")
+      ledger = described_class.new(File.join(root, described_class::FILENAME), [fp, gone])
+      expect(ledger.missing_file_entries(root)).to eq([gone])
+    end
+  end
+
+  it "keeps missing-file entries across an unscoped accept! (deletion is the user's call)" do
+    Dir.mktmpdir do |root|
+      gone = fp(file: "lib/gone.rb", subject: "Gone#away")
+      described_class.load(root).accept!([gone], [gone], scanned_files: ["lib/gone.rb"])
+      # Unscoped run over the whole (now gone.rb-less) tree:
+      described_class.load(root).accept!([fp], [fp], scanned_files: ["lib/calc.rb"])
+      reloaded = described_class.load(root)
+      expect(reloaded.accepted?(gone)).to be(true)
+      expect(reloaded.accepted?(fp)).to be(true)
+    end
+  end
+
   it "reports no stale entries when scanned_files is nil" do
     Dir.mktmpdir do |root|
       described_class.load(root).accept!([fp], [fp], scanned_files: ["lib/calc.rb"])

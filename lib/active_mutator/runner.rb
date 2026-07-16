@@ -188,6 +188,9 @@ module ActiveMutator
 
     # Only a run with no subject-level narrowing has fully scanned a file;
     # anything narrower must not prune (or warn about) out-of-scope entries.
+    # MAINTENANCE: any future flag that narrows the mutant set below "every
+    # subject in the scanned files" MUST be added to this nil-trigger list,
+    # or scoped accept runs will clobber out-of-scope ledger entries (#24).
     def prune_scope(subjects)
       return nil if @config.subject_filter || @config.since || @config.max_mutants
 
@@ -216,6 +219,9 @@ module ActiveMutator
     def warn_stale(ledger, all_fingerprints, scanned_files)
       ledger.stale_entries(all_fingerprints, scanned_files: scanned_files).each do |entry|
         warn "active_mutator: stale accepted fingerprint (no matching mutant): #{entry.subject}, #{entry.description}"
+      end
+      ledger.missing_file_entries(@config.root).each do |entry|
+        warn "active_mutator: accepted fingerprint references missing file: #{entry.file} (#{entry.subject})"
       end
     end
   end

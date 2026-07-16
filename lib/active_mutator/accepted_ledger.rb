@@ -5,6 +5,10 @@ module ActiveMutator
   # Committed, repo-root ledger of accepted (equivalent) survivors.
   # Deliberately NOT inside .active_mutator/: that dir is gitignored and
   # disposable, while acceptance decisions are durable team/CI state.
+  #
+  # Entries whose file no longer exists are kept, not pruned: the file may
+  # still exist on another branch, so deletion is the user's call. The runner
+  # warns about them on every run instead (see #missing_file_entries).
   class AcceptedLedger
     FILENAME = ".active_mutator_accepted.json"
 
@@ -38,6 +42,12 @@ module ActiveMutator
       current = all_current_fingerprints.to_set
       scanned = scanned_files.to_set
       @entries.reject { |e| current.include?(e) || !scanned.include?(e.file) }
+    end
+
+    # Missing is objective regardless of run scope: such entries can never
+    # appear in scanned_files, so without this they'd be immortal AND silent.
+    def missing_file_entries(root)
+      @entries.reject { |e| File.exist?(File.join(root, e.file)) }
     end
 
     def accept!(new_fingerprints, all_current_fingerprints, scanned_files:)
