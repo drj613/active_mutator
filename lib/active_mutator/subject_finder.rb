@@ -40,7 +40,8 @@ module ActiveMutator
     # Defs inside blocks (`Data.define do ... end`, `class_eval do ... end`)
     # do not live on the enclosing constant scope, so Inserter would redefine
     # them on the wrong constant and every mutant would falsely survive.
-    # Same v1 limit as `class << self`: not visited.
+    # Same v1 limit as `class << self`: not visited. Note this also hides
+    # classes/modules defined inside blocks (accepted v1 limit).
     def visit_block_node(node); end
 
     def visit_def_node(node)

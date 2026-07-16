@@ -106,6 +106,13 @@ RSpec.describe ActiveMutator::Scheduler do
     expect(results.first.details).to eq("worker exited without reporting")
   end
 
+  it "marks valid JSON with a non-Hash root as :error instead of crashing" do
+    worker = ->(_m, _e, writer) { writer.puts(JSON.generate([1])) }
+    results = scheduler(worker: worker).run([item])
+    expect(results.map(&:status)).to eq([:error])
+    expect(results.first.details).to eq("worker exited without reporting")
+  end
+
   it "marks unparseable payloads as :error instead of crashing" do
     worker = ->(_m, _e, writer) { writer.puts("not json{") }
     results = scheduler(worker: worker).run([item])
