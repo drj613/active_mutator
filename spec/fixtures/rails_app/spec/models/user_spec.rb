@@ -9,8 +9,9 @@ RSpec.describe User do
   describe ".adults" do
     it "queries the database" do
       User.create!(age: 20)
+      User.create!(age: 18)
       User.create!(age: 10)
-      expect(User.adults.count).to eq(1)
+      expect(User.adults.count).to eq(2)
     end
   end
 end

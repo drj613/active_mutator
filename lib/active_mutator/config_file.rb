@@ -20,7 +20,8 @@ module ActiveMutator
       "exclude" => :string_list,
       "serial_patterns" => :string_list,
       "requires" => :string_list,
-      "preload_helper" => :preload_helper
+      "preload_helper" => :preload_helper,
+      "adaptive_timeout" => :boolean
     }.freeze
 
     def self.load(root)
@@ -65,6 +66,11 @@ module ActiveMutator
       when :string_list
         unless value.is_a?(Array) && value.all?(String)
           raise Error, "#{FILENAME}: #{key} must be a list of strings"
+        end
+        value
+      when :boolean
+        unless [true, false].include?(value)
+          raise Error, "#{FILENAME}: #{key} must be true or false"
         end
         value
       when :preload_helper

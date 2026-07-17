@@ -38,6 +38,22 @@ RSpec.describe ActiveMutator::ConfigFile do
     )
   end
 
+  it "accepts adaptive_timeout: false" do
+    write_config("adaptive_timeout: false\n")
+    expect(described_class.load(root)[:adaptive_timeout]).to be false
+  end
+
+  it "accepts adaptive_timeout: true" do
+    write_config("adaptive_timeout: true\n")
+    expect(described_class.load(root)[:adaptive_timeout]).to be true
+  end
+
+  it "rejects a non-boolean adaptive_timeout" do
+    write_config("adaptive_timeout: nope\n")
+    expect { described_class.load(root) }
+      .to raise_error(ActiveMutator::Error, /adaptive_timeout must be true or false/)
+  end
+
   it "maps preload_helper: false to :none" do
     write_config("preload_helper: false\n")
     expect(described_class.load(root)).to eq(preload_helper: :none)

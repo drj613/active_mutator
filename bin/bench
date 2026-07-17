@@ -1,0 +1,21 @@
+#!/usr/bin/env ruby
+# Usage: bin/bench [--out DIR]
+# Runs every cell in bench/targets.json against the committed fixture corpus
+# (plus any git-pinned targets) and writes reports + timings per cell.
+require "optparse"
+
+repo_root = File.expand_path("..", __dir__)
+require File.join(repo_root, "bench/lib/bench/plan")
+require File.join(repo_root, "bench/lib/bench/runner")
+
+out = File.join(repo_root, "bench/results", Time.now.strftime("%Y%m%d-%H%M%S"))
+OptionParser.new do |o|
+  o.banner = "Usage: bin/bench [--out DIR]"
+  o.on("--out DIR", "Results directory (default: bench/results/<timestamp>)") { |v| out = File.expand_path(v) }
+end.parse!
+
+require "fileutils"
+FileUtils.mkdir_p(out)
+cells = Bench::Plan.load(File.join(repo_root, "bench/targets.json")).cells
+Bench::Runner.new(cells: cells, repo_root: repo_root, out_dir: out).call
+puts "bench results written to #{out}"

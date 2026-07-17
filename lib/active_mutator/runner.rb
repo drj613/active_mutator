@@ -28,7 +28,11 @@ module ActiveMutator
       return debug_plan(items, pre_results) if @config.debug_plan
 
       pre_results.each { |r| @reporter.on_result(r) }
-      scheduler = Scheduler.new(jobs: @config.jobs, on_result: @reporter.method(:on_result))
+      calibrators = if @config.adaptive_timeout
+                      { parallel: TimeoutCalibrator.new, serial: TimeoutCalibrator.new }
+                    end
+      scheduler = Scheduler.new(jobs: @config.jobs, on_result: @reporter.method(:on_result),
+                                calibrators: calibrators)
       results = scheduler.run(items) + pre_results
 
       accept_survivors!(ledger, results, fingerprints, scanned_files) if @config.accept_survivors
@@ -51,9 +55,11 @@ module ActiveMutator
           pre_results << Result.new(mutation: mutation, status: :uncovered, details: nil)
         else
           lane = example_ids.any? { |id| serial_example?(id) } ? :serial : :parallel
-          timeout = map.time_for(example_ids) * @config.timeout_factor + @config.timeout_floor
-          timeout += @config.browser_boot_seconds if lane == :serial
-          items << WorkItem.new(mutation: mutation, example_ids: example_ids, timeout: timeout, lane: lane)
+          variable = map.time_for(example_ids) * @config.timeout_factor
+          boot_extra = lane == :serial ? @config.browser_boot_seconds : 0.0
+          timeout = variable + @config.timeout_floor + boot_extra
+          items << WorkItem.new(mutation: mutation, example_ids: example_ids,
+                                timeout: timeout, lane: lane, variable: variable)
         end
       end
       [items, pre_results]

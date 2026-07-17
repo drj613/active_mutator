@@ -7,8 +7,8 @@ RSpec.describe ActiveMutator::Scheduler do
     ActiveMutator::WorkItem.new(mutation: nil, example_ids: [], timeout: timeout, lane: lane)
   end
 
-  def scheduler(worker:, jobs: 2, on_result: nil)
-    described_class.new(jobs: jobs, worker: worker, on_result: on_result)
+  def scheduler(worker:, jobs: 2, on_result: nil, calibrators: nil)
+    described_class.new(jobs: jobs, worker: worker, on_result: on_result, calibrators: calibrators)
   end
 
   # SIGKILL delivery is asynchronous; poll briefly before declaring a leak.
@@ -323,6 +323,98 @@ RSpec.describe ActiveMutator::Scheduler do
     scheduler(worker: worker, jobs: 2).run([item, item, item, item])
     elapsed = Process.clock_gettime(Process::CLOCK_MONOTONIC) - started
     expect(elapsed).to be >= 0.3 # 4 items / 2 jobs => at least two waves
+  end
+
+  describe "adaptive timeouts" do
+    def fake_calibrator(budget: nil, scale: 1.0, warmed: false)
+      cal = instance_double(ActiveMutator::TimeoutCalibrator,
+                            scale: scale, warmed?: warmed)
+      if budget
+        allow(cal).to receive(:budget_for).and_return(budget)
+      else
+        allow(cal).to receive(:budget_for) { |i| i.timeout }
+      end
+      allow(cal).to receive(:record)
+      cal
+    end
+
+    def killed_worker
+      ->(_m, _e, writer) { writer.puts(JSON.generate("status" => "killed", "details" => nil)) }
+    end
+
+    it "asks the lane's calibrator for the effective budget at spawn time" do
+      # Static timeout is generous, but the calibrator returns a tiny budget:
+      # the sleeping worker must be reaped as a timeout.
+      cal = fake_calibrator(budget: 0.2)
+      worker = ->(_m, _e, _w) { sleep 30 }
+      results = scheduler(worker: worker, calibrators: { parallel: cal, serial: cal })
+                .run([item(timeout: 60.0)])
+      expect(results.map(&:status)).to eq([:timeout])
+    end
+
+    it "records killed forks with their elapsed time AND the effective budget they ran under" do
+      recordings = []
+      cal = fake_calibrator(budget: 5.0)
+      allow(cal).to receive(:record) { |elapsed, budget| recordings << [elapsed, budget] }
+      scheduler(worker: killed_worker, calibrators: { parallel: cal, serial: cal })
+        .run([item(timeout: 60.0), item(timeout: 60.0)])
+      expect(recordings.size).to eq(2)
+      # The denominator is the scaled budget (5.0), never the static 60.0 —
+      # recording against the static budget would ratchet the scale to max.
+      expect(recordings).to all(satisfy { |(elapsed, budget)| elapsed.positive? && budget == 5.0 })
+    end
+
+    it "routes recordings to the calibrator of the item's lane" do
+      parallel_cal = fake_calibrator
+      serial_cal = fake_calibrator
+      scheduler(worker: killed_worker, calibrators: { parallel: parallel_cal, serial: serial_cal })
+        .run([item(lane: :parallel), item(lane: :serial)])
+      expect(parallel_cal).to have_received(:record).once
+      expect(serial_cal).to have_received(:record).once
+    end
+
+    it "does not record survived or errored forks (they would bias the median)" do
+      cal = fake_calibrator
+      survived = ->(_m, _e, writer) { writer.puts(JSON.generate("status" => "survived", "details" => nil)) }
+      errored  = ->(_m, _e, writer) { writer.puts(JSON.generate("status" => "error", "details" => "boom")) }
+      scheduler(worker: survived, calibrators: { parallel: cal, serial: cal }).run([item])
+      scheduler(worker: errored, calibrators: { parallel: cal, serial: cal }).run([item])
+      expect(cal).not_to have_received(:record)
+    end
+
+    it "does not record timed-out forks (their true wall time is unknown)" do
+      cal = fake_calibrator(budget: 0.2)
+      worker = ->(_m, _e, _w) { sleep 30 }
+      scheduler(worker: worker, calibrators: { parallel: cal, serial: cal }).run([item(timeout: 60.0)])
+      expect(cal).not_to have_received(:record)
+    end
+
+    it "runs on static budgets when no calibrators are given" do
+      worker = ->(_m, _e, _w) { sleep 30 }
+      results = scheduler(worker: worker).run([item(timeout: 0.2)])
+      expect(results.map(&:status)).to eq([:timeout])
+    end
+
+    it "logs the scale with its lane to stderr once per change, not once per spawn" do
+      # 2.456 distinguishes round(2) from round(3): the log must read 2.46.
+      cal = fake_calibrator(warmed: true, scale: 2.456)
+      expect do
+        scheduler(worker: killed_worker, calibrators: { parallel: cal, serial: cal })
+          .run([item, item, item])
+      end.to output(/active_mutator: adaptive timeout scale \(parallel\): 2\.46\n/).to_stderr_from_any_process
+      # exactly once: the regex above plus a negative count check
+      expect do
+        scheduler(worker: killed_worker, calibrators: { parallel: cal, serial: cal })
+          .run([item, item])
+      end.to output(satisfy { |s| s.scan("adaptive timeout scale").size == 1 }).to_stderr_from_any_process
+    end
+
+    it "does not log the scale before warm-up" do
+      cal = fake_calibrator(warmed: false)
+      expect do
+        scheduler(worker: killed_worker, calibrators: { parallel: cal, serial: cal }).run([item])
+      end.not_to output(/adaptive timeout scale/).to_stderr_from_any_process
+    end
   end
 
   it "runs serial-lane items one at a time, after the parallel lane" do

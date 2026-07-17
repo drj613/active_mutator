@@ -239,7 +239,8 @@ survivors show inline on the PR diff. Pairs with the CI recipe:
 - Per-PR: `active_mutator --since origin/main --format github` (minutes;
   survivors annotate the PR diff)
 - Nightly: `active_mutator --force-baseline` (full run; also recovers the
-  incremental baseline's newly-covering-example blind spot)
+  residual blind spot — constant-reference detection handles the common
+  newly-covering-example case since 0.2)
 
 ## Flags
 
@@ -259,6 +260,7 @@ survivors show inline on the PR diff. Pairs with the CI recipe:
 | `--serial-pattern PAT` | `spec/system/`, `spec/features/` | covering-path prefixes forced serial |
 | `--browser-boot-seconds S` | 15 | serial-lane timeout bump |
 | `--timeout-factor F` / `--timeout-floor S` | 8 / 10 | mutation timeout budget |
+| `--[no-]adaptive-timeout` | on | scale timeout budgets from observed worker wall times (median utilization, grow-only, clamped 1x–4x; `--timeout-factor`/`--timeout-floor` set the starting budget) |
 | `--require FILE` | none | preload files (repeatable) |
 | `--fail-at SCORE` | none (strict) | exit 0 if score >= SCORE even with survivors (opt-in relaxation for gradual adoption; 0 = report-only) |
 
@@ -281,7 +283,8 @@ flags override file values (`--require` and `--exclude` add to the file's
 lists; the first `--serial-pattern` replaces them). Recognized keys:
 `jobs`, `format`, `timeout_factor`, `timeout_floor`,
 `browser_boot_seconds`, `fail_at`, `exclude`, `serial_patterns`,
-`requires`, `preload_helper` (a path, or `false` to skip preload).
+`requires`, `preload_helper` (a path, or `false` to skip preload),
+`adaptive_timeout` (`true`/`false`).
 Unknown keys and wrong types are errors, not silent no-ops.
 
 ```yaml
@@ -298,8 +301,11 @@ fail_at: 90   # legacy suite: gate on score instead of zero-survivors
 
 Method bodies only (no class-macro/constant mutation). RSpec only.
 Heredoc strings are not mutated. `class << self` bodies and nested defs
-are skipped. The incremental baseline can miss examples that only cover
-changed code after the change (nightly `--force-baseline` recovers).
+are skipped. The incremental baseline recovers the residual blind spot —
+constant-reference detection handles the common case since 0.2, and a few
+residual cases (pure indirection, partially-covering files, leaf-only or
+wrapper-only references, `class ::Foo`, `Data.define`/`Struct.new` value
+objects) are caught by nightly `--force-baseline`.
 
 ## Guides
 

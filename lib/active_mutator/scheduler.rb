@@ -8,11 +8,13 @@ module ActiveMutator
     OrphanedError = Class.new(Error)
 
     def initialize(jobs:, worker: Worker.method(:run), on_result: nil,
-                   orphaned: -> { Process.ppid == 1 })
+                   calibrators: nil, orphaned: -> { Process.ppid == 1 })
       @jobs = jobs
       @worker = worker
       @on_result = on_result
+      @calibrators = calibrators
       @orphaned = orphaned
+      @last_logged_scale = {} # lane => last scale logged for that lane
     end
 
     def run(items)
@@ -72,7 +74,12 @@ module ActiveMutator
         Process.exit!(0)
       end
       writer.close
-      running[pid] = { reader: reader, item: item, deadline: now + item.timeout }
+      calibrator = calibrator_for(item)
+      budget = calibrator ? calibrator.budget_for(item) : item.timeout
+      log_scale(calibrator, item.lane)
+      started = now
+      running[pid] = { reader: reader, item: item, started: started,
+                       budget: budget, deadline: started + budget }
     end
 
     def reap(running, results)
@@ -80,7 +87,11 @@ module ActiveMutator
         done, _status = Process.waitpid2(pid, Process::WNOHANG)
         if done
           running.delete(pid)
-          results << finish(entry)
+          result = finish(entry)
+          if result.status == :killed
+            calibrator_for(entry[:item])&.record(now - entry[:started], entry[:budget])
+          end
+          results << result
         elsif now > entry[:deadline]
           kill(pid)
           running.delete(pid)
@@ -147,6 +158,23 @@ module ActiveMutator
 
     def restore_traps(previous)
       previous.each { |sig, handler| trap(sig, handler || "DEFAULT") }
+    end
+
+    def calibrator_for(item)
+      @calibrators && @calibrators[item.lane]
+    end
+
+    # Effective budgets are otherwise invisible (--debug-plan shows static
+    # ones by design). One stderr line per scale CHANGE per lane, not per
+    # spawn — the two lanes calibrate independently, so the lane is named.
+    def log_scale(calibrator, lane)
+      return unless calibrator&.warmed?
+
+      scale = calibrator.scale.round(2)
+      return if scale == @last_logged_scale[lane]
+
+      @last_logged_scale[lane] = scale
+      warn "active_mutator: adaptive timeout scale (#{lane}): #{scale}"
     end
 
     def now = Process.clock_gettime(Process::CLOCK_MONOTONIC)
