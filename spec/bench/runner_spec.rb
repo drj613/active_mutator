@@ -33,8 +33,10 @@ RSpec.describe Bench::Runner do
       expect(mutator_calls).to all(include(chdir: end_with("spec/fixtures/tiny_project")))
 
       summary = JSON.parse(File.read(File.join(out, "tiny-jobs1", "bench.json")))
-      expect(summary.keys).to include("cell", "baseline_seconds", "mutation_seconds", "exit_ok")
+      expect(summary.keys).to include("cell", "baseline_seconds", "baseline_ok",
+                                      "mutation_seconds", "exit_ok")
       expect(summary["cell"]).to eq("tiny-jobs1")
+      expect(summary["baseline_ok"]).to be(true)
       expect(summary["exit_ok"]).to be(true)
     end
   end
@@ -54,13 +56,15 @@ RSpec.describe Bench::Runner do
   it "records a failed mutation stage as exit_ok false and keeps going" do
     Dir.mktmpdir do |out|
       log = []
-      statuses = Hash.new(true)
       bad = cell(id: "bad", argv: ["lib", "--jobs", "1", "--format", "stryker-json"])
       exec = lambda do |argv, chdir:|
         log << { argv: argv, chdir: chdir }
-        # Fail only the bad cell's real mutation stage (no --force-baseline in argv).
-        !(argv.any? { |a| a.end_with?("active_mutator") } &&
-          !argv.include?("--force-baseline") && argv.include?("1"))
+        # Fail only the bad cell's real mutation stage: an active_mutator call
+        # without --force-baseline whose argv carries the bad cell's --jobs 1 pair.
+        mutation_stage = argv.any? { |a| a.end_with?("active_mutator") } &&
+                         !argv.include?("--force-baseline")
+        bad_cell = argv.each_cons(2).include?(["--jobs", "1"])
+        !(mutation_stage && bad_cell)
       end
       runner = described_class.new(cells: [bad, cell(id: "good", argv: ["lib", "--jobs", "2", "--format", "stryker-json"])],
                                    repo_root: Dir.pwd, out_dir: out, exec: exec)

@@ -47,7 +47,7 @@ module Bench
       FileUtils.mkdir_p(cell_dir)
       mutator = File.expand_path("exe/active_mutator", @repo_root)
 
-      baseline_seconds, = timed do
+      baseline_seconds, baseline_ok = timed do
         @exec.call(["bundle", "exec", mutator, *cell.argv, "--force-baseline", "--max-mutants", "0"],
                    chdir: target_dir)
       end
@@ -59,6 +59,7 @@ module Bench
       File.write(File.join(cell_dir, "bench.json"), JSON.pretty_generate(
         "cell" => cell.id, "target" => cell.target_name, "argv" => cell.argv,
         "baseline_seconds" => baseline_seconds.round(2),
+        "baseline_ok" => !!baseline_ok,
         "mutation_seconds" => mutation_seconds.round(2),
         "exit_ok" => !!ok
       ))
