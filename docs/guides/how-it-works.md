@@ -306,8 +306,10 @@ actually took. Each lane keeps its own calibrator (parallel and serial
 never pool samples). After a warm-up of 5 **killed** forks, the calibrator
 takes the median of each sampled fork's utilization — its wall time
 against the effective budget it actually ran under — and scales future
-budgets toward a target utilization of `0.25`, clamped to the `0.5`–`4`
-range. Only killed forks are sampled: errors, survivors, and timeouts
+budgets toward a target utilization of `0.25`, grow-only: clamped to the
+`1`–`4` range, so budgets extend beyond the static value but never fall
+below it (timeouts are censored samples — a shrunken budget would have no
+recovery signal). Only killed forks are sampled: errors, survivors, and timeouts
 never feed the calibrator (a timeout's wall time is an artifact of the
 budget, not the honest run cost). The fixed part of the budget (floor plus
 browser boot) is never scaled — only the covering-example time is. Whenever

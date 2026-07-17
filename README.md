@@ -260,7 +260,7 @@ survivors show inline on the PR diff. Pairs with the CI recipe:
 | `--serial-pattern PAT` | `spec/system/`, `spec/features/` | covering-path prefixes forced serial |
 | `--browser-boot-seconds S` | 15 | serial-lane timeout bump |
 | `--timeout-factor F` / `--timeout-floor S` | 8 / 10 | mutation timeout budget |
-| `--[no-]adaptive-timeout` | on | scale timeout budgets from observed worker wall times (median utilization, clamped 0.5x–4x; `--timeout-factor`/`--timeout-floor` set the starting budget) |
+| `--[no-]adaptive-timeout` | on | scale timeout budgets from observed worker wall times (median utilization, grow-only, clamped 1x–4x; `--timeout-factor`/`--timeout-floor` set the starting budget) |
 | `--require FILE` | none | preload files (repeatable) |
 | `--fail-at SCORE` | none (strict) | exit 0 if score >= SCORE even with survivors (opt-in relaxation for gradual adoption; 0 = report-only) |
 
