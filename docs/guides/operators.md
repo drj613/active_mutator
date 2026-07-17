@@ -105,9 +105,10 @@ literals.
   different from the original value; a literal `0` only gets the `+1`
   edit).
 - **Strings:** a non-empty string literal is replaced with `""`. An empty
-  string literal is replaced with `"active_mutator"`. Heredocs and
-  quote-less parts (string interpolation segments) are not mutated. This is
-  a documented v1 limit.
+  string literal is replaced with `"active_mutator"`. A plain heredoc with
+  a nonempty (dedented) body has its body emptied ("empty heredoc body").
+  Interpolated heredocs and quote-less parts (string interpolation
+  segments) are not mutated.
 - **Booleans:** `true` ↔ `false`.
 
 ```ruby
@@ -225,6 +226,14 @@ avoid manufacturing unkillable noise.
 | `.last` | `.first` |
 | `.any?` | `.none?` |
 | `.none?` | `.any?` |
+| `.all?` | `.any?` (one-directional) |
+| `.take` | `.drop` |
+| `.drop` | `.take` |
+| `.min_by` | `.max_by` |
+| `.max_by` | `.min_by` |
+| `.sort` | `.reverse` (one-directional) |
+| `.detect` | `.first` (one-directional) |
+| `.find` | `.first` (one-directional) |
 | `.present?` | `.blank?` *(Rails-aware)* |
 | `.blank?` | `.present?` *(Rails-aware)* |
 | `.save` | `.save!` *(Rails-aware)* |

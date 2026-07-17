@@ -303,8 +303,12 @@ fail_at: 90   # legacy suite: gate on score instead of zero-survivors
 ## Known limits (v1.1)
 
 Method bodies only (no class-macro/constant mutation). RSpec only.
-Heredoc strings are not mutated. `class << self` bodies and nested defs
-are skipped. The incremental baseline recovers the residual blind spot —
+Plain heredoc bodies ARE mutated (emptied); interpolated heredocs are
+skipped. `class << self` bodies are mutated as singleton subjects
+(`class << obj` and top-level `class << self` are skipped). Nested defs
+mutate as part of the enclosing method's body — they get no subject of
+their own (a directly-inserted mutant would be reverted whenever the
+outer method re-runs the `def`). The incremental baseline recovers the residual blind spot —
 constant-reference detection handles the common case since 0.2, and a few
 residual cases (pure indirection, partially-covering files, leaf-only or
 wrapper-only references, `class ::Foo`, `Data.define`/`Struct.new` value

@@ -19,14 +19,18 @@ nesting) and yields a `Subject` (`{name, file, byte_range, line_range,
 constant_scope, kind}`) for every `def` it finds, for example
 `Billing::Calculator#total` or `Billing::Calculator.build`.
 
-Two things it deliberately does **not** descend into:
-- `class << self` bodies (`visit_singleton_class_node` is overridden to a
-  no-op). This is a documented limit, not an oversight.
-- Nested `def`s: `visit_def_node` does not call `super`. A method
-  defined inside another method body is invisible to the finder. In
-  practice, active_mutator's unit of mutation is exactly one method body:
-  no class-macro calls (`validates`, `scope`, `has_many`), no constants,
-  no DSL blocks.
+Scope details worth knowing:
+- `class << self` bodies inside a constant scope ARE visited: their defs
+  become singleton subjects (`Foo.bar`) flagged `sclass`, so insertion
+  targets the singleton class. `class << obj` and a top-level
+  `class << self` (no constant to hang the method on) are skipped.
+- Nested `def`s get no subject of their own: `visit_def_node` does not
+  call `super`. Their bodies still mutate — the engine descends into them
+  under the OUTER subject, because a directly-inserted nested-def mutant
+  would be silently reverted every time the outer method re-runs the
+  `def`. In practice, active_mutator's unit of mutation is one outermost
+  method body: no class-macro calls (`validates`, `scope`, `has_many`),
+  no constants, no DSL blocks.
 
 `Runner#discover_subjects` globs `app/**/*.rb` and `lib/**/*.rb` (or
 whatever paths/`--subject`/`--since` narrow it to) and hands each file to
@@ -368,10 +372,11 @@ silently pile up.
 - **Method bodies only.** No class-macro, constant, or DSL-block mutation
   (`validates`, `scope`, `has_many`, etc.). This follows from how subjects
   are found (§1) and inserted (§4); it is not an accident.
-- **`class << self` bodies and nested `def`s are invisible** to subject
-  discovery (§1).
-- **Heredoc strings, and quote-less/interpolated string segments, are not
-  mutated** (`Operators::Literal`).
+- **`class << obj` and top-level `class << self` are invisible** to
+  subject discovery; `class << self` inside a class/module IS mutated (§1).
+  Nested `def`s mutate only via their enclosing method's subject (§1).
+- **Interpolated heredocs and quote-less/interpolated string segments are
+  not mutated** (`Operators::Literal`); plain heredoc bodies are emptied.
 - **RSpec only.** Test selection, worker setup, and the world-group filter
   are all RSpec-API-shaped.
 - **The incremental baseline's residual blind spot** (§3): constant-reference
