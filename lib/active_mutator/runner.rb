@@ -28,7 +28,11 @@ module ActiveMutator
       return debug_plan(items, pre_results) if @config.debug_plan
 
       pre_results.each { |r| @reporter.on_result(r) }
-      scheduler = Scheduler.new(jobs: @config.jobs, on_result: @reporter.method(:on_result))
+      calibrators = if @config.adaptive_timeout
+                      { parallel: TimeoutCalibrator.new, serial: TimeoutCalibrator.new }
+                    end
+      scheduler = Scheduler.new(jobs: @config.jobs, on_result: @reporter.method(:on_result),
+                                calibrators: calibrators)
       results = scheduler.run(items) + pre_results
 
       accept_survivors!(ledger, results, fingerprints, scanned_files) if @config.accept_survivors

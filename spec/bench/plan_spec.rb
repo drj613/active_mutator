@@ -18,7 +18,8 @@ RSpec.describe Bench::Plan do
       cells = described_class.load(path).cells
       expect(cells.map(&:id)).to eq(["tiny-jobs1-tf8.0", "tiny-jobs2-tf8.0"])
       expect(cells.first.argv).to eq(
-        ["lib", "--jobs", "1", "--timeout-factor", "8.0", "--format", "stryker-json"]
+        ["lib", "--jobs", "1", "--timeout-factor", "8.0",
+         "--no-adaptive-timeout", "--format", "stryker-json"]
       )
       expect(cells.first.target_name).to eq("tiny")
       expect(cells.first.path).to eq("spec/fixtures/tiny_project")
@@ -33,7 +34,19 @@ RSpec.describe Bench::Plan do
       ])
       cells = described_class.load(path).cells
       expect(cells.map(&:id)).to eq(["tiny-default"])
-      expect(cells.first.argv).to eq(["lib", "--format", "stryker-json"])
+      expect(cells.first.argv).to eq(["lib", "--no-adaptive-timeout", "--format", "stryker-json"])
+    end
+  end
+
+  it "lets a matrix row opt back in to adaptive timeouts as a boolean flag" do
+    Dir.mktmpdir do |dir|
+      path = write_targets(dir, "targets" => [
+        { "name" => "tiny", "type" => "path", "path" => "spec/fixtures/tiny_project",
+          "paths" => ["lib"], "matrix" => { "adaptive_timeout" => [true, false] } }
+      ])
+      argvs = described_class.load(path).cells.map(&:argv)
+      expect(argvs[0]).to eq(["lib", "--adaptive-timeout", "--format", "stryker-json"])
+      expect(argvs[1]).to eq(["lib", "--no-adaptive-timeout", "--format", "stryker-json"])
     end
   end
 

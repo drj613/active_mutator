@@ -35,7 +35,8 @@ module Bench
           path: path,
           git_url: target["url"],
           git_sha: target["sha"],
-          argv: target.fetch("paths", []) + flag_argv(combo) + ["--format", "stryker-json"]
+          argv: target.fetch("paths", []) + flag_argv(combo) +
+                adaptive_default(combo) + ["--format", "stryker-json"]
         )
       end
     end
@@ -59,8 +60,21 @@ module Bench
         .fetch(flag, flag.delete("_"))
     end
 
+    # Deterministic by default: adaptive budgets are load-dependent and would
+    # make the bench-diff regression gate flaky. Matrix rows may override.
+    def adaptive_default(combo)
+      combo.key?("adaptive_timeout") ? [] : ["--no-adaptive-timeout"]
+    end
+
     def flag_argv(combo)
-      combo.flat_map { |flag, v| ["--#{flag.tr("_", "-")}", v.to_s] }
+      combo.flat_map do |flag, v|
+        name = flag.tr("_", "-")
+        case v
+        when true  then ["--#{name}"]
+        when false then ["--no-#{name}"]
+        else ["--#{name}", v.to_s]
+        end
+      end
     end
   end
 end

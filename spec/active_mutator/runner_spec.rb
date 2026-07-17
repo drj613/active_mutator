@@ -8,7 +8,7 @@ RSpec.describe ActiveMutator::Runner do
       requires: [], timeout_factor: 4.0, timeout_floor: 2.0, force_baseline: false,
       root: "/project", preload_helper: nil, serial_patterns: ["spec/system/", "spec/features/"],
       browser_boot_seconds: 15.0, accept_survivors: false, exclude: [],
-      max_mutants: nil, debug_plan: false, fail_at: nil
+      max_mutants: nil, debug_plan: false, fail_at: nil, adaptive_timeout: true
     )
   end
 
@@ -124,6 +124,57 @@ RSpec.describe ActiveMutator::Runner do
     github_config = config.with(format: :github)
     reporter = described_class.new(github_config).instance_variable_get(:@reporter)
     expect(reporter).to be_a(ActiveMutator::Reporter::Github)
+  end
+
+  describe "#call adaptive-timeout wiring" do
+    let(:reporter) do
+      r = Object.new
+      def r.coverage_map=(_); end
+      def r.on_result(_); end
+      def r.summary(*, **); end
+      r
+    end
+
+    def stub_runner(cfg)
+      runner = described_class.new(cfg, reporter: reporter)
+      allow(runner).to receive(:preload!)
+      allow(runner).to receive(:preload_spec_helper!)
+      allow(runner).to receive(:discover_subjects).and_return([])
+      allow(ActiveMutator::Baseline).to receive(:new).and_return(
+        instance_double(ActiveMutator::Baseline, coverage_map: instance_double(ActiveMutator::CoverageMap))
+      )
+      runner
+    end
+
+    it "passes per-lane TimeoutCalibrators to the scheduler when adaptive_timeout is on" do
+      runner = stub_runner(config.with(adaptive_timeout: true))
+      expect(ActiveMutator::Scheduler).to receive(:new)
+        .with(hash_including(calibrators: {
+          parallel: kind_of(ActiveMutator::TimeoutCalibrator),
+          serial: kind_of(ActiveMutator::TimeoutCalibrator)
+        }))
+        .and_return(instance_double(ActiveMutator::Scheduler, run: []))
+      runner.call
+    end
+
+    it "builds distinct calibrator instances per lane (no cross-lane sample pooling)" do
+      runner = stub_runner(config.with(adaptive_timeout: true))
+      captured = nil
+      expect(ActiveMutator::Scheduler).to receive(:new) do |**kwargs|
+        captured = kwargs[:calibrators]
+        instance_double(ActiveMutator::Scheduler, run: [])
+      end
+      runner.call
+      expect(captured[:parallel]).not_to be(captured[:serial])
+    end
+
+    it "passes no calibrators when adaptive_timeout is off" do
+      runner = stub_runner(config.with(adaptive_timeout: false))
+      expect(ActiveMutator::Scheduler).to receive(:new)
+        .with(hash_including(calibrators: nil))
+        .and_return(instance_double(ActiveMutator::Scheduler, run: []))
+      runner.call
+    end
   end
 
   it "exits 1 when mutants survive, 0 otherwise" do

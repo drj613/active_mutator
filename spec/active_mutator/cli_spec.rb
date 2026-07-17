@@ -30,6 +30,14 @@ RSpec.describe ActiveMutator::CLI do
       expect(config.timeout_floor).to eq(5.0)
     end
 
+    it "defaults adaptive_timeout to true" do
+      expect(described_class.parse([]).adaptive_timeout).to be true
+    end
+
+    it "parses --no-adaptive-timeout" do
+      expect(described_class.parse(["--no-adaptive-timeout"]).adaptive_timeout).to be false
+    end
+
     it "defaults the v1.1 fields" do
       config = described_class.parse([])
       expect(config.preload_helper).to be_nil
@@ -94,6 +102,7 @@ RSpec.describe ActiveMutator::CLI do
         "Skip spec-helper preload",
         "Covering-path prefix that forces the serial lane (repeatable; replaces defaults on first use)",
         "Extra timeout budget for serial-lane mutants",
+        "Scale timeout budgets from observed worker wall times (default: on)",
         "Record surviving mutants into the acceptance ledger",
         "Skip files matching glob, relative to root (repeatable)",
         "Deterministically sample the first N mutants",

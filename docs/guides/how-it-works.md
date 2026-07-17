@@ -262,6 +262,23 @@ correctness, not just cleanliness: a worker-side timeout cannot interrupt
 every possible infinite loop, since the mutated code itself might be the
 thing spinning, with no chance to check a deadline.
 
+With `--adaptive-timeout` (the default), a per-lane `TimeoutCalibrator`
+scales the *variable* part of each remaining budget from what workers
+actually took. Each lane keeps its own calibrator (parallel and serial
+never pool samples). After a warm-up of 5 **killed** forks, the calibrator
+takes the median of each sampled fork's utilization — its wall time
+against the effective budget it actually ran under — and scales future
+budgets toward a target utilization of `0.25`, clamped to the `0.5`–`4`
+range. Only killed forks are sampled: errors, survivors, and timeouts
+never feed the calibrator (a timeout's wall time is an artifact of the
+budget, not the honest run cost). The fixed part of the budget (floor plus
+browser boot) is never scaled — only the covering-example time is. Whenever
+a lane's applied scale changes, the scheduler emits
+`active_mutator: adaptive timeout scale (parallel|serial): N.NN` on stderr;
+that line is how you see effective budgets, since `--debug-plan`
+intentionally keeps printing the static ones. Pass `--no-adaptive-timeout`
+to restore the purely static budget.
+
 ## 7. Statuses
 
 | Status | Meaning | Counts toward score? |

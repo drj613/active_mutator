@@ -259,6 +259,7 @@ survivors show inline on the PR diff. Pairs with the CI recipe:
 | `--serial-pattern PAT` | `spec/system/`, `spec/features/` | covering-path prefixes forced serial |
 | `--browser-boot-seconds S` | 15 | serial-lane timeout bump |
 | `--timeout-factor F` / `--timeout-floor S` | 8 / 10 | mutation timeout budget |
+| `--[no-]adaptive-timeout` | on | scale timeout budgets from observed worker wall times (median utilization, clamped 0.5x–4x; `--timeout-factor`/`--timeout-floor` set the starting budget) |
 | `--require FILE` | none | preload files (repeatable) |
 | `--fail-at SCORE` | none (strict) | exit 0 if score >= SCORE even with survivors (opt-in relaxation for gradual adoption; 0 = report-only) |
 
@@ -281,7 +282,8 @@ flags override file values (`--require` and `--exclude` add to the file's
 lists; the first `--serial-pattern` replaces them). Recognized keys:
 `jobs`, `format`, `timeout_factor`, `timeout_floor`,
 `browser_boot_seconds`, `fail_at`, `exclude`, `serial_patterns`,
-`requires`, `preload_helper` (a path, or `false` to skip preload).
+`requires`, `preload_helper` (a path, or `false` to skip preload),
+`adaptive_timeout` (`true`/`false`).
 Unknown keys and wrong types are errors, not silent no-ops.
 
 ```yaml
