@@ -145,6 +145,23 @@ RSpec.describe ActiveMutator::BaselineDelta do
       end
     end
 
+    it "reads the spec-file set only once across multiple changed source files" do
+      project(
+        "lib/invoice.rb" => "class Invoice; end\n",
+        "lib/order.rb" => "class Order; end\n",
+        "spec/invoice_shared_spec.rb" => "RSpec.describe Invoice do; end\n"
+      ) do |root|
+        # The memoized spec-contents cache must survive the whole compute call
+        # (a per-iteration rebuild is the O(changed x specs) IO regression).
+        expect(Dir).to receive(:[]).once.and_call_original
+        described_class.compute(
+          old_digests: { "lib/invoice.rb" => "x", "lib/order.rb" => "x" },
+          new_digests: { "lib/invoice.rb" => "y", "lib/order.rb" => "y" },
+          coverage_map: coverage_map({}), root: root
+        )
+      end
+    end
+
     it "falls back to a full run when the referencing set exceeds half of all spec files" do
       project(
         "lib/invoice.rb" => "class Invoice; end\n",
