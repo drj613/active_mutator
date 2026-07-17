@@ -139,23 +139,61 @@ into the cached JSON. Both the full and partial write paths go through
 the same time in the same repo can't corrupt the cache (or the acceptance
 ledger, which uses the same helper).
 
-**The documented blind spot:** "re-run the examples currently covering the
-changed file" cannot find an example in an *unchanged* spec file that
-only starts covering the changed source *because of* the edit. For
-example, a pre-existing shared or parameterized example might now reach a
-newly added branch. The delta model has no way to know that example
-exists without running it, since it wasn't in the set of examples that
-used to cover anything nearby. The result is a false `uncovered` or
-`survived` status on such lines, until the next full baseline runs.
+**The newly-covering-example blind spot (mostly closed since 0.2):** "re-run
+the examples currently covering the changed file" cannot, on its own, find
+an example in an *unchanged* spec file that only starts covering the changed
+source *because of* the edit (a pre-existing shared or parameterized example
+that now reaches a newly added branch). The delta model has no way to know
+that example exists without running it, since it wasn't in the set of
+examples that used to cover anything nearby.
+
+Since 0.2 the delta refresh **also** re-runs unchanged spec files that
+*textually reference a constant defined in the changed source file* but
+currently contribute zero coverage to it. `DefinedConstants` does a Prism
+walk of the changed file and emits the **deepest fully qualified**
+class/module names it defines (`Billing::Invoice`, not `Invoice` and not the
+bare wrapper `Billing`); `BaselineDelta` word-boundary-matches those names
+against every non-covering spec file and re-runs any that hit. If more than
+50% of spec files match (a common token slipped through), it degrades to a
+full baseline and prints a stderr warning rather than re-running most of the
+suite silently. This closes the common case — the flag-flipped branch in an
+unchanged spec that names the changed class.
+
+**Residual gap — six cases still missed until the next full baseline**, all
+recovered by nightly `--force-baseline`:
+
+1. **Pure indirection** — a spec that newly covers the change but references
+   *neither* the constant *nor* the source file textually (it reaches the
+   code through an unrelated collaborator). Nothing links it to the edit.
+2. **Partially-covering spec files** — a spec file that *already* contributes
+   some coverage to the changed file (so it is skipped by the zero-coverage
+   candidate rule) but whose *other*, non-covering examples newly start
+   covering it. Re-running such files wholesale on every edit would regress
+   incremental speed for the common zero-growth case, so it is not done.
+3. **Nested constant referenced by bare leaf name only** — a spec that writes
+   `Invoice` for `Billing::Invoice`. `DefinedConstants` deliberately never
+   emits bare leaves (a common leaf would match half the suite and trip the
+   full-run fallback on every edit), so the leaf-only reference is not seen.
+4. **Pure namespace wrapper referenced only by the wrapper** — a spec that
+   mentions only `Billing` for a change inside `module Billing; class Invoice`.
+   Wrapper tokens are never emitted for the same thrash reason.
+5. **Top-level `::`-prefixed definitions** (`class ::Foo`) — the emitted slice
+   is `::Foo`, and `/\b::Foo\b/` can never match (there is no word boundary
+   before `:`), so such files are silently unscanned. See the `TODO` in
+   `lib/active_mutator/baseline_delta.rb`.
+6. **Value objects assigned to a constant** (`Point = Data.define(...)`,
+   `Struct.new(...)`) — these parse as `ConstantWriteNode`, not a
+   class/module node, so `DefinedConstants` emits no name and their
+   references are never scanned.
 
 **Recovery:** `--force-baseline` ignores the cache and always runs a full
 instrumented baseline. This is why the CI recipe (see the README) runs it
 nightly. The incremental path is correct for the common case and is
-cheap, but it is not a soundness guarantee on its own. Nightly
-`--force-baseline` closes that gap. `docs/skills/mutation-check.md` also
-tells an agent: if a survivor's coverage looks implausibly thin for a line
-you know is tested, re-run once with `--force-baseline` before writing new
-tests.
+cheap — the constant-reference scan extends that common case — but it is
+not a soundness guarantee on its own. Nightly `--force-baseline` closes
+every residual gap above. `docs/skills/mutation-check.md` also tells an
+agent: if a survivor's coverage looks implausibly thin for a line you know
+is tested, re-run once with `--force-baseline` before writing new tests.
 
 ## 4. The fork pipeline
 
@@ -334,8 +372,12 @@ silently pile up.
   mutated** (`Operators::Literal`).
 - **RSpec only.** Test selection, worker setup, and the world-group filter
   are all RSpec-API-shaped.
-- **The incremental baseline's blind spot** (§3): a newly-covering example
-  in an unchanged spec file is missed until the next `--force-baseline`.
+- **The incremental baseline's residual blind spot** (§3): constant-reference
+  detection (since 0.2) re-runs unchanged spec files that name the changed
+  class, so the common newly-covering-example case is caught; a handful of
+  residual cases (pure indirection, partially-covering files, leaf-only or
+  wrapper-only references, `class ::Foo`, `Data.define`/`Struct.new` value
+  objects) are still missed until the next `--force-baseline`.
 - **Equivalent mutants are not detected.** They are only curated against
   by operator design and closed out through the acceptance ledger. Some
   survivor noise is inherent to the technique, not a bug in this tool.

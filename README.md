@@ -239,7 +239,8 @@ survivors show inline on the PR diff. Pairs with the CI recipe:
 - Per-PR: `active_mutator --since origin/main --format github` (minutes;
   survivors annotate the PR diff)
 - Nightly: `active_mutator --force-baseline` (full run; also recovers the
-  incremental baseline's newly-covering-example blind spot)
+  residual blind spot — constant-reference detection handles the common
+  newly-covering-example case since 0.2)
 
 ## Flags
 
@@ -300,8 +301,11 @@ fail_at: 90   # legacy suite: gate on score instead of zero-survivors
 
 Method bodies only (no class-macro/constant mutation). RSpec only.
 Heredoc strings are not mutated. `class << self` bodies and nested defs
-are skipped. The incremental baseline can miss examples that only cover
-changed code after the change (nightly `--force-baseline` recovers).
+are skipped. The incremental baseline recovers the residual blind spot —
+constant-reference detection handles the common case since 0.2, and a few
+residual cases (pure indirection, partially-covering files, leaf-only or
+wrapper-only references, `class ::Foo`, `Data.define`/`Struct.new` value
+objects) are caught by nightly `--force-baseline`.
 
 ## Guides
 
