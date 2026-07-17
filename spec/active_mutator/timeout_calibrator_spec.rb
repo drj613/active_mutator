@@ -91,9 +91,11 @@ RSpec.describe ActiveMutator::TimeoutCalibrator do
 
   it "averages the two middle elements for an even-sized window of distinct samples" do
     cal = described_class.new
-    [0.10, 0.15, 0.20, 0.30, 0.35, 0.40].each { |u| rec(cal, u) } # 6 distinct
-    # even median (0.20 + 0.30) / 2 = 0.25 / target 0.25 = scale 1.0
-    expect(cal.scale).to be_within(0.0001).of(1.0)
+    [0.20, 0.25, 0.30, 0.40, 0.45, 0.50].each { |u| rec(cal, u) } # 6 distinct
+    # even median (0.30 + 0.40) / 2 = 0.35 / target 0.25 = scale 1.4; a
+    # single-element pick would give 1.2 (sorted[2]) or 1.6 (sorted[3]), and
+    # neither clamps away now that MIN_SCALE is 1.0.
+    expect(cal.scale).to be_within(0.0001).of(1.4)
   end
 
   it "caps the window at exactly WINDOW samples, dropping only the single oldest" do
