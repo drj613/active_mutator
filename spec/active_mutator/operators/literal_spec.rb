@@ -56,8 +56,16 @@ RSpec.describe ActiveMutator::Operators::Literal do
 
   it "skips interpolated heredocs" do
     # Build the source so the interpolation is in the parsed code, not the spec.
+    # (Guard fires at the opening_loc check: the inner StringNode parts of an
+    # InterpolatedStringNode carry no opening, so heredoc_edits is never reached.)
     source = 'x = <<~SQL' + "\n" + '  #{b}' + "\nSQL\n"
     expect(mutations_of(source, operator)).to eq([])
+  end
+
+  it "splices heredoc bodies by byte offset, not character offset" do
+    mutants = mutations_of("x = <<~TXT\n  café après\nTXT\ny = 1\n", operator)
+    expect(mutants).to include("x = <<~TXT\nTXT\ny = 1\n")
+    expect(mutants).to include("x = <<~TXT\n  café après\nTXT\ny = 0\n")
   end
 
   it "skips bare string parts inside interpolation containers" do

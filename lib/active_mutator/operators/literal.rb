@@ -36,6 +36,9 @@ module ActiveMutator
       # The node span covers the `<<~X` opening token; splicing there breaks
       # the source. Mutate the body content range instead: nonempty body →
       # empty heredoc (opening line directly followed by the terminator).
+      # The guard is on the DEDENTED VALUE (unescaped), not content_loc: a
+      # squiggly body that dedents to "" would only lose whitespace bytes —
+      # an equivalent mutant — so it is skipped even though content is nonempty.
       def heredoc_edits(node)
         return [] if node.unescaped.empty?
 
