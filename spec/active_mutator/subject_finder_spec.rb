@@ -86,6 +86,50 @@ RSpec.describe ActiveMutator::SubjectFinder do
     expect(subjects.map(&:sclass)).to eq([true, true])
   end
 
+  it "resets sclass context inside a class nested in class << self" do
+    subjects = subjects_of(<<~RUBY)
+      class Foo
+        class << self
+          class Bar
+            def baz = 1
+          end
+        end
+      end
+    RUBY
+    subject = subjects.fetch(0)
+    expect(subject.name).to eq("Foo::Bar#baz")
+    expect(subject.kind).to eq(:instance)
+    expect(subject.sclass).to be(false)
+  end
+
+  it "restores the sclass context after leaving a class nested in class << self" do
+    subjects = subjects_of(<<~RUBY)
+      class Foo
+        class << self
+          class Bar
+            def baz = 1
+          end
+          def qux = 2
+        end
+      end
+    RUBY
+    qux = subjects.find { |s| s.name.end_with?("qux") }
+    expect(qux.name).to eq("Foo.qux")
+    expect(qux.sclass).to be(true)
+  end
+
+  it "pops the scope stack so sibling classes do not nest" do
+    subjects = subjects_of(<<~RUBY)
+      class A
+        def x = 1
+      end
+      class B
+        def y = 2
+      end
+    RUBY
+    expect(subjects.map(&:name)).to eq(["A#x", "B#y"])
+  end
+
   it "does not mark def self.x as an sclass subject" do
     subject = subjects_of(<<~RUBY).first
       class Foo

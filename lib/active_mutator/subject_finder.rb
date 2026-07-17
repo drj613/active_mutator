@@ -78,10 +78,16 @@ module ActiveMutator
 
     private
 
+    # A nested class/module opens a fresh default context: defs inside it are
+    # ordinary methods of THAT constant even when the class is declared inside
+    # an enclosing `class << self`, so the sclass depth is suspended here.
     def with_scope(name)
       @stack.push(name)
+      outer_sclass_depth = @sclass_depth
+      @sclass_depth = 0
       yield
     ensure
+      @sclass_depth = outer_sclass_depth
       @stack.pop
     end
   end
