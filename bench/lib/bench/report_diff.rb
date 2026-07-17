@@ -3,7 +3,9 @@
 module Bench
   class ReportDiff
     DETECTED = %w[Killed Timeout].freeze
-    SCOREABLE = %w[Killed Timeout Survived RuntimeError].freeze
+    # Errors are excluded from the denominator to match Reporter::Terminal.score
+    # (detected / (detected + survived)) — the score the tool actually prints.
+    SCOREABLE = %w[Killed Timeout Survived].freeze
 
     def initialize(report_a, report_b)
       @a = index(report_a)
