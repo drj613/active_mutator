@@ -7,3 +7,5 @@ spec/fixtures/rails_app/storage/*.sqlite3
 spec/fixtures/rails_app/storage/*.sqlite3-*
 Gemfile.lock
 *.gem
+bench/.cache/
+bench/results/

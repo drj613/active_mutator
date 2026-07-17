@@ -1,0 +1,17 @@
+#!/usr/bin/env ruby
+# Usage: bin/bench-diff OLD_REPORT.json NEW_REPORT.json
+# Diffs two Stryker mutation reports: score delta, status transitions, added/removed mutants.
+require "json"
+
+repo_root = File.expand_path("..", __dir__)
+require File.join(repo_root, "bench/lib/bench/report_diff")
+
+abort "usage: bin/bench-diff OLD.json NEW.json" unless ARGV.size == 2
+a, b = ARGV.map { |p| JSON.parse(File.read(p)) }
+diff = Bench::ReportDiff.new(a, b).call
+
+puts "score: #{diff[:score_a]} -> #{diff[:score_b]} (delta #{diff[:score_delta]})"
+diff[:transitions].each { |t| puts "TRANSITION #{t[:key]}: #{t[:from]} -> #{t[:to]}" }
+diff[:only_in_a].each { |k| puts "REMOVED #{k}" }
+diff[:only_in_b].each { |k| puts "ADDED #{k}" }
+exit(diff[:transitions].empty? && diff[:only_in_a].empty? && diff[:only_in_b].empty? ? 0 : 1)

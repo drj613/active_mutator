@@ -26,8 +26,6 @@ module Bench
 
     def expand(target)
       type = target.fetch("type")
-      raise ArgumentError, "unknown target type: #{type}" unless %w[path git].include?(type)
-
       path = type == "git" ? File.join("bench/.cache", target.fetch("name")) : target.fetch("path")
       combos(target.fetch("matrix", {})).map do |combo|
         Cell.new(
