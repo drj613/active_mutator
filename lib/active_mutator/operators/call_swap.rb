@@ -14,11 +14,14 @@ module ActiveMutator
         all?: "any?",
         take: "drop", drop: "take",
         min_by: "max_by", max_by: "min_by",
-        # sort→reverse is one-way: the reverse (reverse→sort) is near-equivalent
-        # on data that is already typically sorted, so we only mutate forward.
+        # sort→reverse is one-way by design: reverse already has a strong
+        # forward mutant here, and reverse→sort would double-map `reverse`
+        # against nothing useful (reverse has no MAP entry to preserve).
         sort: "reverse",
-        # detect/find→first is one-way: first ignores the block, so the mutant
-        # differs; the reverse (first→detect/find) would be invalid or equivalent.
+        # detect/find→first is one-way: first ignores the retained block, so
+        # the mutant usually differs (equivalent only when element 0 already
+        # satisfies the predicate). No reverse edge: `first` is taken by
+        # first→last above.
         detect: "first", find: "first",
         # Evaluated and rejected: sum (initial-arg arity mismatch),
         # find_index (no safe partner — rindex is Array-only).
