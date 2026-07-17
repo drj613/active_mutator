@@ -22,6 +22,22 @@ RSpec.describe ActiveMutator::Engine do
     RUBY
   end
 
+  it "names the failing operator when one raises during analysis" do
+    boom = Class.new(ActiveMutator::Operators::Base) do
+      def self.name = "BoomOp"
+      def edits(_node) = raise "kaput"
+    end
+    ActiveMutator::Operators::Base::REGISTRY.pop # undo self-registration
+    failing = described_class.new(operators: [boom.new])
+    Dir.mktmpdir do |dir|
+      file = File.join(dir, "code.rb")
+      File.write(file, source)
+      subject_ = ActiveMutator::SubjectFinder.call(file).first
+      expect { failing.analyze(subject_) }
+        .to raise_error(ActiveMutator::Error, /operator BoomOp failed .*kaput/)
+    end
+  end
+
   it "produces mutations from all applicable operators" do
     analysis = analyze(source)
     descriptions = analysis.mutations.map { |m| m.edit.description }

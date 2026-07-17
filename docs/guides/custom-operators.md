@@ -39,7 +39,9 @@ operators:
   - ops/nil_guard.rb
 ```
 
-Paths resolve against the project root. Files load in the parent process before analysis, so `--require`d app code is NOT yet loaded — operators must be self-contained (Prism is available).
+Relative paths resolve against the project root (absolute paths are used as-is). Files load in the parent process before analysis, so `--require`d app code is NOT yet loaded — operators must be self-contained (Prism is available).
+
+Registration lasts for the process lifetime: each `active_mutator` invocation is a fresh process, so this only matters if you embed the runner in a long-lived process — loaded operators stay registered across runs there.
 
 ## Stability policy
 

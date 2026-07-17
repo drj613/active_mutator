@@ -35,7 +35,13 @@ module ActiveMutator
     def collect_edits(def_node)
       edits = []
       walk(def_node.body) do |node|
-        @operators.each { |op| edits.concat(op.edits(node)) }
+        @operators.each do |op|
+          edits.concat(op.edits(node))
+        rescue StandardError => e
+          # Fail loud but attributed: a buggy (likely third-party) operator
+          # should point at itself, not surface as a bare crash mid-analysis.
+          raise Error, "operator #{op.class.name} failed on #{node.class.name}: #{e.message}"
+        end
       end
       edits
     end

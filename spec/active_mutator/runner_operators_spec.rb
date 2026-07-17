@@ -34,4 +34,17 @@ RSpec.describe ActiveMutator::Runner, "#load_operators" do
     expect(ActiveMutator::Operators::Base.all.map { |o| o.class.name })
       .to include("LoadedNilGuard")
   end
+
+  it "raises a friendly Error for a missing operator file" do
+    runner = described_class.new(config_with(["nope.rb"]))
+    expect { runner.send(:load_operators) }
+      .to raise_error(ActiveMutator::Error, /operator file not loadable: nope\.rb/)
+  end
+
+  it "raises a friendly Error for an operator file that fails to parse" do
+    File.write(File.join(@root, "bad.rb"), "class Broken <\n")
+    runner = described_class.new(config_with(["bad.rb"]))
+    expect { runner.send(:load_operators) }
+      .to raise_error(ActiveMutator::Error, /operator file not loadable: bad\.rb/)
+  end
 end
