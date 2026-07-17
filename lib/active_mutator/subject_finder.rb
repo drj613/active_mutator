@@ -58,7 +58,8 @@ module ActiveMutator
         constant_scope: scope,
         kind: singleton ? :singleton : :instance
       )
-      # No `super`: nested defs are out of scope for v1.
+      # No `super`: nested defs get no subject of their own -- their bodies
+      # are mutated via the OUTER def (Engine#walk descends into them).
     end
 
     private

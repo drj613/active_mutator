@@ -42,7 +42,14 @@ module ActiveMutator
 
     def walk(node, &blk)
       return if node.nil?
-      return if node.is_a?(Prism::DefNode) # nested defs are separate subjects
+      # Descend into nested DefNodes rather than treating them as separate
+      # subjects. Giving a nested def its own subject identity is a trap:
+      # every call of the outer method re-executes the nested `def`, which
+      # would silently revert a directly-inserted mutant mid-run (phantom
+      # survivors). Instead we mutate the nested body as part of the outer
+      # def's re-evaled source. (SubjectFinder still emits no subject for
+      # nested defs.) walk is called as walk(def_node.body), so the outer
+      # DefNode itself never passes through here.
 
       yield node
       node.compact_child_nodes.each { |child| walk(child, &blk) }
