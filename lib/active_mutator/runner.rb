@@ -9,6 +9,7 @@ module ActiveMutator
 
     def call
       ENV["ACTIVE_MUTATOR"] = "1"
+      load_operators
       preload!
       preload_spec_helper!
       map = Baseline.new(root: @config.root).coverage_map(force: @config.force_baseline)
@@ -76,6 +77,14 @@ module ActiveMutator
     end
 
     private
+
+    # Custom operators must exist in the PARENT before Engine analysis:
+    # subclassing Operators::Base self-registers, and forks inherit the
+    # loaded class. `requires` can't serve — those load inside the fork's
+    # setup, after mutations are already planned.
+    def load_operators
+      @config.operator_paths.each { |f| require File.expand_path(f, @config.root) }
+    end
 
     # Line coverage attributes multi-line expressions to their statement anchor
     # line (version-dependently), so a sub-expression mutant's own lines may

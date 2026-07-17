@@ -94,6 +94,7 @@ RSpec.describe ActiveMutator::CLI do
         "Concurrent workers (default: half the CPU count)",
         "Output format",
         "File to require before mutating (repeatable; adds to config-file requires)",
+        "Ruby file defining a custom operator, loaded before analysis (repeatable)",
         "Exit 0 if mutation score >= SCORE even with survivors (default: any survivor fails)",
         "Ignore cached coverage map",
         "Timeout = baseline time * F + floor",
@@ -164,6 +165,15 @@ RSpec.describe ActiveMutator::CLI do
 
     it "defaults fail_at to nil" do
       expect(described_class.parse([]).fail_at).to be_nil
+    end
+
+    it "collects repeatable --operator paths" do
+      config = described_class.parse(%w[--operator ./ops/a.rb --operator ./ops/b.rb])
+      expect(config.operator_paths).to eq(["./ops/a.rb", "./ops/b.rb"])
+    end
+
+    it "defaults operator_paths to empty" do
+      expect(described_class.parse([]).operator_paths).to eq([])
     end
   end
 
