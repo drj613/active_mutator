@@ -14,6 +14,16 @@ module ActiveMutator
   # scaled by the clamped median utilization. The fixed part (timeout_floor
   # + browser boot) is never scaled: fork boot cost does not shrink because
   # examples run fast.
+  #
+  # The scale is grow-only (MIN_SCALE = 1.0): budgets may only extend beyond
+  # the static value, never fall below it. Downscaling has no recovery signal
+  # because timeouts are CENSORED samples — the scheduler skips them (they have
+  # no known wall time), so only killed forks feed the window. A low median
+  # utilization would shrink the budget, causing a legitimately slow kill to be
+  # reaped as a timeout; that censored kill never enters the window, so nothing
+  # ever pushes utilization back up. The shrink self-sustains — an asymmetric
+  # ratchet. Growing is safe (a too-large budget still records a real kill and
+  # relaxes); shrinking is not, so we forbid it.
   class TimeoutCalibrator
     WARMUP = 5
     # A real sliding window, not full-run history: a 500-mutant run's early
@@ -22,7 +32,7 @@ module ActiveMutator
     # track load changes within a few dozen finishes.
     WINDOW = 30
     TARGET_UTILIZATION = 0.25
-    MIN_SCALE = 0.5
+    MIN_SCALE = 1.0
     MAX_SCALE = 4.0
 
     def initialize

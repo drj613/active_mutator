@@ -24,11 +24,19 @@ RSpec.describe ActiveMutator::TimeoutCalibrator do
     expect(cal.budget_for(item(timeout: 20.0, variable: 8.0))).to eq(36.0)
   end
 
-  it "shrinks budgets when utilization is far below the target, clamped at 0.5x" do
+  it "never shrinks below the static budget: low utilization clamps the scale to 1.0" do
     cal = described_class.new
-    5.times { cal.record(0.2, 20.0) } # utilization 0.01 -> clamp 0.5
-    # variable 8.0 * 0.5 + fixed 12.0 = 16.0
-    expect(cal.budget_for(item(timeout: 20.0, variable: 8.0))).to eq(16.0)
+    5.times { cal.record(0.2, 20.0) } # utilization 0.01 -> would shrink, but clamps to 1.0
+    # variable 8.0 * 1.0 + fixed 12.0 = 20.0 (== static item.timeout)
+    expect(cal.budget_for(item(timeout: 20.0, variable: 8.0))).to eq(20.0)
+  end
+
+  it "clamps a warmed window of very low utilizations to the static budget (grow-only)" do
+    cal = described_class.new
+    10.times { cal.record(1.0, 20.0) } # utilization 0.05, well below target
+    item = item(timeout: 20.0, variable: 8.0)
+    expect(cal.warmed?).to be true
+    expect(cal.budget_for(item)).to eq(item.timeout) # scale clamps to 1.0, never below
   end
 
   it "clamps growth at 4x" do
@@ -76,9 +84,9 @@ RSpec.describe ActiveMutator::TimeoutCalibrator do
 
   it "takes the true middle element for an odd-sized window of distinct samples" do
     cal = described_class.new
-    [0.10, 0.15, 0.20, 0.25, 0.30].each { |u| rec(cal, u) } # 5 distinct, median 0.20
-    # median 0.20 / target 0.25 = scale 0.8 (picks sorted[2], not sorted[1])
-    expect(cal.scale).to be_within(0.0001).of(0.8)
+    [0.20, 0.25, 0.30, 0.35, 0.40].each { |u| rec(cal, u) } # 5 distinct, median 0.30
+    # median 0.30 / target 0.25 = scale 1.2 (picks sorted[2]=0.30, not sorted[1]=0.25 -> 1.0)
+    expect(cal.scale).to be_within(0.0001).of(1.2)
   end
 
   it "averages the two middle elements for an even-sized window of distinct samples" do
