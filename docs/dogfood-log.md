@@ -16,6 +16,7 @@
 | 2026-07-16 | 3 close | `active_mutator lib/nope.rb` | n/a | n/a | n/a | `no such file or directory: lib/nope.rb`, exit 2 — no more silent false-green |
 | 2026-07-16 | 3 close | `active_mutator README.md` | n/a | n/a | n/a | `not a Ruby file: README.md`, exit 2 |
 | 2026-07-16 | 3 close | `active_mutator lib` (full gate) | n/a | 100.0% | 0 | 1094 killed, 8 timeout, 25 accepted; first pass showed 9 phantom survivors in `Runner#prune_scope` from a stale incremental baseline — one `--force-baseline` refresh killed all of them, exit 0 |
+| 2026-07-16 | 4 pre-#9 | `bin/bench` (fixture corpus) | tiny j1/j2 + rails j2 mutation-stage seconds: 1.05 / 0.65 / 0.83 (baselines 0.35 / 0.31 / 1.49) | n/a | n/a | pinned bench/baselines/tiny_project-jobs2; static timeouts; exit_ok false = planted survivors (expected) |
 
 ## Findings
 

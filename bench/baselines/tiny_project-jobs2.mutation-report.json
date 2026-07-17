@@ -1,0 +1,489 @@
+{
+  "$schema": "https://git.io/mutation-testing-schema",
+  "schemaVersion": "2",
+  "thresholds": {
+    "high": 80,
+    "low": 60
+  },
+  "projectRoot": "/Users/djdjo/Documents/enovis/active_mutator/spec/fixtures/tiny_project",
+  "config": {
+    "active_mutator": {
+      "invalid_discarded": 0,
+      "version": "0.1.1"
+    }
+  },
+  "files": {
+    "lib/calculator.rb": {
+      "language": "ruby",
+      "source": "class Calculator\n  def eligible?(age)\n    if age >= 18\n      \"yes\"\n    else\n      \"no\"\n    end\n  end\n\n  def discount(total)\n    return 0 if total < 100\n    total / 10\n  end\n\n  def untested_helper\n    42\n  end\nend\n",
+      "mutants": [
+        {
+          "id": "0",
+          "mutatorName": "ConditionForcing",
+          "location": {
+            "start": {
+              "line": 3,
+              "column": 8
+            },
+            "end": {
+              "line": 3,
+              "column": 17
+            }
+          },
+          "status": "Killed",
+          "replacement": "true",
+          "description": "force condition to `true`",
+          "coveredBy": [
+            "./spec/calculator_spec.rb[1:1:1]",
+            "./spec/calculator_spec.rb[1:1:2]",
+            "./spec/calculator_spec.rb[1:1:3]"
+          ]
+        },
+        {
+          "id": "1",
+          "mutatorName": "ConditionForcing",
+          "location": {
+            "start": {
+              "line": 3,
+              "column": 8
+            },
+            "end": {
+              "line": 3,
+              "column": 17
+            }
+          },
+          "status": "Killed",
+          "replacement": "false",
+          "description": "force condition to `false`",
+          "coveredBy": [
+            "./spec/calculator_spec.rb[1:1:1]",
+            "./spec/calculator_spec.rb[1:1:2]",
+            "./spec/calculator_spec.rb[1:1:3]"
+          ]
+        },
+        {
+          "id": "2",
+          "mutatorName": "ConditionalBoundary",
+          "location": {
+            "start": {
+              "line": 3,
+              "column": 12
+            },
+            "end": {
+              "line": 3,
+              "column": 14
+            }
+          },
+          "status": "Killed",
+          "replacement": ">",
+          "description": "replace `>=` with `>`",
+          "coveredBy": [
+            "./spec/calculator_spec.rb[1:1:1]",
+            "./spec/calculator_spec.rb[1:1:2]",
+            "./spec/calculator_spec.rb[1:1:3]"
+          ]
+        },
+        {
+          "id": "3",
+          "mutatorName": "Literal",
+          "location": {
+            "start": {
+              "line": 3,
+              "column": 15
+            },
+            "end": {
+              "line": 3,
+              "column": 17
+            }
+          },
+          "status": "Killed",
+          "replacement": "0",
+          "description": "replace `18` with `0`",
+          "coveredBy": [
+            "./spec/calculator_spec.rb[1:1:1]",
+            "./spec/calculator_spec.rb[1:1:2]",
+            "./spec/calculator_spec.rb[1:1:3]"
+          ]
+        },
+        {
+          "id": "4",
+          "mutatorName": "Literal",
+          "location": {
+            "start": {
+              "line": 3,
+              "column": 15
+            },
+            "end": {
+              "line": 3,
+              "column": 17
+            }
+          },
+          "status": "Killed",
+          "replacement": "19",
+          "description": "replace `18` with `19`",
+          "coveredBy": [
+            "./spec/calculator_spec.rb[1:1:1]",
+            "./spec/calculator_spec.rb[1:1:2]",
+            "./spec/calculator_spec.rb[1:1:3]"
+          ]
+        },
+        {
+          "id": "5",
+          "mutatorName": "Literal",
+          "location": {
+            "start": {
+              "line": 4,
+              "column": 7
+            },
+            "end": {
+              "line": 4,
+              "column": 12
+            }
+          },
+          "status": "Killed",
+          "replacement": "\"\"",
+          "description": "replace string with \"\"",
+          "coveredBy": [
+            "./spec/calculator_spec.rb[1:1:1]",
+            "./spec/calculator_spec.rb[1:1:2]"
+          ]
+        },
+        {
+          "id": "6",
+          "mutatorName": "Literal",
+          "location": {
+            "start": {
+              "line": 6,
+              "column": 7
+            },
+            "end": {
+              "line": 6,
+              "column": 11
+            }
+          },
+          "status": "Killed",
+          "replacement": "\"\"",
+          "description": "replace string with \"\"",
+          "coveredBy": [
+            "./spec/calculator_spec.rb[1:1:3]"
+          ]
+        },
+        {
+          "id": "7",
+          "mutatorName": "StatementDeletion",
+          "location": {
+            "start": {
+              "line": 11,
+              "column": 5
+            },
+            "end": {
+              "line": 11,
+              "column": 28
+            }
+          },
+          "status": "Killed",
+          "replacement": "",
+          "description": "delete `return 0 if total < 100`",
+          "coveredBy": [
+            "./spec/calculator_spec.rb[1:2:1]",
+            "./spec/calculator_spec.rb[1:2:2]"
+          ]
+        },
+        {
+          "id": "8",
+          "mutatorName": "StatementDeletion",
+          "location": {
+            "start": {
+              "line": 12,
+              "column": 5
+            },
+            "end": {
+              "line": 12,
+              "column": 15
+            }
+          },
+          "status": "Killed",
+          "replacement": "",
+          "description": "delete `total / 10`",
+          "coveredBy": [
+            "./spec/calculator_spec.rb[1:2:2]"
+          ]
+        },
+        {
+          "id": "9",
+          "mutatorName": "ConditionForcing",
+          "location": {
+            "start": {
+              "line": 11,
+              "column": 17
+            },
+            "end": {
+              "line": 11,
+              "column": 28
+            }
+          },
+          "status": "Killed",
+          "replacement": "true",
+          "description": "force condition to `true`",
+          "coveredBy": [
+            "./spec/calculator_spec.rb[1:2:1]",
+            "./spec/calculator_spec.rb[1:2:2]"
+          ]
+        },
+        {
+          "id": "10",
+          "mutatorName": "ConditionalBoundary",
+          "location": {
+            "start": {
+              "line": 11,
+              "column": 23
+            },
+            "end": {
+              "line": 11,
+              "column": 24
+            }
+          },
+          "status": "Survived",
+          "replacement": "<=",
+          "description": "replace `<` with `<=`",
+          "coveredBy": [
+            "./spec/calculator_spec.rb[1:2:1]",
+            "./spec/calculator_spec.rb[1:2:2]"
+          ]
+        },
+        {
+          "id": "11",
+          "mutatorName": "ConditionForcing",
+          "location": {
+            "start": {
+              "line": 11,
+              "column": 17
+            },
+            "end": {
+              "line": 11,
+              "column": 28
+            }
+          },
+          "status": "Killed",
+          "replacement": "false",
+          "description": "force condition to `false`",
+          "coveredBy": [
+            "./spec/calculator_spec.rb[1:2:1]",
+            "./spec/calculator_spec.rb[1:2:2]"
+          ]
+        },
+        {
+          "id": "12",
+          "mutatorName": "Literal",
+          "location": {
+            "start": {
+              "line": 11,
+              "column": 25
+            },
+            "end": {
+              "line": 11,
+              "column": 28
+            }
+          },
+          "status": "Killed",
+          "replacement": "0",
+          "description": "replace `100` with `0`",
+          "coveredBy": [
+            "./spec/calculator_spec.rb[1:2:1]",
+            "./spec/calculator_spec.rb[1:2:2]"
+          ]
+        },
+        {
+          "id": "13",
+          "mutatorName": "Literal",
+          "location": {
+            "start": {
+              "line": 11,
+              "column": 25
+            },
+            "end": {
+              "line": 11,
+              "column": 28
+            }
+          },
+          "status": "Survived",
+          "replacement": "101",
+          "description": "replace `100` with `101`",
+          "coveredBy": [
+            "./spec/calculator_spec.rb[1:2:1]",
+            "./spec/calculator_spec.rb[1:2:2]"
+          ]
+        },
+        {
+          "id": "14",
+          "mutatorName": "EarlyReturn",
+          "location": {
+            "start": {
+              "line": 11,
+              "column": 5
+            },
+            "end": {
+              "line": 11,
+              "column": 13
+            }
+          },
+          "status": "Killed",
+          "replacement": "0",
+          "description": "unwrap `return`",
+          "coveredBy": [
+            "./spec/calculator_spec.rb[1:2:1]",
+            "./spec/calculator_spec.rb[1:2:2]"
+          ]
+        },
+        {
+          "id": "15",
+          "mutatorName": "EarlyReturn",
+          "location": {
+            "start": {
+              "line": 11,
+              "column": 5
+            },
+            "end": {
+              "line": 11,
+              "column": 13
+            }
+          },
+          "status": "Killed",
+          "replacement": "return nil",
+          "description": "return nil instead",
+          "coveredBy": [
+            "./spec/calculator_spec.rb[1:2:1]",
+            "./spec/calculator_spec.rb[1:2:2]"
+          ]
+        },
+        {
+          "id": "16",
+          "mutatorName": "Literal",
+          "location": {
+            "start": {
+              "line": 11,
+              "column": 12
+            },
+            "end": {
+              "line": 11,
+              "column": 13
+            }
+          },
+          "status": "Killed",
+          "replacement": "1",
+          "description": "replace `0` with `1`",
+          "coveredBy": [
+            "./spec/calculator_spec.rb[1:2:1]",
+            "./spec/calculator_spec.rb[1:2:2]"
+          ]
+        },
+        {
+          "id": "17",
+          "mutatorName": "Literal",
+          "location": {
+            "start": {
+              "line": 12,
+              "column": 13
+            },
+            "end": {
+              "line": 12,
+              "column": 15
+            }
+          },
+          "status": "Killed",
+          "replacement": "0",
+          "description": "replace `10` with `0`",
+          "coveredBy": [
+            "./spec/calculator_spec.rb[1:2:2]"
+          ]
+        },
+        {
+          "id": "18",
+          "mutatorName": "Literal",
+          "location": {
+            "start": {
+              "line": 12,
+              "column": 13
+            },
+            "end": {
+              "line": 12,
+              "column": 15
+            }
+          },
+          "status": "Killed",
+          "replacement": "11",
+          "description": "replace `10` with `11`",
+          "coveredBy": [
+            "./spec/calculator_spec.rb[1:2:2]"
+          ]
+        },
+        {
+          "id": "19",
+          "mutatorName": "Literal",
+          "location": {
+            "start": {
+              "line": 16,
+              "column": 5
+            },
+            "end": {
+              "line": 16,
+              "column": 7
+            }
+          },
+          "status": "NoCoverage",
+          "replacement": "0",
+          "description": "replace `42` with `0`",
+          "coveredBy": [
+
+          ]
+        },
+        {
+          "id": "20",
+          "mutatorName": "Literal",
+          "location": {
+            "start": {
+              "line": 16,
+              "column": 5
+            },
+            "end": {
+              "line": 16,
+              "column": 7
+            }
+          },
+          "status": "NoCoverage",
+          "replacement": "43",
+          "description": "replace `42` with `43`",
+          "coveredBy": [
+
+          ]
+        }
+      ]
+    }
+  },
+  "testFiles": {
+    "spec/calculator_spec.rb": {
+      "tests": [
+        {
+          "id": "./spec/calculator_spec.rb[1:1:1]",
+          "name": "./spec/calculator_spec.rb[1:1:1]"
+        },
+        {
+          "id": "./spec/calculator_spec.rb[1:1:2]",
+          "name": "./spec/calculator_spec.rb[1:1:2]"
+        },
+        {
+          "id": "./spec/calculator_spec.rb[1:1:3]",
+          "name": "./spec/calculator_spec.rb[1:1:3]"
+        },
+        {
+          "id": "./spec/calculator_spec.rb[1:2:1]",
+          "name": "./spec/calculator_spec.rb[1:2:1]"
+        },
+        {
+          "id": "./spec/calculator_spec.rb[1:2:2]",
+          "name": "./spec/calculator_spec.rb[1:2:2]"
+        }
+      ]
+    }
+  }
+}
