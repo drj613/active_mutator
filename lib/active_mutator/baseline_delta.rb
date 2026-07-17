@@ -25,6 +25,13 @@ module ActiveMutator
       drop_example_ids = []
       drop_source_files = []
 
+      # Read the spec-file list and their contents once per compute call, not
+      # once per changed source file: newly_covering_candidates scans every
+      # spec file, so re-globbing and re-reading inside the loop was
+      # O(changed_files x spec_files) IO. Built lazily so a delta with no
+      # scannable source change pays nothing.
+      spec_contents = nil
+
       changed.each do |rel|
         added = !old_digests.key?(rel)
         deleted = !new_digests.key?(rel)
@@ -47,7 +54,9 @@ module ActiveMutator
             rerun_example_ids.concat(coverage_map.examples_covering_file(abs))
           end
           unless deleted
-            candidates = newly_covering_candidates(root: root, rel: rel, coverage_map: coverage_map)
+            spec_contents ||= Dir[File.join(root, "spec/**/*_spec.rb")].to_h { |f| [f, File.read(f)] }
+            candidates = newly_covering_candidates(root: root, rel: rel, coverage_map: coverage_map,
+                                                   spec_contents: spec_contents)
             return FULL if candidates == :full
 
             rerun_spec_files.concat(candidates)
@@ -71,14 +80,14 @@ module ActiveMutator
     # textually reference a constant the changed file defines, but currently
     # contribute zero coverage to it, get re-run. Files already covering it
     # are handled example-by-example via rerun_example_ids.
-    def self.newly_covering_candidates(root:, rel:, coverage_map:)
+    def self.newly_covering_candidates(root:, rel:, coverage_map:, spec_contents:)
       abs = File.join(root, rel)
       return [] unless File.exist?(abs)
 
       constants = DefinedConstants.in_source(File.read(abs))
       return [] if constants.empty?
 
-      all_specs = Dir[File.join(root, "spec/**/*_spec.rb")]
+      all_specs = spec_contents.keys
 
       covering_specs = coverage_map.examples_covering_file(abs)
                                    .map { |id| spec_file_of(id) }.to_a.uniq
@@ -94,7 +103,7 @@ module ActiveMutator
         spec_rel = spec_abs.delete_prefix(root).delete_prefix("/")
         next if covering_specs.include?(spec_rel)
 
-        spec_rel if File.read(spec_abs).match?(pattern)
+        spec_rel if spec_contents.fetch(spec_abs).match?(pattern)
       end
       if candidates.size > 1 && candidates.size > all_specs.size * REFERENCE_FULL_RATIO
         # Never silently degrade: a full baseline where the user expected an
