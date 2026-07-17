@@ -82,10 +82,14 @@ module ActiveMutator
 
       covering_specs = coverage_map.examples_covering_file(abs)
                                    .map { |id| spec_file_of(id) }.to_a.uniq
-      # Constants are Prism-parsed qualified names (only [A-Za-z0-9_:]), so no
-      # regex escaping is needed — a raw alternation is exact and avoids an
-      # equivalent map/escape mutant on the hot path.
-      pattern = /\b(?:#{constants.join("|")})\b/
+      # Escaping is required: dynamic-namespace class definitions (e.g.
+      # `class (a)::Baz`, `class foo.bar::Baz`) make constant_path.slice carry
+      # regex metachars. Unescaped, "(a)::Baz" would match the literal text
+      # "a::Baz" — a false candidate.
+      # TODO(#11, Task 10 residual gap): a top-level `class ::Foo` yields the
+      # slice "::Foo", and /\b::Foo\b/ can never match (no word boundary
+      # before ":"), so such files are silently unscanned.
+      pattern = /\b(?:#{constants.map { |c| Regexp.escape(c) }.join("|")})\b/
       candidates = all_specs.filter_map do |spec_abs|
         spec_rel = spec_abs.delete_prefix(root).delete_prefix("/")
         next if covering_specs.include?(spec_rel)

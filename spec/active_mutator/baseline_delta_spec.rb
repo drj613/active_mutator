@@ -248,6 +248,27 @@ RSpec.describe ActiveMutator::BaselineDelta do
       end
     end
 
+    it "escapes regex metachars from dynamic-namespace constant names (no false matches)" do
+      # `class (a)::Baz` yields the raw slice "(a)::Baz" from DefinedConstants.
+      # Unescaped, "(a)" is a capture group and the pattern matches the literal
+      # text "a::Baz" — selecting a spec that never references the defined
+      # constant. Escaped, it only matches the literal "(a)::Baz".
+      expect(ActiveMutator::DefinedConstants.in_source("class (a)::Baz; def x; 1; end; end\n"))
+        .to eq(["(a)::Baz"])
+      project(
+        "lib/baz.rb" => "class (a)::Baz; def x; 1; end; end\n",
+        "spec/plain_spec.rb" => "RSpec.describe a::Baz do; end\n",
+        "spec/other_spec.rb" => "RSpec.describe Object do; end\n"
+      ) do |root|
+        delta = described_class.compute(
+          old_digests: { "lib/baz.rb" => "x" }, new_digests: { "lib/baz.rb" => "y" },
+          coverage_map: coverage_map({}), root: root
+        )
+        expect(delta.full?).to be(false)
+        expect(delta.rerun_spec_files).to eq([])
+      end
+    end
+
     it "keeps a partial re-run (no fallback) at exactly the half-of-all-specs boundary" do
       project(
         "lib/invoice.rb" => "class Invoice; end\n",
