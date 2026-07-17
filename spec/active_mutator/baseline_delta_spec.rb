@@ -85,4 +85,184 @@ RSpec.describe ActiveMutator::BaselineDelta do
     expect(compute({ "Gemfile.lock" => "x" }, { "Gemfile.lock" => "y" }).full?).to be(true)
     expect(compute({ ".rspec" => "x" }, { ".rspec" => "y" }).full?).to be(true)
   end
+
+  describe "newly-covering candidates (#11)" do
+    require "fileutils"
+    require "tmpdir"
+
+    def project(files)
+      Dir.mktmpdir do |dir|
+        files.each do |rel, content|
+          abs = File.join(dir, rel)
+          FileUtils.mkdir_p(File.dirname(abs))
+          File.write(abs, content)
+        end
+        yield dir
+      end
+    end
+
+    it "re-runs an unchanged spec file that references the changed constant but covers none of it" do
+      project(
+        "lib/invoice.rb" => "class Invoice; def total; 1; end; end\n",
+        "spec/invoice_shared_spec.rb" => "RSpec.describe Invoice do; end\n",
+        "spec/other_spec.rb" => "RSpec.describe Object do; end\n"
+      ) do |root|
+        recs = { "./spec/other_spec.rb[1:1]" => [[File.join(root, "lib/other.rb"), 1]] }
+        delta = described_class.compute(
+          old_digests: { "lib/invoice.rb" => "x" }, new_digests: { "lib/invoice.rb" => "y" },
+          coverage_map: coverage_map(recs), root: root
+        )
+        expect(delta.full?).to be(false)
+        expect(delta.rerun_spec_files).to eq(["spec/invoice_shared_spec.rb"])
+      end
+    end
+
+    it "does not re-run a referencing spec file that already covers the changed file" do
+      project(
+        "lib/invoice.rb" => "class Invoice; def total; 1; end; end\n",
+        "spec/invoice_spec.rb" => "RSpec.describe Invoice do; end\n"
+      ) do |root|
+        recs = { "./spec/invoice_spec.rb[1:1]" => [[File.join(root, "lib/invoice.rb"), 1]] }
+        delta = described_class.compute(
+          old_digests: { "lib/invoice.rb" => "x" }, new_digests: { "lib/invoice.rb" => "y" },
+          coverage_map: coverage_map(recs), root: root
+        )
+        expect(delta.rerun_spec_files).to eq([])
+        expect(delta.rerun_example_ids).to eq(["./spec/invoice_spec.rb[1:1]"])
+      end
+    end
+
+    it "scans newly added source files too" do
+      project(
+        "lib/invoice.rb" => "class Invoice; end\n",
+        "spec/invoice_shared_spec.rb" => "RSpec.describe Invoice do; end\n"
+      ) do |root|
+        delta = described_class.compute(
+          old_digests: {}, new_digests: { "lib/invoice.rb" => "y" },
+          coverage_map: coverage_map({}), root: root
+        )
+        expect(delta.rerun_spec_files).to eq(["spec/invoice_shared_spec.rb"])
+      end
+    end
+
+    it "falls back to a full run when the referencing set exceeds half of all spec files" do
+      project(
+        "lib/invoice.rb" => "class Invoice; end\n",
+        "spec/a_spec.rb" => "RSpec.describe Invoice do; end\n",
+        "spec/b_spec.rb" => "RSpec.describe Invoice do; end\n",
+        "spec/c_spec.rb" => "RSpec.describe Object do; end\n"
+      ) do |root|
+        delta = described_class.compute(
+          old_digests: { "lib/invoice.rb" => "x" }, new_digests: { "lib/invoice.rb" => "y" },
+          coverage_map: coverage_map({}), root: root
+        )
+        expect(delta.full?).to be(true)
+      end
+    end
+
+    it "ignores deleted source files (nothing on disk to scan)" do
+      project("spec/a_spec.rb" => "RSpec.describe Invoice do; end\n") do |root|
+        delta = described_class.compute(
+          old_digests: { "lib/invoice.rb" => "x" }, new_digests: {},
+          coverage_map: coverage_map({}), root: root
+        )
+        expect(delta.rerun_spec_files).to eq([])
+      end
+    end
+
+    it "warns when the reference scan trips the full-run fallback (never silent)" do
+      project(
+        "lib/invoice.rb" => "class Invoice; end\n",
+        "spec/a_spec.rb" => "RSpec.describe Invoice do; end\n",
+        "spec/b_spec.rb" => "RSpec.describe Invoice do; end\n"
+      ) do |root|
+        expect do
+          described_class.compute(
+            old_digests: { "lib/invoice.rb" => "x" }, new_digests: { "lib/invoice.rb" => "y" },
+            coverage_map: coverage_map({}), root: root
+          )
+        end.to output(/constant-reference scan matched 2 of 2 spec files.*falling back to full baseline/)
+          .to_stderr
+      end
+    end
+
+    it "does not blow up incremental mode for common leaf names or ubiquitous namespace tokens" do
+      # DefinedConstants (Task 8) emits only "MyApp::Config" here: neither the
+      # bare leaf "Config" nor the pure wrapper "MyApp" is matched. In a
+      # namespaced app every spec mentions the top module, so matching either
+      # token would trip the full-run fallback on every edit.
+      project(
+        "lib/my_app/config.rb" => "module MyApp; class Config; end; end\n",
+        "spec/a_spec.rb" => "RSpec.describe \"a\" do; end # bare Config and MyApp mentioned\n",
+        "spec/b_spec.rb" => "RSpec.describe \"b\" do; end # bare Config and MyApp mentioned\n",
+        "spec/c_spec.rb" => "RSpec.describe MyApp::Config do; end\n"
+      ) do |root|
+        delta = described_class.compute(
+          old_digests: { "lib/my_app/config.rb" => "x" },
+          new_digests: { "lib/my_app/config.rb" => "y" },
+          coverage_map: coverage_map({}), root: root
+        )
+        expect(delta.full?).to be(false)
+        expect(delta.rerun_spec_files).to eq(["spec/c_spec.rb"])
+      end
+    end
+
+    it "does not scan a deleted source file even when it still exists on disk" do
+      project(
+        "lib/invoice.rb" => "class Invoice; def total; 1; end; end\n",
+        "spec/invoice_shared_spec.rb" => "RSpec.describe Invoice do; end\n"
+      ) do |root|
+        delta = described_class.compute(
+          old_digests: { "lib/invoice.rb" => "x" }, new_digests: {},
+          coverage_map: coverage_map({}), root: root
+        )
+        expect(delta.rerun_spec_files).to eq([])
+        expect(delta.drop_source_files).to eq([File.join(root, "lib/invoice.rb")])
+      end
+    end
+
+    it "scans nothing when the changed source file defines no constants" do
+      project(
+        "lib/plain.rb" => "PLAIN = 1\n",
+        "spec/plain_shared_spec.rb" => "RSpec.describe Object do; end\n"
+      ) do |root|
+        delta = described_class.compute(
+          old_digests: { "lib/plain.rb" => "x" }, new_digests: { "lib/plain.rb" => "y" },
+          coverage_map: coverage_map({}), root: root
+        )
+        expect(delta.full?).to be(false)
+        expect(delta.rerun_spec_files).to eq([])
+      end
+    end
+
+    it "matches any one of several defined constants (alternation, not concatenation)" do
+      project(
+        "lib/pair.rb" => "class Invoice; end\nclass Widget; end\n",
+        "spec/widget_only_spec.rb" => "RSpec.describe Widget do; end\n"
+      ) do |root|
+        delta = described_class.compute(
+          old_digests: { "lib/pair.rb" => "x" }, new_digests: { "lib/pair.rb" => "y" },
+          coverage_map: coverage_map({}), root: root
+        )
+        expect(delta.rerun_spec_files).to eq(["spec/widget_only_spec.rb"])
+      end
+    end
+
+    it "keeps a partial re-run (no fallback) at exactly the half-of-all-specs boundary" do
+      project(
+        "lib/invoice.rb" => "class Invoice; end\n",
+        "spec/a_spec.rb" => "RSpec.describe Invoice do; end\n",
+        "spec/b_spec.rb" => "RSpec.describe Invoice do; end\n",
+        "spec/c_spec.rb" => "RSpec.describe Object do; end\n",
+        "spec/d_spec.rb" => "RSpec.describe Object do; end\n"
+      ) do |root|
+        delta = described_class.compute(
+          old_digests: { "lib/invoice.rb" => "x" }, new_digests: { "lib/invoice.rb" => "y" },
+          coverage_map: coverage_map({}), root: root
+        )
+        expect(delta.full?).to be(false)
+        expect(delta.rerun_spec_files).to eq(["spec/a_spec.rb", "spec/b_spec.rb"])
+      end
+    end
+  end
 end

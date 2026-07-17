@@ -26,6 +26,9 @@ module ActiveMutator
       names.uniq
     end
 
+    # The walk intentionally descends into block bodies (unlike SubjectFinder,
+    # which skips them): over-inclusion is the safe direction for spec-file
+    # matching, so a constant defined inside a block is still emitted.
     def self.walk(node, scope, names)
       if node.is_a?(Prism::ClassNode) || node.is_a?(Prism::ModuleNode)
         scope = scope + [node.constant_path.slice]
