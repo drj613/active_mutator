@@ -1,7 +1,7 @@
 RSpec.describe ActiveMutator::TimeoutCalibrator do
-  def item(timeout: 20.0, variable: 8.0, boot_extra: 0.0)
+  def item(timeout: 20.0, variable: 8.0)
     ActiveMutator::WorkItem.new(mutation: nil, example_ids: [], timeout: timeout,
-                                lane: :parallel, variable: variable, boot_extra: boot_extra)
+                                lane: :parallel, variable: variable)
   end
 
   it "returns a neutral scale of 1.0 on an empty window instead of raising" do
@@ -74,7 +74,7 @@ RSpec.describe ActiveMutator::TimeoutCalibrator do
   it "never scales the fixed part (floor + browser boot stay additive)" do
     cal = described_class.new
     5.times { cal.record(15.0, 20.0) } # scale 3.0
-    serial = item(timeout: 35.0, variable: 8.0, boot_extra: 15.0)
+    serial = item(timeout: 35.0, variable: 8.0)
     # 8.0 * 3.0 + (35.0 - 8.0) = 51.0 : the 15s browser boot and 12s floor untouched
     expect(cal.budget_for(serial)).to eq(51.0)
   end

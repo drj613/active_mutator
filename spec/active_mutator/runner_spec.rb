@@ -64,11 +64,10 @@ RSpec.describe ActiveMutator::Runner do
     items, = described_class.new(config).plan_work([m], map)
     item = items.first
     expect(item.variable).to eq(map.time_for(item.example_ids) * config.timeout_factor)
-    expect(item.boot_extra).to eq(0.0)
     expect(item.timeout).to eq(item.variable + config.timeout_floor)
   end
 
-  it "marks the serial lane's browser boot as boot_extra" do
+  it "adds the serial lane's browser boot to the timeout budget" do
     m = mutation(line: 2)
     map = instance_double(ActiveMutator::CoverageMap)
     allow(map).to receive(:examples_for)
@@ -77,7 +76,7 @@ RSpec.describe ActiveMutator::Runner do
 
     items, = described_class.new(config).plan_work([m], map)
     serial_item = items.first
-    expect(serial_item.boot_extra).to eq(config.browser_boot_seconds)
+    expect(serial_item.lane).to eq(:serial)
     expect(serial_item.timeout)
       .to eq(serial_item.variable + config.timeout_floor + config.browser_boot_seconds)
   end

@@ -59,8 +59,7 @@ module ActiveMutator
           boot_extra = lane == :serial ? @config.browser_boot_seconds : 0.0
           timeout = variable + @config.timeout_floor + boot_extra
           items << WorkItem.new(mutation: mutation, example_ids: example_ids,
-                                timeout: timeout, lane: lane,
-                                variable: variable, boot_extra: boot_extra)
+                                timeout: timeout, lane: lane, variable: variable)
         end
       end
       [items, pre_results]
