@@ -35,8 +35,29 @@ RSpec.describe ActiveMutator::Operators::Literal do
     expect(mutations_of("x = false", operator)).to eq(["x = true"])
   end
 
-  it "skips heredocs" do
-    expect(mutations_of("x = <<~TEXT\n  body\nTEXT\n", operator)).to eq([])
+  it "empties squiggly heredoc bodies" do
+    mutants = mutations_of("x = <<~SQL\n  select 1\nSQL\n", operator)
+    expect(mutants).to include("x = <<~SQL\nSQL\n")
+  end
+
+  it "empties dash heredoc bodies" do
+    mutants = mutations_of("x = <<-TXT\n  hi\n  TXT\n", operator)
+    expect(mutants).to include("x = <<-TXT\n  TXT\n")
+  end
+
+  it "labels heredoc body mutation" do
+    descriptions = descriptions_of("x = <<~SQL\n  select 1\nSQL\n", operator)
+    expect(descriptions).to include("empty heredoc body")
+  end
+
+  it "skips already-empty heredoc bodies" do
+    expect(mutations_of("x = <<~SQL\nSQL\n", operator)).to eq([])
+  end
+
+  it "skips interpolated heredocs" do
+    # Build the source so the interpolation is in the parsed code, not the spec.
+    source = 'x = <<~SQL' + "\n" + '  #{b}' + "\nSQL\n"
+    expect(mutations_of(source, operator)).to eq([])
   end
 
   it "skips bare string parts inside interpolation containers" do

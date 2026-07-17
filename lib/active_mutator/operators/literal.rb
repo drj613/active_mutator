@@ -23,14 +23,23 @@ module ActiveMutator
 
       def string_edits(node)
         opening = node.opening_loc&.slice
-        return [] unless opening                  # quote-less parts (interpolation)
-        return [] if opening.start_with?("<<")    # heredocs: v1 limit
+        return [] unless opening                # quote-less parts (interpolation)
+        return heredoc_edits(node) if opening.start_with?("<<")
 
         if node.unescaped.empty?
           [edit(loc_range(node.location), %("active_mutator"), %(replace "" with "active_mutator"))]
         else
           [edit(loc_range(node.location), %(""), %(replace string with ""))]
         end
+      end
+
+      # The node span covers the `<<~X` opening token; splicing there breaks
+      # the source. Mutate the body content range instead: nonempty body →
+      # empty heredoc (opening line directly followed by the terminator).
+      def heredoc_edits(node)
+        return [] if node.unescaped.empty?
+
+        [edit(loc_range(node.content_loc), "", "empty heredoc body")]
       end
     end
   end
