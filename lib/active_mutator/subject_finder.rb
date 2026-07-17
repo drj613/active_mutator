@@ -27,11 +27,18 @@ module ActiveMutator
       super()
     end
 
+    # Classes/modules declared inside `class << self` hang their constant on
+    # the SINGLETON class, so a lexically-joined scope like "Foo::Bar" is not
+    # reachable via Object.const_get — Inserter would crash. Skipped entirely.
     def visit_class_node(node)
+      return if @sclass_depth.positive?
+
       with_scope(node.constant_path.slice) { super }
     end
 
     def visit_module_node(node)
+      return if @sclass_depth.positive?
+
       with_scope(node.constant_path.slice) { super }
     end
 
@@ -78,16 +85,10 @@ module ActiveMutator
 
     private
 
-    # A nested class/module opens a fresh default context: defs inside it are
-    # ordinary methods of THAT constant even when the class is declared inside
-    # an enclosing `class << self`, so the sclass depth is suspended here.
     def with_scope(name)
       @stack.push(name)
-      outer_sclass_depth = @sclass_depth
-      @sclass_depth = 0
       yield
     ensure
-      @sclass_depth = outer_sclass_depth
       @stack.pop
     end
   end

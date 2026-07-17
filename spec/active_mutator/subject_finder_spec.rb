@@ -86,7 +86,7 @@ RSpec.describe ActiveMutator::SubjectFinder do
     expect(subjects.map(&:sclass)).to eq([true, true])
   end
 
-  it "resets sclass context inside a class nested in class << self" do
+  it "skips classes declared inside class << self (constant lives on the singleton class)" do
     subjects = subjects_of(<<~RUBY)
       class Foo
         class << self
@@ -96,10 +96,20 @@ RSpec.describe ActiveMutator::SubjectFinder do
         end
       end
     RUBY
-    subject = subjects.fetch(0)
-    expect(subject.name).to eq("Foo::Bar#baz")
-    expect(subject.kind).to eq(:instance)
-    expect(subject.sclass).to be(false)
+    expect(subjects).to be_empty
+  end
+
+  it "skips modules declared inside class << self (constant lives on the singleton class)" do
+    subjects = subjects_of(<<~RUBY)
+      class Foo
+        class << self
+          module Util
+            def helper = 1
+          end
+        end
+      end
+    RUBY
+    expect(subjects).to be_empty
   end
 
   it "restores the sclass context after leaving a class nested in class << self" do
