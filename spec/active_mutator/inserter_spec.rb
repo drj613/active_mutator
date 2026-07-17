@@ -1,10 +1,10 @@
 RSpec.describe ActiveMutator::Inserter do
   subject(:inserter) { described_class.new }
 
-  def mutation_stub(scope:, def_source:, kind: :instance)
+  def mutation_stub(scope:, def_source:, kind: :instance, sclass: false)
     subject_ = ActiveMutator::Subject.new(
       name: "test", file: "(test)", byte_range: 0...1, line_range: 1..1,
-      constant_scope: scope, kind: kind
+      constant_scope: scope, kind: kind, sclass: sclass
     )
     instance_double(ActiveMutator::Mutation,
                     subject: subject_, mutated_def_source: def_source, mutated_def_line: 1)
@@ -31,6 +31,17 @@ RSpec.describe ActiveMutator::Inserter do
     inserter.insert(mutation_stub(scope: "InserterFixture",
                                   def_source: "def self.build = :mutated", kind: :singleton))
     expect(InserterFixture.build).to eq(:mutated)
+  end
+
+  it "redefines a class << self method via the singleton class" do
+    stub_const("SclassHost", Class.new do
+      class << self
+        def bar = 1
+      end
+    end)
+    inserter.insert(mutation_stub(scope: "SclassHost", def_source: "def bar; 2; end",
+                                  kind: :singleton, sclass: true))
+    expect(SclassHost.bar).to eq(2)
   end
 
   it "evals top-level subjects (nil constant_scope) at main scope" do

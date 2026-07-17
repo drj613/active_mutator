@@ -55,16 +55,65 @@ RSpec.describe ActiveMutator::SubjectFinder do
     expect(subjects.first.constant_scope).to be_nil
   end
 
-  it "skips class << self bodies (documented v1 limit)" do
+  it "treats class << self defs as singleton subjects" do
     subjects = subjects_of(<<~RUBY)
-      class Widget
+      class Foo
         class << self
-          def hidden = 1
+          def bar = 1
         end
         def visible = 2
       end
     RUBY
-    expect(subjects.map(&:name)).to eq(["Widget#visible"])
+    expect(subjects.map(&:name)).to eq(["Foo.bar", "Foo#visible"])
+    sclass = subjects.first
+    expect(sclass.kind).to eq(:singleton)
+    expect(sclass.sclass).to be(true)
+    expect(sclass.constant_scope).to eq("Foo")
+  end
+
+  it "handles sibling class << self blocks independently" do
+    subjects = subjects_of(<<~RUBY)
+      class Foo
+        class << self
+          def a = 1
+        end
+        class << self
+          def b = 2
+        end
+      end
+    RUBY
+    expect(subjects.map(&:name)).to eq(["Foo.a", "Foo.b"])
+    expect(subjects.map(&:sclass)).to eq([true, true])
+  end
+
+  it "does not mark def self.x as an sclass subject" do
+    subject = subjects_of(<<~RUBY).first
+      class Foo
+        def self.bar = 1
+      end
+    RUBY
+    expect(subject.kind).to eq(:singleton)
+    expect(subject.sclass).to be(false)
+  end
+
+  it "skips class << obj (non-self) bodies" do
+    subjects = subjects_of(<<~RUBY)
+      class Foo
+        class << $x
+          def bar = 1
+        end
+      end
+    RUBY
+    expect(subjects).to be_empty
+  end
+
+  it "skips a top-level class << self (no constant scope)" do
+    subjects = subjects_of(<<~RUBY)
+      class << self
+        def bar = 1
+      end
+    RUBY
+    expect(subjects).to be_empty
   end
 
   it "skips defs inside blocks (Data.define, class_eval) — same v1 limit" do
