@@ -51,9 +51,12 @@ module ActiveMutator
           pre_results << Result.new(mutation: mutation, status: :uncovered, details: nil)
         else
           lane = example_ids.any? { |id| serial_example?(id) } ? :serial : :parallel
-          timeout = map.time_for(example_ids) * @config.timeout_factor + @config.timeout_floor
-          timeout += @config.browser_boot_seconds if lane == :serial
-          items << WorkItem.new(mutation: mutation, example_ids: example_ids, timeout: timeout, lane: lane)
+          variable = map.time_for(example_ids) * @config.timeout_factor
+          boot_extra = lane == :serial ? @config.browser_boot_seconds : 0.0
+          timeout = variable + @config.timeout_floor + boot_extra
+          items << WorkItem.new(mutation: mutation, example_ids: example_ids,
+                                timeout: timeout, lane: lane,
+                                variable: variable, boot_extra: boot_extra)
         end
       end
       [items, pre_results]

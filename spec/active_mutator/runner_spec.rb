@@ -55,6 +55,33 @@ RSpec.describe ActiveMutator::Runner do
     expect(items.first.timeout).to eq(1.0 * 4.0 + 2.0 + 15.0)
   end
 
+  it "records the variable and fixed budget parts on the work item" do
+    m = mutation(line: 2)
+    map = instance_double(ActiveMutator::CoverageMap)
+    allow(map).to receive(:examples_for).and_return(["./spec/a_spec.rb[1:1]"])
+    allow(map).to receive(:time_for).and_return(0.5)
+
+    items, = described_class.new(config).plan_work([m], map)
+    item = items.first
+    expect(item.variable).to eq(map.time_for(item.example_ids) * config.timeout_factor)
+    expect(item.boot_extra).to eq(0.0)
+    expect(item.timeout).to eq(item.variable + config.timeout_floor)
+  end
+
+  it "marks the serial lane's browser boot as boot_extra" do
+    m = mutation(line: 2)
+    map = instance_double(ActiveMutator::CoverageMap)
+    allow(map).to receive(:examples_for)
+      .and_return(["./spec/system/extractions_spec.rb[1:1]", "./spec/a_spec.rb[1:1]"])
+    allow(map).to receive(:time_for).and_return(1.0)
+
+    items, = described_class.new(config).plan_work([m], map)
+    serial_item = items.first
+    expect(serial_item.boot_extra).to eq(config.browser_boot_seconds)
+    expect(serial_item.timeout)
+      .to eq(serial_item.variable + config.timeout_floor + config.browser_boot_seconds)
+  end
+
   it "plans a mutant whose own line is uncovered when the subject's line range is covered" do
     # Line coverage attributes multi-line expressions to their anchor line, so
     # a sub-expression mutant's own line may have no coverage entry at all.

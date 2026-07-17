@@ -4,6 +4,10 @@ RSpec.describe ActiveMutator::TimeoutCalibrator do
                                 lane: :parallel, variable: variable, boot_extra: boot_extra)
   end
 
+  it "returns a neutral scale of 1.0 on an empty window instead of raising" do
+    expect(described_class.new.scale).to eq(1.0)
+  end
+
   it "returns the static budget before warm-up completes, and reports warmed? accordingly" do
     cal = described_class.new
     4.times { cal.record(19.0, 20.0) } # 4 < WARMUP

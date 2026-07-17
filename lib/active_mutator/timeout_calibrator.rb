@@ -46,6 +46,10 @@ module ActiveMutator
     end
 
     def scale
+      # An empty window has no median; a caller invoking scale without warmed?
+      # (median of [] is nil) would otherwise raise. Neutral scale = no change.
+      return 1.0 if @utilizations.empty?
+
       s = median(@utilizations) / TARGET_UTILIZATION
       s.clamp(MIN_SCALE, MAX_SCALE)
     end
