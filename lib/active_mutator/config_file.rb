@@ -20,9 +20,13 @@ module ActiveMutator
       "exclude" => :string_list,
       "serial_patterns" => :string_list,
       "requires" => :string_list,
+      "operators" => :string_list,
       "preload_helper" => :preload_helper,
       "adaptive_timeout" => :boolean
     }.freeze
+
+    # YAML keys that don't match their Config member name.
+    RENAMES = { "operators" => :operator_paths }.freeze
 
     def self.load(root)
       path = File.join(root, FILENAME)
@@ -36,7 +40,7 @@ module ActiveMutator
         validator = KEYS[key]
         raise Error, "#{FILENAME}: unknown config key: #{key}" unless validator
 
-        [key.to_sym, coerce(key, validator, value)]
+        [RENAMES.fetch(key, key.to_sym), coerce(key, validator, value)]
       end
     end
 

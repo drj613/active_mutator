@@ -262,6 +262,7 @@ survivors show inline on the PR diff. Pairs with the CI recipe:
 | `--timeout-factor F` / `--timeout-floor S` | 8 / 10 | mutation timeout budget |
 | `--[no-]adaptive-timeout` | on | scale timeout budgets from observed worker wall times (median utilization, grow-only, clamped 1x–4x; `--timeout-factor`/`--timeout-floor` set the starting budget) |
 | `--require FILE` | none | preload files (repeatable) |
+| `--operator FILE` | none | load a custom operator file before analysis (repeatable) |
 | `--fail-at SCORE` | none (strict) | exit 0 if score >= SCORE even with survivors (opt-in relaxation for gradual adoption; 0 = report-only) |
 
 `--debug-plan` prints the planned mutant list as one JSON document
@@ -283,7 +284,9 @@ flags override file values (`--require` and `--exclude` add to the file's
 lists; the first `--serial-pattern` replaces them). Recognized keys:
 `jobs`, `format`, `timeout_factor`, `timeout_floor`,
 `browser_boot_seconds`, `fail_at`, `exclude`, `serial_patterns`,
-`requires`, `preload_helper` (a path, or `false` to skip preload),
+`requires`, `operators` (custom operator files, loaded before analysis; see
+[Custom operators](docs/guides/custom-operators.md)),
+`preload_helper` (a path, or `false` to skip preload),
 `adaptive_timeout` (`true`/`false`).
 Unknown keys and wrong types are errors, not silent no-ops.
 
@@ -300,8 +303,12 @@ fail_at: 90   # legacy suite: gate on score instead of zero-survivors
 ## Known limits (v1.1)
 
 Method bodies only (no class-macro/constant mutation). RSpec only.
-Heredoc strings are not mutated. `class << self` bodies and nested defs
-are skipped. The incremental baseline recovers the residual blind spot —
+Plain heredoc bodies ARE mutated (emptied); interpolated heredocs are
+skipped. `class << self` bodies are mutated as singleton subjects
+(`class << obj` and top-level `class << self` are skipped). Nested defs
+mutate as part of the enclosing method's body — they get no subject of
+their own (a directly-inserted mutant would be reverted whenever the
+outer method re-runs the `def`). The incremental baseline recovers the residual blind spot —
 constant-reference detection handles the common case since 0.2, and a few
 residual cases (pure indirection, partially-covering files, leaf-only or
 wrapper-only references, `class ::Foo`, `Data.define`/`Struct.new` value
@@ -317,6 +324,8 @@ objects) are caught by nightly `--force-baseline`.
 - [Operator reference](docs/guides/operators.md): every mutation
   active_mutator can generate, with before/after examples and what a
   survivor of each one means.
+- [Custom operators](docs/guides/custom-operators.md): write and load your
+  own mutation operators with `--operator` / the `operators:` config key.
 - [Mutation-check skill](docs/skills/mutation-check.md): the agent-facing
   workflow. Run, read survivors, strengthen tests, or accept with a reason.
 

@@ -23,7 +23,8 @@ module ActiveMutator
         requires: [], timeout_factor: 8.0, timeout_floor: 10.0, force_baseline: false,
         preload_helper: nil, serial_patterns: ["spec/system/", "spec/features/"],
         browser_boot_seconds: 15.0, accept_survivors: false, exclude: [],
-        max_mutants: nil, debug_plan: false, fail_at: nil, adaptive_timeout: true
+        max_mutants: nil, debug_plan: false, fail_at: nil, adaptive_timeout: true,
+        operator_paths: []
       }
       options.merge!(ConfigFile.load(Dir.pwd))
       paths = OptionParser.new do |o|
@@ -34,6 +35,7 @@ module ActiveMutator
         o.on("--jobs N", Integer, "Concurrent workers (default: half the CPU count)") { |v| options[:jobs] = v }
         o.on("--format FMT", ConfigFile::FORMATS, "Output format") { |v| options[:format] = v.tr("-", "_").to_sym }
         o.on("--require FILE", "File to require before mutating (repeatable; adds to config-file requires)") { |v| options[:requires] << v }
+        o.on("--operator FILE", "Ruby file defining a custom operator, loaded before analysis (repeatable)") { |v| options[:operator_paths] << v }
         o.on("--force-baseline", "Ignore cached coverage map") { options[:force_baseline] = true }
         o.on("--timeout-factor F", Float, "Timeout = baseline time * F + floor") { |v| options[:timeout_factor] = v }
         o.on("--timeout-floor S", Float, "Minimum timeout seconds") { |v| options[:timeout_floor] = v }

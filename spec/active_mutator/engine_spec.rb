@@ -22,6 +22,22 @@ RSpec.describe ActiveMutator::Engine do
     RUBY
   end
 
+  it "names the failing operator when one raises during analysis" do
+    boom = Class.new(ActiveMutator::Operators::Base) do
+      def self.name = "BoomOp"
+      def edits(_node) = raise "kaput"
+    end
+    ActiveMutator::Operators::Base::REGISTRY.pop # undo self-registration
+    failing = described_class.new(operators: [boom.new])
+    Dir.mktmpdir do |dir|
+      file = File.join(dir, "code.rb")
+      File.write(file, source)
+      subject_ = ActiveMutator::SubjectFinder.call(file).first
+      expect { failing.analyze(subject_) }
+        .to raise_error(ActiveMutator::Error, /operator BoomOp failed .*kaput/)
+    end
+  end
+
   it "produces mutations from all applicable operators" do
     analysis = analyze(source)
     descriptions = analysis.mutations.map { |m| m.edit.description }
@@ -61,18 +77,18 @@ RSpec.describe ActiveMutator::Engine do
     expect(analysis.mutations.map(&:mutated_file_source)).to all(include("1 < 2"))
   end
 
-  it "does not descend into nested defs" do
+  it "mutates nested def bodies under the outer subject" do
     nested = <<~RUBY
-      class Gate
-        def outer
-          def inner = 1 > 0
-          :ok
+      class Outer
+        def build
+          def helper; 1 + 1; end
+          helper
         end
       end
     RUBY
-    analysis = analyze(nested)
+    analysis = analyze(nested) # first subject = Outer#build
     expect(analysis.mutations.map { |m| m.edit.description })
-      .not_to include("replace `>` with `>=`")
+      .to include("replace `1` with `0`")
   end
 
   it "raises when the source no longer parses" do

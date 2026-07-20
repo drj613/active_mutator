@@ -23,19 +23,38 @@ module ActiveMutator
       @skip_lines = skip_lines
       @stack = []
       @subjects = []
+      @sclass_depth = 0
       super()
     end
 
+    # Classes/modules declared inside `class << self` hang their constant on
+    # the SINGLETON class, so a lexically-joined scope like "Foo::Bar" is not
+    # reachable via Object.const_get — Inserter would crash. Skipped entirely.
     def visit_class_node(node)
+      return if @sclass_depth.positive?
+
       with_scope(node.constant_path.slice) { super }
     end
 
     def visit_module_node(node)
+      return if @sclass_depth.positive?
+
       with_scope(node.constant_path.slice) { super }
     end
 
-    # `class << self` bodies are a documented v1 limit: not visited.
-    def visit_singleton_class_node(node); end
+    # `class << self` inside a constant scope: defs there are singleton
+    # methods of the enclosing constant. `class << obj` and a top-level
+    # `class << self` (no constant to hang the method on) stay skipped.
+    def visit_singleton_class_node(node)
+      return unless node.expression.is_a?(Prism::SelfNode) && !@stack.empty?
+
+      @sclass_depth += 1
+      begin
+        super
+      ensure
+        @sclass_depth -= 1
+      end
+    end
 
     # Defs inside blocks (`Data.define do ... end`, `class_eval do ... end`)
     # do not live on the enclosing constant scope, so Inserter would redefine
@@ -47,7 +66,8 @@ module ActiveMutator
     def visit_def_node(node)
       return if @skip_lines.include?(node.location.start_line - 1)
 
-      singleton = node.receiver.is_a?(Prism::SelfNode)
+      sclass = @sclass_depth.positive?
+      singleton = sclass || node.receiver.is_a?(Prism::SelfNode)
       scope = @stack.empty? ? nil : @stack.join("::")
       loc = node.location
       @subjects << Subject.new(
@@ -56,9 +76,11 @@ module ActiveMutator
         byte_range: loc.start_offset...loc.end_offset,
         line_range: loc.start_line..loc.end_line,
         constant_scope: scope,
-        kind: singleton ? :singleton : :instance
+        kind: singleton ? :singleton : :instance,
+        sclass: sclass
       )
-      # No `super`: nested defs are out of scope for v1.
+      # No `super`: nested defs get no subject of their own -- their bodies
+      # are mutated via the OUTER def (Engine#walk descends into them).
     end
 
     private
