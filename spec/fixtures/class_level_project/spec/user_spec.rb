@@ -13,6 +13,13 @@ RSpec.describe User do
     expect(User.new("a@b.c").audit_tag).to eq("audit:User")
   end
 
+  # Pins the content of Trackable's `included do ... end` block. If the string
+  # inside the block is mutated (or the def deleted), this fails — proving a
+  # concern-block mutation is killable through closure reload + re-include.
+  it "labels tracking via a concern `included` block" do
+    expect(User.new("a@b.c").tracking_label).to eq("tracked")
+  end
+
   # Uses described_class (not the bare constant) on purpose: this is the case
   # that regressed when class-body mutants were reloaded AFTER the example
   # group bound described_class. If the `validates :email` macro is deleted or

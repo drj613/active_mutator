@@ -286,6 +286,20 @@ RSpec.describe ActiveMutator::ClosureReload do
     bad # keep alive past the call
   end
 
+  it "raises MutantLoadError when the mutated target source fails to load" do
+    file = load_source("cr_broken.rb", <<~RUBY, top_const: :CrBroken)
+      class CrBroken
+        RATE = 5
+      end
+    RUBY
+    # The mutation left the class body calling an undefined macro; re-evaling
+    # it raises at load. That is the mutation's own doing, so it is a kill
+    # (MutantLoadError), not a skip or a bare error.
+    mutated = "class CrBroken\n  undefined_macro :x\nend\n"
+    expect { described_class.new(subject_for(file, "CrBroken"), mutated).call }
+      .to raise_error(described_class::MutantLoadError)
+  end
+
   it "defaults the closure cap to DEFAULT_CAP (10) when none is configured" do
     # Runner sets .cap from config; with none set, .call falls back to
     # DEFAULT_CAP. Pinning the value guards the fallback against silent drift.

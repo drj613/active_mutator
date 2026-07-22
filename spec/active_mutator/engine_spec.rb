@@ -324,6 +324,33 @@ RSpec.describe ActiveMutator::Engine do
       expect(trues).to be_empty
     end
 
+    it "mutates statements inside an ActiveSupport::Concern `included` block" do
+      analysis, = class_body_analysis(<<~RUBY)
+        module Auditable
+          extend ActiveSupport::Concern
+          included do
+            validates :name, presence: true
+            AUDIT = true
+          end
+        end
+      RUBY
+      descriptions = analysis.mutations.map { |m| m.edit.description }
+      expect(descriptions).to include("replace `true` with `false`")
+    end
+
+    it "mutates def bodies inside a `class_methods` block" do
+      analysis, = class_body_analysis(<<~RUBY)
+        module Auditable
+          extend ActiveSupport::Concern
+          class_methods do
+            def audited? = true
+          end
+        end
+      RUBY
+      descriptions = analysis.mutations.map { |m| m.edit.description }
+      expect(descriptions).to include("replace `true` with `false`")
+    end
+
     it "does not delete defs nested in class-level control flow" do
       analysis, = class_body_analysis(<<~RUBY)
         class User

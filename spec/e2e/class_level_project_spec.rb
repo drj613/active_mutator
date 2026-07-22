@@ -56,15 +56,22 @@ RSpec.describe "class_level_project end-to-end", :e2e do
     expect(killed.call("Auditable (class body)", "replace string with \"\""))
       .to be(true), stderr
 
-    # 3. killed-count >= 3 (not an exact score: operator-catalog growth must
-    #    not break this test).
-    expect(counts.fetch("killed", 0)).to be >= 3
+    # 3. Trackable concern-body: a mutation INSIDE an `included do ... end`
+    #    block is killed — proving concern-block mutants (issue #31) are both
+    #    produced and propagated into the includer via closure reload + the
+    #    concern's include-time block replay.
+    expect(killed.call("Trackable (class body)", "replace string with \"\""))
+      .to be(true), stderr
 
-    # 4. No mutants errored out (a class-body mutant that ERRORs is a real bug).
+    # 4. killed-count >= 4 (not an exact score: operator-catalog growth must
+    #    not break this test).
+    expect(counts.fetch("killed", 0)).to be >= 4
+
+    # 5. No mutants errored out (a class-body mutant that ERRORs is a real bug).
     expect(counts.fetch("error", 0)).to eq(0)
 
-    # Both class-body subjects were actually produced for the fixture.
+    # All three class-body subjects were actually produced for the fixture.
     subjects = results.map { |r| r["subject"] }.uniq
-    expect(subjects).to include("User (class body)", "Auditable (class body)")
+    expect(subjects).to include("User (class body)", "Auditable (class body)", "Trackable (class body)")
   end
 end

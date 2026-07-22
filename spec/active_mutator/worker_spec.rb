@@ -198,5 +198,12 @@ RSpec.describe ActiveMutator::Worker do
       run_worker
       expect(emitted).to eq("status" => "skipped", "details" => "constant Thing not loaded")
     end
+
+    it "reports killed when ClosureReload raises MutantLoadError (mutation broke loading)" do
+      allow_any_instance_of(ActiveMutator::ClosureReload)
+        .to receive(:call).and_raise(ActiveMutator::ClosureReload::MutantLoadError, "boom")
+      run_worker
+      expect(emitted).to eq("status" => "killed", "details" => "mutated class failed to load: boom")
+    end
   end
 end

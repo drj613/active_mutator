@@ -26,6 +26,11 @@ module ActiveMutator
   class ClosureReload
     Skip = Class.new(StandardError)
 
+    # The MUTATED target source could not be re-evaled — the mutation broke the
+    # class so it no longer loads. Every covering spec loads the class, so the
+    # suite would fail: the Worker maps this to a kill, not an error.
+    MutantLoadError = Class.new(StandardError)
+
     DEFAULT_CAP = 10
 
     class << self
@@ -62,14 +67,20 @@ module ActiveMutator
       ordered = [target, *rest.sort_by { |m| m.ancestors.size }]
       sources = ordered.map { |mod| [mod.name, source_for(mod)] }
       sources.each { |name, _| remove_constant(name) }
-      sources.each do |_, (file, src)|
+      sources.each_with_index do |(_, (file, src)), idx|
         eval(src, TOPLEVEL_BINDING, file, 1) # rubocop:disable Security/Eval
-      rescue NameError => e
-        # A dependent's pristine source could not be re-evaled standalone in the
-        # order we chose — typically a cross-attacher reference the ancestry-depth
-        # sort doesn't capture (see the ordering note above). We cannot faithfully
-        # reinstate the closure, so this is an honest Skip, not a survived/killed
-        # verdict and not a bare `error`.
+      rescue ScriptError, StandardError => e
+        # idx.zero? is the MUTATED target, which by construction depends on
+        # nothing else in the closure (every other member carries the target,
+        # not vice versa). Its source failing to load is therefore the
+        # mutation's own doing — a kill, not a tool error.
+        #
+        # A PRISTINE dependent (idx > 0) failing means the ancestry-depth order
+        # couldn't satisfy a cross-attacher reference (see the ordering note
+        # above): we can't faithfully reinstate the closure, so this is an
+        # honest Skip, not a survived/killed verdict and not a bare error.
+        raise MutantLoadError, e.message if idx.zero?
+
         raise Skip, "reload re-eval failed (#{e.message}); closure could not be reinstated in dependency order"
       end
       nil

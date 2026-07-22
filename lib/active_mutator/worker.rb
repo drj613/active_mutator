@@ -44,6 +44,9 @@ module ActiveMutator
       emit(code.zero? ? "survived" : "killed")
     rescue ClosureReload::Skip => e
       emit("skipped", details: e.message)
+    rescue ClosureReload::MutantLoadError => e
+      # The mutation made the class unloadable; a real suite would fail on it.
+      emit("killed", details: "mutated class failed to load: #{e.message}")
     rescue StandardError, ScriptError => e
       emit("error", details: "#{e.class}: #{e.message}")
     end

@@ -51,15 +51,17 @@ module ActiveMutator
     end
 
     # Class-level code only: defs, nested class/modules and `class << self`
-    # bodies are owned by other subjects; macro blocks (association
-    # extensions) are out of scope (issue #31). Lambdas (scope bodies, if:
-    # procs) ARE descended. Edits that would delete a whole owned statement
+    # bodies are owned by other subjects. Lambdas (scope bodies, if: procs) ARE
+    # descended, as are the ActiveSupport::Concern DSL blocks (`included`,
+    # `prepended`, `class_methods`) whose bodies re-run as class-level code in
+    # the includer (issue #31). Every OTHER block (association extensions,
+    # custom DSLs that run in an unknown context) stays pruned — mutating those
+    # risks false survivors. Edits that would delete a whole owned statement
     # (StatementDeletion sees the enclosing StatementsNode) are discarded.
     # Owned ranges are collected recursively while walking, not just from the
     # class body's direct children: a def can nest inside class-level control
     # flow (`if`/`unless`/`begin`), and deleting it there is equally out of
-    # scope. Blocks are pruned before their owned descendants are reached, so
-    # defs inside association-extension blocks are never collected.
+    # scope.
     def collect_class_body_edits(class_node)
       owned = []
       edits = []
@@ -75,6 +77,15 @@ module ActiveMutator
 
     def owned_statement?(node) = ClassShape.owned_by_other_subject?(node)
 
+    # ActiveSupport::Concern DSL calls whose block body re-runs as class-level
+    # code in the includer, so it is in scope for class-body mutation.
+    CONCERN_BLOCK_CALLS = %i[included prepended class_methods].freeze
+
+    def concern_dsl_block?(node)
+      node.is_a?(Prism::CallNode) && node.receiver.nil? &&
+        CONCERN_BLOCK_CALLS.include?(node.name) && node.block.is_a?(Prism::BlockNode)
+    end
+
     # No nil guard needed (unlike #walk): the entry node is the class body's
     # StatementsNode, guaranteed present for a class-body subject, and
     # compact_child_nodes never yields nil.
@@ -86,6 +97,14 @@ module ActiveMutator
       return if node.is_a?(Prism::BlockNode)
 
       yield node
+      if concern_dsl_block?(node)
+        # Inside a concern block the statements have no subject of their own, so
+        # mutate everything (including nested def bodies) exactly like the
+        # def-level #walk — do NOT recurse via class_walk (it would prune the
+        # block) and do NOT mark the interior defs owned.
+        walk(node.block.body, &blk)
+        return
+      end
       node.compact_child_nodes.each { |child| class_walk(child, owned, &blk) }
     end
 
