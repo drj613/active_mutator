@@ -22,7 +22,9 @@ module ActiveMutator
       "requires" => :string_list,
       "operators" => :string_list,
       "preload_helper" => :preload_helper,
-      "adaptive_timeout" => :boolean
+      "adaptive_timeout" => :boolean,
+      "class_level" => :boolean,
+      "class_level_closure_cap" => :integer
     }.freeze
 
     # YAML keys that don't match their Config member name.

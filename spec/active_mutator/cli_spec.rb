@@ -95,6 +95,7 @@ RSpec.describe ActiveMutator::CLI do
         "Output format",
         "File to require before mutating (repeatable; adds to config-file requires)",
         "Ruby file defining a custom operator, loaded before analysis (repeatable)",
+        "Mutate class-level code: macros, constants, DSL lambdas (default: on)",
         "Exit 0 if mutation score >= SCORE even with survivors (default: any survivor fails)",
         "Ignore cached coverage map",
         "Timeout = baseline time * F + floor",
@@ -174,6 +175,16 @@ RSpec.describe ActiveMutator::CLI do
 
     it "defaults operator_paths to empty" do
       expect(described_class.parse([]).operator_paths).to eq([])
+    end
+
+    it "defaults class_level on with cap 10" do
+      config = described_class.parse([])
+      expect(config.class_level).to be(true)
+      expect(config.class_level_closure_cap).to eq(10)
+    end
+
+    it "turns class-level mutation off with --no-class-level" do
+      expect(described_class.parse(["--no-class-level"]).class_level).to be(false)
     end
   end
 

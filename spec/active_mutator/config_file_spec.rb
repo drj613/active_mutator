@@ -164,4 +164,14 @@ RSpec.describe ActiveMutator::ConfigFile do
     write_config("")
     expect(described_class.load(root)).to eq({})
   end
+
+  it "accepts class_level and class_level_closure_cap" do
+    write_config("class_level: false\nclass_level_closure_cap: 25\n")
+    expect(described_class.load(root)).to eq(class_level: false, class_level_closure_cap: 25)
+  end
+
+  it "rejects a non-boolean class_level" do
+    write_config("class_level: 1\n")
+    expect { described_class.load(root) }.to raise_error(ActiveMutator::Error, /class_level must be true or false/)
+  end
 end

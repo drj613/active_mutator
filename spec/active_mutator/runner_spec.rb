@@ -9,7 +9,7 @@ RSpec.describe ActiveMutator::Runner do
       root: "/project", preload_helper: nil, serial_patterns: ["spec/system/", "spec/features/"],
       browser_boot_seconds: 15.0, accept_survivors: false, exclude: [],
       max_mutants: nil, debug_plan: false, fail_at: nil, adaptive_timeout: true,
-      operator_paths: []
+      operator_paths: [], class_level: true, class_level_closure_cap: 10
     )
   end
 
