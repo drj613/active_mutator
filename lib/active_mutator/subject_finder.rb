@@ -18,12 +18,10 @@ module ActiveMutator
     end
 
     # Class-body subjects only for Zeitwerk-shaped files: exactly one
-    # top-level class/module node. Multi-constant files and core-class
-    # reopens have no safe remove_const + re-eval story (issue #32).
+    # top-level constant. Multi-constant files and core-class reopens have no
+    # safe remove_const + re-eval story (issue #32). Shared with ClosureReload.
     def self.zeitwerk_shaped?(program)
-      program.statements.body.count do |s|
-        s.is_a?(Prism::ClassNode) || s.is_a?(Prism::ModuleNode)
-      end == 1
+      ClassShape.single_top_level_constant?(program)
     end
 
     attr_reader :subjects
@@ -126,10 +124,7 @@ module ActiveMutator
       )
     end
 
-    def owned_by_other_subject?(node)
-      node.is_a?(Prism::DefNode) || node.is_a?(Prism::ClassNode) ||
-        node.is_a?(Prism::ModuleNode) || node.is_a?(Prism::SingletonClassNode)
-    end
+    def owned_by_other_subject?(node) = ClassShape.owned_by_other_subject?(node)
 
     def with_scope(name)
       @stack.push(name)

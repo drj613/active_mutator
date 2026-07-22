@@ -287,6 +287,19 @@ RSpec.describe ActiveMutator::SubjectFinder do
       expect(subjects.select { |s| s.kind == :class_body }).to be_empty
     end
 
+    it "gates on Zeitwerk shape: no class-body subject when a top-level constant is assigned alongside the class" do
+      # `Adapter = Class.new` is a ConstantWriteNode, not a ClassNode. A
+      # class-node-only count would miss it, pass the gate, then reassign
+      # Adapter on every re-eval. The shared ClassShape gate counts it.
+      subjects = subjects_of(<<~RUBY)
+        class Registry
+          RATE = 1
+        end
+        Adapter = Class.new
+      RUBY
+      expect(subjects.select { |s| s.kind == :class_body }).to be_empty
+    end
+
     it "skips a class-body subject with active_mutator:skip above the class line" do
       subjects = subjects_of(<<~RUBY)
         # active_mutator:skip

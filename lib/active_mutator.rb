@@ -10,6 +10,7 @@ end
 require_relative "active_mutator/edit"
 require_relative "active_mutator/splicer"
 require_relative "active_mutator/subject"
+require_relative "active_mutator/class_shape"
 require_relative "active_mutator/subject_finder"
 require_relative "active_mutator/subject_matcher"
 require_relative "active_mutator/operators/base"

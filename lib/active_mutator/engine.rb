@@ -73,10 +73,7 @@ module ActiveMutator
       edits.reject { |e| owned.include?(e.range) }
     end
 
-    def owned_statement?(node)
-      node.is_a?(Prism::DefNode) || node.is_a?(Prism::ClassNode) ||
-        node.is_a?(Prism::ModuleNode) || node.is_a?(Prism::SingletonClassNode)
-    end
+    def owned_statement?(node) = ClassShape.owned_by_other_subject?(node)
 
     # No nil guard needed (unlike #walk): the entry node is the class body's
     # StatementsNode, guaranteed present for a class-body subject, and

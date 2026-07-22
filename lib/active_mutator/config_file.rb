@@ -24,7 +24,7 @@ module ActiveMutator
       "preload_helper" => :preload_helper,
       "adaptive_timeout" => :boolean,
       "class_level" => :boolean,
-      "class_level_closure_cap" => :integer
+      "class_level_closure_cap" => :positive_integer
     }.freeze
 
     # YAML keys that don't match their Config member name.
@@ -56,6 +56,10 @@ module ActiveMutator
       case validator
       when :integer
         raise Error, "#{FILENAME}: #{key} must be an integer" unless value.is_a?(Integer)
+        value
+      when :positive_integer
+        raise Error, "#{FILENAME}: #{key} must be an integer" unless value.is_a?(Integer)
+        raise Error, "#{FILENAME}: #{key} must be >= 1" unless value >= 1
         value
       when :number
         raise Error, "#{FILENAME}: #{key} must be a number" unless value.is_a?(Numeric)

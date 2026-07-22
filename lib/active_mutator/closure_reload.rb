@@ -162,14 +162,12 @@ module ActiveMutator
 
     # Same Zeitwerk-shape rule the SubjectFinder gate applies to the target
     # file: re-evaling a multi-constant file would re-run macros on constants
-    # that were NOT removed (accumulation bugs).
+    # that were NOT removed (accumulation bugs). Shared with SubjectFinder.
     def single_constant_file?(source)
       result = Prism.parse(source)
       return false unless result.success?
 
-      result.value.statements.body.count do |s|
-        s.is_a?(Prism::ClassNode) || s.is_a?(Prism::ModuleNode)
-      end == 1
+      ClassShape.single_top_level_constant?(result.value)
     end
 
     def remove_constant(name)
