@@ -10,6 +10,7 @@ module ActiveMutator
     def call
       ENV["ACTIVE_MUTATOR"] = "1"
       load_operators
+      ClosureReload.cap = @config.class_level_closure_cap
       preload!
       preload_spec_helper!
       map = Baseline.new(root: @config.root).coverage_map(force: @config.force_baseline)
@@ -126,7 +127,7 @@ module ActiveMutator
         .uniq
         .reject { |file| excluded?(file) }
         .sort.flat_map { |file| SubjectFinder.call(file) }
-      subjects = subjects.reject(&:class_body?) # TODO(Task 6): Worker can't insert these yet
+      subjects = subjects.reject(&:class_body?) unless @config.class_level
       if @config.subject_filter
         matcher = SubjectMatcher.new(@config.subject_filter)
         subjects = subjects.select { |s| matcher.match?(s.name) }

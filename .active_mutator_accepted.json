@@ -250,5 +250,19 @@
     "description": "replace `false` with `true`",
     "original_snippet": "false",
     "ordinal": 0
+  },
+  {
+    "file": "lib/active_mutator/runner.rb",
+    "subject": "ActiveMutator::Runner (class body)",
+    "description": "delete `private`",
+    "original_snippet": "private",
+    "ordinal": 0
+  },
+  {
+    "file": "lib/active_mutator/worker.rb",
+    "subject": "ActiveMutator::Worker (class body)",
+    "description": "delete `private`",
+    "original_snippet": "private",
+    "ordinal": 0
   }
 ]

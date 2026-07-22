@@ -175,6 +175,17 @@ RSpec.describe ActiveMutator::Runner do
         .and_return(instance_double(ActiveMutator::Scheduler, run: []))
       runner.call
     end
+
+    it "sets ClosureReload.cap from config before scheduling (forks inherit it)" do
+      original_cap = ActiveMutator::ClosureReload.cap
+      runner = stub_runner(config.with(class_level_closure_cap: 42))
+      allow(ActiveMutator::Scheduler).to receive(:new)
+        .and_return(instance_double(ActiveMutator::Scheduler, run: []))
+      runner.call
+      expect(ActiveMutator::ClosureReload.cap).to eq(42)
+    ensure
+      ActiveMutator::ClosureReload.cap = original_cap
+    end
   end
 
   it "exits 1 when mutants survive, 0 otherwise" do
@@ -599,12 +610,23 @@ RSpec.describe ActiveMutator::Runner do
       end
     end
 
-    it "excludes class-body subjects (Task 3 guard: Engine cannot analyze them yet)" do
+    it "includes class-body subjects when class_level is enabled" do
       Dir.mktmpdir do |dir|
         FileUtils.mkdir_p(File.join(dir, "lib"))
         File.write(File.join(dir, "lib", "keep.rb"), "class Keep\n  X = 1\n  def a = 2\nend\n")
 
-        runner = described_class.new(config.with(root: dir))
+        runner = described_class.new(config.with(root: dir, class_level: true))
+        subjects = runner.send(:discover_subjects)
+        expect(subjects.map(&:kind)).to contain_exactly(:class_body, :instance)
+      end
+    end
+
+    it "excludes class-body subjects when class_level is disabled" do
+      Dir.mktmpdir do |dir|
+        FileUtils.mkdir_p(File.join(dir, "lib"))
+        File.write(File.join(dir, "lib", "keep.rb"), "class Keep\n  X = 1\n  def a = 2\nend\n")
+
+        runner = described_class.new(config.with(root: dir, class_level: false))
         subjects = runner.send(:discover_subjects)
         expect(subjects.map(&:kind)).to eq([:instance])
         expect(subjects.map(&:name)).to eq(["Keep#a"])

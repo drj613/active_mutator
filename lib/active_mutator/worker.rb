@@ -27,15 +27,27 @@ module ActiveMutator
       # One failure kills the mutant; running the rest of the covering set
       # is pure waste inside the fork.
       RSpec.configuration.fail_fast = 1
-      Inserter.new.insert(@mutation)   # now the target constant exists
+      insert_mutation                  # now the target constant exists
       after_fork_hygiene
       code = runner.run_specs(covering_groups)
       emit(code.zero? ? "survived" : "killed")
+    rescue ClosureReload::Skip => e
+      emit("skipped", details: e.message)
     rescue StandardError, ScriptError => e
       emit("error", details: "#{e.class}: #{e.message}")
     end
 
     private
+
+    # Def mutants class_eval over the live constant; class-body mutants
+    # cannot (macros accumulate) and go through whole-file closure reload.
+    def insert_mutation
+      if @mutation.subject.class_body?
+        ClosureReload.new(@mutation.subject, @mutation.mutated_file_source).call
+      else
+        Inserter.new.insert(@mutation)
+      end
+    end
 
     def after_fork_hygiene
       srand

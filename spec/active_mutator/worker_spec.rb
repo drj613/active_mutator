@@ -3,7 +3,11 @@ require "stringio"
 
 RSpec.describe ActiveMutator::Worker do
   let(:writer) { StringIO.new }
-  let(:mutation) { instance_double(ActiveMutator::Mutation) }
+  # Default mutation is a def mutant, routed through the Inserter.
+  let(:mutation) do
+    instance_double(ActiveMutator::Mutation,
+                    subject: instance_double(ActiveMutator::Subject, class_body?: false))
+  end
   let(:rspec_runner) { instance_double(RSpec::Core::Runner) }
 
   def emitted
@@ -137,5 +141,38 @@ RSpec.describe ActiveMutator::Worker do
     allow(rspec_runner).to receive(:run_specs) { |groups| ran_groups = groups; 0 }
     run_worker
     expect(ran_groups).to eq([covering])
+  end
+
+  describe "class-body mutants" do
+    let(:mutation) do
+      subject = ActiveMutator::Subject.new(
+        name: "Thing (class body)", file: "/tmp/thing.rb",
+        byte_range: 0...10, line_range: 1..3,
+        constant_scope: "Thing", kind: :class_body, sclass: false
+      )
+      ActiveMutator::Mutation.new(
+        subject: subject,
+        edit: ActiveMutator::Edit.new(range: 8...9, replacement: "2", description: "x", operator: "Literal"),
+        original_snippet: "1", line: 2,
+        mutated_file_source: "class Thing\n  X = 2\nend\n",
+        mutated_def_source: "class Thing\n  X = 2\nend\n",
+        mutated_def_line: 1
+      )
+    end
+
+    it "routes class-body mutants through ClosureReload, not the Inserter" do
+      allow(rspec_runner).to receive(:run_specs).and_return(0)
+      expect_any_instance_of(ActiveMutator::ClosureReload).to receive(:call)
+      expect_any_instance_of(ActiveMutator::Inserter).not_to receive(:insert)
+      run_worker
+      expect(emitted).to eq("status" => "survived", "details" => nil)
+    end
+
+    it "reports skipped with the reason when ClosureReload raises Skip" do
+      allow_any_instance_of(ActiveMutator::ClosureReload)
+        .to receive(:call).and_raise(ActiveMutator::ClosureReload::Skip, "constant Thing not loaded")
+      run_worker
+      expect(emitted).to eq("status" => "skipped", "details" => "constant Thing not loaded")
+    end
   end
 end
