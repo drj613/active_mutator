@@ -28,9 +28,16 @@ Scope details worth knowing:
   call `super`. Their bodies still mutate — the engine descends into them
   under the OUTER subject, because a directly-inserted nested-def mutant
   would be silently reverted every time the outer method re-runs the
-  `def`. In practice, active_mutator's unit of mutation is one outermost
-  method body: no class-macro calls (`validates`, `scope`, `has_many`),
-  no constants, no DSL blocks.
+  `def`.
+- **Class bodies are subjects too**, for Zeitwerk-shaped files (see §4a).
+  A file with exactly one top-level class/module also yields a
+  `"<Scope> (class body)"` subject covering its class-level code —
+  macros (`validates`, `scope`, `has_many`), constants, and DSL/scope
+  lambdas. `SubjectFinder.zeitwerk_shaped?` gates this: multi-constant
+  files and core-class reopens get method subjects only, because they have
+  no safe remove-and-reload story (issue #32). Class-level statements owned
+  by other subjects (`def`s, nested classes/modules, `class << self`) are
+  excluded from the class-body subject.
 
 `Runner#discover_subjects` globs `app/**/*.rb` and `lib/**/*.rb` (or
 whatever paths/`--subject`/`--since` narrow it to) and hands each file to
@@ -279,6 +286,78 @@ and DB residue across mutations and silently corrupt results. The
 isolation guarantee is worth the process-boot cost, and that cost is
 exactly what the preload steps above exist to amortize.
 
+## 4a. Class-level mutation: closure reload
+
+A `def` mutant is inserted by `class_eval`ing the mutated method over the
+live class — same object, method redefined in place. **Class-level code
+cannot be inserted that way.** Re-running a macro *accumulates* state
+rather than replacing it: `class_eval`ing a class body that calls
+`validates :name` a second time adds a *second* validator, it does not
+swap the mutated one in. So a class-body mutant (`kind: :class_body`) goes
+through a different path — `ClosureReload`
+(`lib/active_mutator/closure_reload.rb`).
+
+**Remove and re-eval.** `ClosureReload` `remove_const`s the target and
+re-evaluates the *whole mutated file*, producing a **new** class object
+bound to the constant. But anything already attached to the OLD object
+would go stale — a class that `include`s the module, a subclass, an
+`extend` site all still point at the pre-remove object. So the reload
+computes the object's **closure** and reloads those too, from their
+*pristine* sources (only the target file is the mutated source).
+
+**One-pass closure discovery.** `attachers` does a single
+`ObjectSpace.each_object(Module)` scan for every module whose `ancestors`
+include the target: includers and subclasses carry it directly; `extend`
+sites carry it in their singleton class's ancestry, so singleton classes
+are mapped back through `attached_object`. Ruby's `ancestors` is
+transitive, so one scan already yields every *transitive* attacher — an
+includer-of-an-includer carries the target directly too — and no BFS is
+needed.
+
+**Dependency-first re-eval.** Members must be re-eval'd before their
+dependents or the dependent's file hits a `NameError`. The target is
+pinned first (every closure member depends on it), then the rest are
+sorted by ascending `ancestors.size` (a superclass before its subclass, an
+included module before its includer). Depth is captured while the
+constants are still live, since it can't be read after `remove_const`.
+
+**Guards → `skipped`.** Every situation where the reload can't be done
+faithfully raises `ClosureReload::Skip`, which the worker reports as
+`skipped` (not counted in the score — see §7):
+- the closure exceeds `class_level_closure_cap` (default `10`, set from
+  config via `ClosureReload.cap`);
+- the target constant is defined at a different file than the subject's
+  (a **reopened** constant);
+- a closure member is an **anonymous** class/module, has **no source
+  file** (native or dynamically defined), or its file **defines multiple
+  top-level constants** (re-evaling it would re-run macros on constants
+  that weren't removed);
+- an **object instance** (not a Module) was `extend`ed with the target.
+
+The fork dies after the run, so nothing is restored; there is no
+un-reload step.
+
+### The two-phase kill pipeline
+
+Class-level statements execute at **load time**, so line coverage never
+attributes any example to them — the naive "examples covering the mutated
+line" set would be empty, and every class-body mutant would look
+`uncovered`. `Runner#examples_for_mutation` substitutes a broader set for
+class-body subjects:
+
+- **Phase 1** runs the mutant against every example that covers **any line
+  of the subject's file** (it must have loaded the class) ∪ the examples of
+  the **convention spec file** (`app/models/foo.rb` → `spec/models/foo_spec.rb`).
+- **Phase 2 (escalation)** runs only if phase 1 declares a *survivor*.
+  Before a class-body survivor is final, `escalate_class_body_survivors`
+  re-enqueues it against every spec file that **textually references a
+  constant the subject's file defines** and that phase 1 didn't already
+  run. Matching is textual (a constant in a comment still counts — worst
+  case is a wasted run), and unlike the baseline delta there is **no
+  fan-out ceiling**: a class-body survivor gets every referencing spec its
+  shot. If escalation kills it, the kill wins; if it still survives, the
+  result is annotated `escalated (+N spec files)`.
+
 ## 5. Serial lane for browser-covered mutants
 
 System and feature specs boot a browser and an app server per fork. That
@@ -346,6 +425,7 @@ to restore the purely static budget.
 | `accepted` | matched a fingerprint in the acceptance ledger | no (reported, but excluded from the score) |
 | `uncovered` | no example covers the mutated line | no (reported loudly as coverage debt) |
 | `error` | the worker crashed, or the mutated code raised at `eval`/load time | reported separately, not scored |
+| `skipped` | a class-body mutant whose closure couldn't be reloaded faithfully (cap exceeded, reopened constant, anonymous/native/multi-constant attacher — see §4a) | no (listed under "Skipped mutants", excluded from the score; progress char `-`, Stryker `Ignored`) |
 | `invalid` | the mutated text failed to re-parse (discarded before scheduling) | no |
 
 `score = (killed + timeout) / (killed + timeout + survived)`. The process
@@ -382,9 +462,24 @@ silently pile up.
 
 ## Honest limits
 
-- **Method bodies only.** No class-macro, constant, or DSL-block mutation
-  (`validates`, `scope`, `has_many`, etc.). This follows from how subjects
-  are found (§1) and inserted (§4); it is not an accident.
+- **Class-body mutation requires a Zeitwerk-shaped file** — exactly one
+  top-level class/module (§1). Multi-constant files and core-class
+  monkey-patches/reopens get method subjects only, not a class-body subject
+  (issue #32); their method bodies are still mutated.
+- **Code inside blocks is not mutated** — association-extension blocks
+  (`has_many :x do … end`) and any other `do … end`/`{ … }` body. Both
+  `SubjectFinder` and `Engine` prune `BlockNode` subtrees (issue #31).
+- **Constants captured by value go stale after a closure reload.** A
+  reference holding the target by value rather than by ancestry — an alias
+  (`ALIAS = SomeClass`), a registry the class was pushed into, a memoized
+  instance, a class var captured at load — keeps pointing at the pre-reload
+  object, and can produce false survivors. `refine`-based modules are
+  anonymous and aren't discovered/reloaded at all (§4a).
+- **Inter-attacher `extend` ordering (rare).** The re-eval order pins the
+  target first, then sorts the rest by instance-ancestor depth. An
+  `extend` relationship *between two non-target attachers* can still
+  re-eval out of order; a full topological sort is deliberately not
+  attempted (see the `ClosureReload` class comment).
 - **`class << obj` and top-level `class << self` are invisible** to
   subject discovery; `class << self` inside a class/module IS mutated (§1).
   Nested `def`s mutate only via their enclosing method's subject (§1).
