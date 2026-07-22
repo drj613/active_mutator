@@ -13,7 +13,8 @@ module ActiveMutator
     class StrykerJson
       SCHEMA_URL = "https://git.io/mutation-testing-schema"
       STATUS = { killed: "Killed", survived: "Survived", timeout: "Timeout",
-                 error: "RuntimeError", uncovered: "NoCoverage", accepted: "Ignored" }.freeze
+                 error: "RuntimeError", uncovered: "NoCoverage", accepted: "Ignored",
+                 skipped: "Ignored" }.freeze
       ACCEPTED_REASON = "Accepted as equivalent in #{AcceptedLedger::FILENAME}".freeze
       REPORT_PATH = File.join(".active_mutator", "mutation-report.json")
 

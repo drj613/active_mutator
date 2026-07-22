@@ -65,4 +65,35 @@ RSpec.describe ActiveMutator::Reporter::Terminal do
     reporter.summary([result(:killed)], invalid_count: 0)
     expect(out.string).to include("Mutation score: 100.0%")
   end
+
+  def result_with(status, details)
+    ActiveMutator::Result.new(mutation: mutation, status: status, details: details)
+  end
+
+  it "prints '-' for skipped and lists skip reasons in the summary" do
+    skipped = result_with(:skipped, "reload closure (12 constants) exceeds cap (10)")
+    reporter.on_result(skipped)
+    reporter.summary([skipped], invalid_count: 0)
+    expect(out.string).to include("-")
+    expect(out.string).to include("skipped: 1")
+    expect(out.string).to include("\n\nSkipped mutants (not counted in the score):\n")
+    expect(out.string).to include("reload closure (12 constants) exceeds cap (10)")
+  end
+
+  it "omits the detail annotation for survivors without details" do
+    reporter.summary([result(:survived)], invalid_count: 0)
+    expect(out.string).not_to include("    (")
+  end
+
+  it "excludes skipped from the mutation score" do
+    results = [result(:killed), result_with(:skipped, "x")]
+    reporter.summary(results, invalid_count: 0)
+    expect(out.string).to include("Mutation score: 100.0%")
+  end
+
+  it "shows the escalation annotation on survivors" do
+    survivor = result_with(:survived, "escalated (+3 spec files)")
+    reporter.summary([survivor], invalid_count: 0)
+    expect(out.string).to include("escalated (+3 spec files)")
+  end
 end

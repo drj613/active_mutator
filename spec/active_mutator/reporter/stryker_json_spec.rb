@@ -117,6 +117,13 @@ RSpec.describe ActiveMutator::Reporter::StrykerJson do
     expect(report).not_to have_key("testFiles")
   end
 
+  it "maps skipped to Ignored with the reason" do
+    mutant = report_after([build_result(:skipped, file: @file, details: "constant not loaded")])
+             .dig("files", "lib/calc.rb", "mutants").first
+    expect(mutant["status"]).to eq("Ignored")
+    expect(mutant["statusReason"]).to eq("constant not loaded")
+  end
+
   it "prints the report path and progress chars" do
     reporter.on_result(build_result(:killed, file: @file))
     reporter.summary([build_result(:killed, file: @file)], invalid_count: 0)
