@@ -19,6 +19,11 @@ module ActiveMutator
   #     into, memoized instances, class variables captured at load time.
   #   - `refine`-based modules are anonymous and do not appear in normal
   #     `ancestors`, so refinements of the target are not discovered/reloaded.
+  #   - Re-evaling the target AND each attacher re-runs their class-body side
+  #     effects. Non-idempotent load-time effects (self-registration into a
+  #     global registry, DescendantsTracker-style hooks) therefore run twice; a
+  #     spec asserting such a count can see it doubled (false kill) or masked
+  #     (false survival).
   #   - The re-eval order pins the target first (every attacher depends on it)
   #     then sorts the rest by instance-ancestor depth. An `extend`
   #     relationship BETWEEN two non-target attachers can still re-eval out of

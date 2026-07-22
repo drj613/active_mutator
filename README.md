@@ -335,14 +335,20 @@ remaining limits are:
   top-level class/module per file. Multi-constant files and core-class
   monkey-patches/reopens are not class-body-mutated (issue #32). Their
   method bodies still are.
-- **Code inside blocks is not mutated** — e.g. an association-extension
-  block (`has_many :x do … end`) or any other `do … end`/`{ … }` body
-  (issue #31).
+- **Most code inside blocks is not mutated.** `ActiveSupport::Concern` DSL
+  blocks (`included`/`prepended`/`class_methods do … end`) ARE mutated — their
+  bodies re-run as class-level code in the includer (issue #31). Every other
+  block (`has_many :x do … end` and any `do … end`/`{ … }` body) is pruned to
+  avoid false survivors from mutating code whose run-time context is unknown.
 - **Constants captured by value go stale.** A reference that holds the
   target *by value* rather than by ancestry — an alias (`ALIAS = SomeClass`),
   a registry the class was pushed into, a memoized instance, a class
   variable captured at load — keeps pointing at the pre-reload object after
   the closure reload. Such stale references can produce false survivors.
+- **Whole-file re-eval re-runs class-body side effects.** The reload
+  re-evaluates the target and every attacher's class body, so non-idempotent
+  load-time side effects (global self-registration, descendant tracking) run
+  twice — which can double or mask a count a spec asserts on.
 - **`refine`-based modules are not discovered or reloaded.** Refinements
   are anonymous and don't appear in normal `ancestors`.
 - **RSpec only.** Test selection, worker setup, and the world-group filter

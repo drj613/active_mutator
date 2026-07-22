@@ -16,7 +16,7 @@ what the design does not cover.
 `SubjectFinder` (`lib/active_mutator/subject_finder.rb`) is a `Prism::Visitor`.
 It parses one file and walks it. It tracks constant scope (`class`/`module`
 nesting) and yields a `Subject` (`{name, file, byte_range, line_range,
-constant_scope, kind}`) for every `def` it finds, for example
+constant_scope, kind, sclass}`) for every `def` it finds, for example
 `Billing::Calculator#total` or `Billing::Calculator.build`.
 
 Scope details worth knowing:
@@ -92,8 +92,9 @@ Consequences of this design:
 The full operator catalog, with before/after examples and what a survivor
 of each one means, is in `docs/guides/operators.md`.
 
-`Engine#analyze` walks only the target `DefNode`'s body. It stops at
-nested `def`s, since those are separate subjects. It asks every operator
+`Engine#analyze` walks the target `DefNode`'s body, descending INTO nested
+`def`s and mutating their bodies too (they get no subject of their own — see
+§1). It asks every operator
 whether it applies to each node, then builds one `Mutation` per surviving
 edit: the subject, the edit, the original snippet, the 1-based
 original-file line, and (critically) the **mutated `def` source**,
@@ -466,9 +467,21 @@ silently pile up.
   top-level class/module (§1). Multi-constant files and core-class
   monkey-patches/reopens get method subjects only, not a class-body subject
   (issue #32); their method bodies are still mutated.
-- **Code inside blocks is not mutated** — association-extension blocks
-  (`has_many :x do … end`) and any other `do … end`/`{ … }` body. Both
-  `SubjectFinder` and `Engine` prune `BlockNode` subtrees (issue #31).
+- **Most code inside blocks is not mutated.** `ActiveSupport::Concern` DSL
+  blocks — `included`/`prepended`/`class_methods do … end` — ARE mutated,
+  since their bodies re-run as class-level code in the includer (issue #31).
+  Every *other* block (`has_many :x do … end` and any other `do … end`/`{ … }`
+  body) is pruned, because its run-time context is unknown and mutating it
+  risks false survivors. Note that a concern-block line executing ONLY at
+  include/load time (a macro, a bare constant) gets no per-example coverage,
+  so its mutant lands `uncovered`; lines run when a method is *called* from a
+  spec are covered and killable.
+- **Whole-file re-eval re-runs class-body side effects.** A closure reload
+  re-evaluates the target *and every attacher's* class body from source, so
+  non-idempotent load-time side effects run again — self-registration into a
+  global registry, `DescendantsTracker`-style hooks, observer wiring. A spec
+  asserting a count of such registrations can see it doubled (false kill) or
+  masked (false survival). Inherent to remove-and-reload.
 - **Constants captured by value go stale after a closure reload.** A
   reference holding the target by value rather than by ancestry — an alias
   (`ALIAS = SomeClass`), a registry the class was pushed into, a memoized
