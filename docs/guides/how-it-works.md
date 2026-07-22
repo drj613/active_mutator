@@ -241,22 +241,35 @@ files. Nothing else runs. (`RSpec.shared_examples` is a separate registry
 and is unaffected either way.)
 
 **Per-fork worker lifecycle** (`Worker#run`):
-1. `runner.setup`: RSpec loads the covering spec files. This is also what
-   loads the application for any project that *isn't* preloaded in the
-   parent (plain gems with no `config/environment.rb`). That's why
-   insertion cannot happen first: inserting into a not-yet-defined
-   constant raises `NameError`, and loading app code after insertion would
-   silently overwrite the mutation with the original method.
-2. `Inserter#insert`: `class_eval`s (or top-level `eval`s) the mutated
-   `def` source, at the subject's original file and line (for accurate
-   backtraces), redefining the just-loaded method with its mutated body.
-3. `after_fork_hygiene`: reseed `srand`, and for Rails apps, clear and
+1. `require` the subject's file: guarantees the target constant is defined
+   before insertion, regardless of preload. Preloaded projects
+   (Rails/Zeitwerk, or a preloaded spec helper) already have it in
+   `$LOADED_FEATURES` so this is a no-op; non-preloaded projects (plain
+   gems whose individual spec files require the lib, or
+   `--no-preload-helper`) get it loaded here rather than depending on
+   spec-load to define it.
+2. Insert the mutation — *before* the spec files are loaded. A `def` mutant
+   goes through `Inserter#insert`, which `class_eval`s (or top-level
+   `eval`s) the mutated `def` source at the subject's original file and
+   line (for accurate backtraces), redefining the method *in place* on the
+   live class. A class-body mutant goes through `ClosureReload`, which
+   `remove_const`s the target and re-`eval`s the mutated whole-file source,
+   producing a **new** class object bound to the constant. Insertion must
+   precede spec-load because `RSpec.describe SomeClass` binds
+   `metadata[:described_class]` to the constant *at load time*: if the
+   groups loaded first, a class-body mutant's reload would swap the constant
+   to a new object while the already-loaded groups kept pointing at the
+   pre-mutation object — exercising unmutated code and falsely surviving.
+   Insert first and every group binds to the mutated object.
+3. `runner.setup`: RSpec loads the covering spec files (now binding
+   `described_class` to the mutated object).
+4. `after_fork_hygiene`: reseed `srand`, and for Rails apps, clear and
    re-establish `ActiveRecord::Base` connections. Forked child processes
    inherit the parent's file descriptors, including DB sockets, and
    sharing a connection across processes corrupts it.
-4. `runner.run_specs(covering_groups)`: run only the filtered groups from
+5. `runner.run_specs(covering_groups)`: run only the filtered groups from
    above, in-process.
-5. Emit a JSON status line over the pipe back to the parent and exit.
+6. Emit a JSON status line over the pipe back to the parent and exit.
 
 Fork gives correctness for free. There is no "un-mutate between
 mutations" step, because the mutated process is simply thrown away. The

@@ -2,17 +2,22 @@ require "json"
 require "set"
 
 module ActiveMutator
-  # Runs INSIDE a fork. Order is critical: the mutation must be inserted
-  # BEFORE RSpec's setup phase loads the spec files. The parent already
-  # preloaded the app (Runner#preload! / #preload_spec_helper! requires the
-  # library before forking), so the target constant exists in the fork
-  # independently of spec-file loading. Inserting first matters because
-  # `RSpec.describe SomeClass` binds `metadata[:described_class]` to the
-  # constant AT LOAD TIME: a class-body mutant reloads the constant to a NEW
-  # object via ClosureReload, so a group loaded first would keep the
-  # pre-mutation object and falsely survive. Insert first and every group
-  # binds to the mutated object. (Def mutants class_eval the live class in
-  # place, same object either way, but share the ordering harmlessly.)
+  # Runs INSIDE a fork. Order is critical: require the subject file, insert
+  # the mutation, THEN let RSpec's setup phase load the spec files. Inserting
+  # before spec-load matters because `RSpec.describe SomeClass` binds
+  # `metadata[:described_class]` to the constant AT LOAD TIME: a class-body
+  # mutant reloads the constant to a NEW object via ClosureReload, so a group
+  # loaded first would keep the pre-mutation object and falsely survive.
+  # Insert first and every group binds to the mutated object. (Def mutants
+  # class_eval the live class in place, same object either way, but share the
+  # ordering harmlessly.)
+  #
+  # The explicit `require` of the subject file guarantees the target constant
+  # exists before insertion regardless of preload: preloaded projects
+  # (Rails/Zeitwerk, or a preloaded spec helper) already have it in
+  # $LOADED_FEATURES so it's a no-op, while non-preloaded projects (plain
+  # gems whose spec files require the lib themselves, or --no-preload-helper)
+  # get it loaded here instead of relying on spec-load to define it.
   class Worker
     def self.run(mutation, example_ids, writer)
       new(mutation, example_ids, writer).run
@@ -28,6 +33,7 @@ module ActiveMutator
       require "rspec/core"
       devnull = File.open(File::NULL, "w")
       runner = RSpec::Core::Runner.new(RSpec::Core::ConfigurationOptions.new(@example_ids))
+      require @mutation.subject.file   # no-op if already loaded; guarantees the constant exists
       insert_mutation                  # BEFORE setup: groups bind described_class to the mutated object
       runner.setup(devnull, devnull)   # loads spec files
       # One failure kills the mutant; running the rest of the covering set

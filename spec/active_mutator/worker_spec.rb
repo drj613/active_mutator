@@ -6,7 +6,8 @@ RSpec.describe ActiveMutator::Worker do
   # Default mutation is a def mutant, routed through the Inserter.
   let(:mutation) do
     instance_double(ActiveMutator::Mutation,
-                    subject: instance_double(ActiveMutator::Subject, class_body?: false))
+                    subject: instance_double(ActiveMutator::Subject,
+                                             class_body?: false, file: "/tmp/thing.rb"))
   end
   let(:rspec_runner) { instance_double(RSpec::Core::Runner) }
 
@@ -33,6 +34,13 @@ RSpec.describe ActiveMutator::Worker do
     allow(rspec_runner).to receive(:setup)
     allow(RSpec.world).to receive(:ordered_example_groups).and_return([])
     allow_any_instance_of(ActiveMutator::Inserter).to receive(:insert)
+    # Worker#run requires the subject file to guarantee the constant is
+    # loaded. Stub only THAT require (the fake path can't be loaded); let
+    # every other require (e.g. "rspec/core") hit the real Kernel#require so
+    # mutations of those arguments still surface.
+    allow_any_instance_of(described_class).to receive(:require).and_wrap_original do |orig, f|
+      f == mutation.subject.file ? nil : orig.call(f)
+    end
   end
 
   it "emits killed when examples fail" do
@@ -47,8 +55,11 @@ RSpec.describe ActiveMutator::Worker do
     expect(emitted).to eq("status" => "survived", "details" => nil)
   end
 
-  it "inserts the mutation BEFORE loading the spec files" do
+  it "requires the subject file, then inserts, all BEFORE loading the spec files" do
     calls = []
+    allow_any_instance_of(described_class).to receive(:require) do |_, f|
+      calls << :require_subject if f == mutation.subject.file
+    end
     allow_any_instance_of(ActiveMutator::Inserter).to receive(:insert) { calls << :insert }
     allow(rspec_runner).to receive(:setup) { calls << :setup }
     allow(rspec_runner).to receive(:run_specs) do
@@ -56,7 +67,7 @@ RSpec.describe ActiveMutator::Worker do
       0
     end
     run_worker
-    expect(calls).to eq(%i[insert setup run_specs])
+    expect(calls).to eq(%i[require_subject insert setup run_specs])
   end
 
   it "emits error when insertion raises" do
