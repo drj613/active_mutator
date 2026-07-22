@@ -8,8 +8,13 @@ module ActiveMutator
   # Both need the same "is this file a single reloadable constant?" rule, and
   # both need the same "does this class-body statement belong to another
   # subject?" rule.
+  # `extend self`, not `module_function`: module_function copies each method
+  # onto the singleton at definition time, so a def-level mutant (which
+  # redefines the INSTANCE method in the fork) would never reach the singleton
+  # copy that callers invoke — an untestable false survivor. `extend self`
+  # keeps ONE method object, dispatched to via the singleton's ancestry.
   module ClassShape
-    module_function
+    extend self
 
     # Zeitwerk-shaped: the file defines exactly one top-level constant, so
     # remove_const + whole-file re-eval reinstates precisely that constant
