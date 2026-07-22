@@ -52,7 +52,7 @@ module ActiveMutator
           pre_results << Result.new(mutation: mutation, status: :accepted, details: nil)
           next
         end
-        example_ids = map.examples_for(mutation.subject.file, coverage_lines(mutation))
+        example_ids = examples_for_mutation(mutation, map)
         if example_ids.empty?
           pre_results << Result.new(mutation: mutation, status: :uncovered, details: nil)
         else
@@ -97,6 +97,24 @@ module ActiveMutator
     # run against every example covering any line of its method.
     def coverage_lines(mutation)
       mutation.lines.to_a | mutation.subject.line_range.to_a
+    end
+
+    # Class-body lines execute at load time, so line coverage never
+    # attributes examples to them. Substitute: every example that covers ANY
+    # line of the file (it must have loaded the class), plus the convention
+    # spec file's examples. Phase 2 (escalation) widens further before a
+    # survivor is declared.
+    def examples_for_mutation(mutation, map)
+      return map.examples_for(mutation.subject.file, coverage_lines(mutation)) unless mutation.subject.class_body?
+
+      (map.examples_covering_file(mutation.subject.file) |
+        map.examples_for_spec_file(convention_spec_rel(mutation.subject.file))).sort
+    end
+
+    def convention_spec_rel(file)
+      rel = file.delete_prefix(@config.root.chomp("/") + "/").delete_suffix(".rb")
+      rest = rel.sub(%r{\A[^/]+/}, "")
+      "spec/#{rest}_spec.rb"
     end
 
     def build_reporter
