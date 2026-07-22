@@ -2,12 +2,17 @@ require "json"
 require "set"
 
 module ActiveMutator
-  # Runs INSIDE a fork. Order is critical: RSpec's setup phase loads the spec
-  # files, whose spec_helper/rails_helper loads the application. Only THEN
-  # can the mutation be inserted over the loaded original. Insert-first would
-  # NameError on any project not preloaded in the parent (all non-Rails
-  # projects), and loading app code after insertion would silently restore
-  # the original method.
+  # Runs INSIDE a fork. Order is critical: the mutation must be inserted
+  # BEFORE RSpec's setup phase loads the spec files. The parent already
+  # preloaded the app (Runner#preload! / #preload_spec_helper! requires the
+  # library before forking), so the target constant exists in the fork
+  # independently of spec-file loading. Inserting first matters because
+  # `RSpec.describe SomeClass` binds `metadata[:described_class]` to the
+  # constant AT LOAD TIME: a class-body mutant reloads the constant to a NEW
+  # object via ClosureReload, so a group loaded first would keep the
+  # pre-mutation object and falsely survive. Insert first and every group
+  # binds to the mutated object. (Def mutants class_eval the live class in
+  # place, same object either way, but share the ordering harmlessly.)
   class Worker
     def self.run(mutation, example_ids, writer)
       new(mutation, example_ids, writer).run
@@ -23,11 +28,11 @@ module ActiveMutator
       require "rspec/core"
       devnull = File.open(File::NULL, "w")
       runner = RSpec::Core::Runner.new(RSpec::Core::ConfigurationOptions.new(@example_ids))
-      runner.setup(devnull, devnull)   # loads spec files -> loads the app
+      insert_mutation                  # BEFORE setup: groups bind described_class to the mutated object
+      runner.setup(devnull, devnull)   # loads spec files
       # One failure kills the mutant; running the rest of the covering set
       # is pure waste inside the fork.
       RSpec.configuration.fail_fast = 1
-      insert_mutation                  # now the target constant exists
       after_fork_hygiene
       code = runner.run_specs(covering_groups)
       emit(code.zero? ? "survived" : "killed")

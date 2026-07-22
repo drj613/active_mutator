@@ -47,16 +47,16 @@ RSpec.describe ActiveMutator::Worker do
     expect(emitted).to eq("status" => "survived", "details" => nil)
   end
 
-  it "loads specs BEFORE inserting the mutation" do
+  it "inserts the mutation BEFORE loading the spec files" do
     calls = []
-    allow(rspec_runner).to receive(:setup) { calls << :setup }
     allow_any_instance_of(ActiveMutator::Inserter).to receive(:insert) { calls << :insert }
+    allow(rspec_runner).to receive(:setup) { calls << :setup }
     allow(rspec_runner).to receive(:run_specs) do
       calls << :run_specs
       0
     end
     run_worker
-    expect(calls).to eq(%i[setup insert run_specs])
+    expect(calls).to eq(%i[insert setup run_specs])
   end
 
   it "emits error when insertion raises" do
@@ -158,6 +158,19 @@ RSpec.describe ActiveMutator::Worker do
         mutated_def_source: "class Thing\n  X = 2\nend\n",
         mutated_def_line: 1
       )
+    end
+
+    # RSpec.describe SomeClass binds metadata[:described_class] to the constant
+    # at spec-LOAD time. A class-body mutant reloads the constant to a NEW
+    # object, so the reload MUST happen before setup loads the groups, or they
+    # bind the pre-mutation object and falsely survive.
+    it "reloads the class BEFORE loading the spec files" do
+      allow(rspec_runner).to receive(:run_specs).and_return(0)
+      calls = []
+      allow_any_instance_of(ActiveMutator::ClosureReload).to receive(:call) { calls << :reload }
+      allow(rspec_runner).to receive(:setup) { calls << :setup }
+      run_worker
+      expect(calls).to eq(%i[reload setup])
     end
 
     it "routes class-body mutants through ClosureReload, not the Inserter" do

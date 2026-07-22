@@ -111,6 +111,16 @@ RSpec.describe ActiveMutator::Reporter::StrykerJson do
     expect(tests).to eq([{ "id" => "./spec/calc_spec.rb[1:1]", "name" => "./spec/calc_spec.rb[1:1]" }])
   end
 
+  it "sorts the aggregated testFiles example ids deterministically" do
+    map = instance_double(ActiveMutator::CoverageMap)
+    allow(map).to receive(:examples_for)
+      .and_return(["./spec/calc_spec.rb[1:1]", "./spec/calc_spec.rb[1:3]", "./spec/calc_spec.rb[1:2]"])
+    reporter.coverage_map = map
+    report = report_after([build_result(:survived, file: @file)])
+    tests = report.dig("testFiles", "spec/calc_spec.rb", "tests").map { |t| t["id"] }
+    expect(tests).to eq(["./spec/calc_spec.rb[1:1]", "./spec/calc_spec.rb[1:2]", "./spec/calc_spec.rb[1:3]"])
+  end
+
   it "omits coveredBy and testFiles without a map" do
     report = report_after([build_result(:survived, file: @file)])
     expect(report.dig("files", "lib/calc.rb", "mutants").first).not_to have_key("coveredBy")
