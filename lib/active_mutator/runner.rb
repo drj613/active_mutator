@@ -126,7 +126,7 @@ module ActiveMutator
         .uniq
         .reject { |file| excluded?(file) }
         .sort.flat_map { |file| SubjectFinder.call(file) }
-      subjects = subjects.reject(&:class_body?) # TODO(Task 3): Engine can't analyze these yet
+      subjects = subjects.reject(&:class_body?) # TODO(Task 6): Worker can't insert these yet
       if @config.subject_filter
         matcher = SubjectMatcher.new(@config.subject_filter)
         subjects = subjects.select { |s| matcher.match?(s.name) }

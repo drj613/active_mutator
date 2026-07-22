@@ -173,5 +173,19 @@
     "description": "replace `0` with `1`",
     "original_snippet": "0",
     "ordinal": 2
+  },
+  {
+    "file": "lib/active_mutator/engine.rb",
+    "subject": "ActiveMutator::Engine#build_class_body_mutation",
+    "description": "return nil instead",
+    "original_snippet": "return [nil, false]",
+    "ordinal": 0
+  },
+  {
+    "file": "lib/active_mutator/engine.rb",
+    "subject": "ActiveMutator::Engine#build_class_body_mutation",
+    "description": "return nil instead",
+    "original_snippet": "return [nil, false]",
+    "ordinal": 1
   }
 ]
