@@ -598,6 +598,29 @@ RSpec.describe ActiveMutator::Runner do
         expect(runner.send(:discover_subjects).map(&:name)).to eq(["Keep#a"])
       end
     end
+
+    it "excludes class-body subjects (Task 3 guard: Engine cannot analyze them yet)" do
+      Dir.mktmpdir do |dir|
+        FileUtils.mkdir_p(File.join(dir, "lib"))
+        File.write(File.join(dir, "lib", "keep.rb"), "class Keep\n  X = 1\n  def a = 2\nend\n")
+
+        runner = described_class.new(config.with(root: dir))
+        subjects = runner.send(:discover_subjects)
+        expect(subjects.map(&:kind)).to eq([:instance])
+        expect(subjects.map(&:name)).to eq(["Keep#a"])
+      end
+    end
+
+    it "sorts discovered files by path so subject order is deterministic" do
+      Dir.mktmpdir do |dir|
+        FileUtils.mkdir_p(File.join(dir, "lib"))
+        File.write(File.join(dir, "lib", "z_last.rb"), "class ZLast; def a; 1; end; end")
+        File.write(File.join(dir, "lib", "a_first.rb"), "class AFirst; def a; 1; end; end")
+
+        runner = described_class.new(config.with(root: dir))
+        expect(runner.send(:discover_subjects).map(&:name)).to eq(["AFirst#a", "ZLast#a"])
+      end
+    end
   end
 
   describe "#call" do

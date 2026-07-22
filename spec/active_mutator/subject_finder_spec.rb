@@ -180,7 +180,9 @@ RSpec.describe ActiveMutator::SubjectFinder do
         def visible = 1
       end
     RUBY
-    expect(subjects.map(&:name)).to eq(["Wrap#visible"])
+    # norm/build (defined in the block) get no subject of their own; the
+    # class-body subject covers Wrap's `Point = ...` constant write.
+    expect(subjects.map(&:name)).to eq(["Wrap (class body)", "Wrap#visible"])
   end
 
   it "records byte_range covering the whole def" do
@@ -224,5 +226,97 @@ RSpec.describe ActiveMutator::SubjectFinder do
       end
     RUBY
     expect(subjects.map(&:name)).to eq(["Foo#not_skipped"])
+  end
+
+  describe "class-body subjects" do
+    it "emits a class-body subject for a class with macro statements" do
+      subjects = subjects_of(<<~RUBY)
+        class User
+          validates :email, presence: true
+
+          def name = "x"
+        end
+      RUBY
+      body = subjects.find { |s| s.kind == :class_body }
+      expect(body.name).to eq("User (class body)")
+      expect(body.constant_scope).to eq("User")
+      expect(body.class_body?).to be(true)
+      expect(body.sclass).to be(false)
+      expect(body.line_range).to eq(1..5)
+      expect(subjects.map(&:name)).to include("User#name")
+    end
+
+    it "emits no class-body subject for an empty class body" do
+      subjects = subjects_of(<<~RUBY)
+        class Empty
+        end
+      RUBY
+      expect(subjects.select { |s| s.kind == :class_body }).to be_empty
+    end
+
+    it "emits no class-body subject when the body is only defs" do
+      subjects = subjects_of(<<~RUBY)
+        class User
+          def name = "x"
+        end
+      RUBY
+      expect(subjects.map(&:kind)).to eq([:instance])
+    end
+
+    it "emits class-body subjects for nested classes but not namespace wrappers" do
+      subjects = subjects_of(<<~RUBY)
+        module Billing
+          class Calculator
+            RATE = 2
+          end
+        end
+      RUBY
+      bodies = subjects.select { |s| s.kind == :class_body }
+      expect(bodies.map(&:name)).to eq(["Billing::Calculator (class body)"])
+    end
+
+    it "gates on Zeitwerk shape: no class-body subjects when a file defines two top-level constants" do
+      subjects = subjects_of(<<~RUBY)
+        class A
+          X = 1
+        end
+        class B
+          Y = 2
+        end
+      RUBY
+      expect(subjects.select { |s| s.kind == :class_body }).to be_empty
+    end
+
+    it "skips a class-body subject with active_mutator:skip above the class line" do
+      subjects = subjects_of(<<~RUBY)
+        # active_mutator:skip
+        class User
+          X = 1
+        end
+      RUBY
+      expect(subjects.select { |s| s.kind == :class_body }).to be_empty
+    end
+
+    it "emits module class-body subjects" do
+      subjects = subjects_of(<<~RUBY)
+        module Util
+          TIMEOUT = 5
+          def helper = 1
+        end
+      RUBY
+      body = subjects.find { |s| s.kind == :class_body }
+      expect(body.name).to eq("Util (class body)")
+    end
+
+    it "emits no class-body subject inside class << self" do
+      subjects = subjects_of(<<~RUBY)
+        class Foo
+          class << self
+            def bar = 1
+          end
+        end
+      RUBY
+      expect(subjects.select { |s| s.kind == :class_body }).to be_empty
+    end
   end
 end

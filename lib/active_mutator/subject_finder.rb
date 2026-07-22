@@ -11,16 +11,27 @@ module ActiveMutator
       skip_lines = result.comments
         .select { |c| c.slice.match?(SKIP_MARKER) }
         .to_set { |c| c.location.start_line }
-      finder = new(file, skip_lines: skip_lines)
+      finder = new(file, skip_lines: skip_lines,
+                   class_level: zeitwerk_shaped?(result.value))
       finder.visit(result.value)
       finder.subjects
     end
 
+    # Class-body subjects only for Zeitwerk-shaped files: exactly one
+    # top-level class/module node. Multi-constant files and core-class
+    # reopens have no safe remove_const + re-eval story (issue #32).
+    def self.zeitwerk_shaped?(program)
+      program.statements.body.count do |s|
+        s.is_a?(Prism::ClassNode) || s.is_a?(Prism::ModuleNode)
+      end == 1
+    end
+
     attr_reader :subjects
 
-    def initialize(file, skip_lines: Set.new)
+    def initialize(file, skip_lines: Set.new, class_level: true)
       @file = file
       @skip_lines = skip_lines
+      @class_level = class_level
       @stack = []
       @subjects = []
       @sclass_depth = 0
@@ -33,13 +44,19 @@ module ActiveMutator
     def visit_class_node(node)
       return if @sclass_depth.positive?
 
-      with_scope(node.constant_path.slice) { super }
+      with_scope(node.constant_path.slice) do
+        add_class_body_subject(node)
+        super
+      end
     end
 
     def visit_module_node(node)
       return if @sclass_depth.positive?
 
-      with_scope(node.constant_path.slice) { super }
+      with_scope(node.constant_path.slice) do
+        add_class_body_subject(node)
+        super
+      end
     end
 
     # `class << self` inside a constant scope: defs there are singleton
@@ -84,6 +101,35 @@ module ActiveMutator
     end
 
     private
+
+    # One subject for the class-level code of this class/module. Only if the
+    # body has at least one statement the class-body walk can mutate: defs
+    # and nested class/modules are owned by other subjects.
+    def add_class_body_subject(node)
+      return unless @class_level
+      return if @skip_lines.include?(node.location.start_line - 1)
+
+      body = node.body
+      return unless body.is_a?(Prism::StatementsNode)
+      return if body.body.all? { |s| owned_by_other_subject?(s) }
+
+      scope = @stack.join("::")
+      loc = node.location
+      @subjects << Subject.new(
+        name: "#{scope} (class body)",
+        file: @file,
+        byte_range: loc.start_offset...loc.end_offset,
+        line_range: loc.start_line..loc.end_line,
+        constant_scope: scope,
+        kind: :class_body,
+        sclass: false
+      )
+    end
+
+    def owned_by_other_subject?(node)
+      node.is_a?(Prism::DefNode) || node.is_a?(Prism::ClassNode) ||
+        node.is_a?(Prism::ModuleNode) || node.is_a?(Prism::SingletonClassNode)
+    end
 
     def with_scope(name)
       @stack.push(name)
