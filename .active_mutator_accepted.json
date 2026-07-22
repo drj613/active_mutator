@@ -285,5 +285,19 @@
     "description": "unwrap `return`",
     "original_snippet": "return results",
     "ordinal": 0
+  },
+  {
+    "file": "lib/active_mutator/reporter/terminal.rb",
+    "subject": "ActiveMutator::Reporter::Terminal (class body)",
+    "description": "delete `private`",
+    "original_snippet": "private",
+    "ordinal": 0
+  },
+  {
+    "file": "lib/active_mutator/reporter/stryker_json.rb",
+    "subject": "ActiveMutator::Reporter::StrykerJson (class body)",
+    "description": "delete `private`",
+    "original_snippet": "private",
+    "ordinal": 0
   }
 ]
