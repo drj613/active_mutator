@@ -157,7 +157,7 @@ module ActiveMutator
     # loaded class. `requires` can't serve — those load inside the fork's
     # setup, after mutations are already planned.
     def load_operators
-      @config.operator_paths.each do |f|
+      @config.operators.each do |f|
         require File.expand_path(f, @config.root)
       rescue LoadError, SyntaxError => e
         raise Error, "operator file not loadable: #{f}: #{e.message}"

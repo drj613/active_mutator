@@ -111,6 +111,27 @@ RSpec.describe ActiveMutator::Reporter::StrykerJson do
     expect(tests).to eq([{ "id" => "./spec/calc_spec.rb[1:1]", "name" => "./spec/calc_spec.rb[1:1]" }])
   end
 
+  it "fills class-body coveredBy from examples_covering_file, not per-line coverage" do
+    source = File.read(@file)
+    subject = ActiveMutator::Subject.new(name: "Calc (class body)", file: @file,
+                                         byte_range: 0...source.bytesize, line_range: 1..3,
+                                         constant_scope: "Calc", kind: :class_body)
+    edit = ActiveMutator::Edit.new(range: 0...3, replacement: "", description: "delete `def`",
+                                   operator: "StatementDeletion")
+    mutation = ActiveMutator::Mutation.new(subject: subject, edit: edit, original_snippet: "def",
+                                           line: 1, mutated_file_source: "", mutated_def_source: "",
+                                           mutated_def_line: 1)
+    result = ActiveMutator::Result.new(mutation: mutation, status: :survived, details: nil)
+
+    map = instance_double(ActiveMutator::CoverageMap)
+    # Per-line coverage would be empty for class-body lines; the reporter must
+    # substitute file-covering examples instead.
+    allow(map).to receive(:examples_covering_file).with(@file).and_return(["./spec/calc_spec.rb[1:2]"])
+    reporter.coverage_map = map
+    report = report_after([result])
+    expect(report.dig("files", "lib/calc.rb", "mutants").first["coveredBy"]).to eq(["./spec/calc_spec.rb[1:2]"])
+  end
+
   it "sorts the aggregated testFiles example ids deterministically" do
     map = instance_double(ActiveMutator::CoverageMap)
     allow(map).to receive(:examples_for)

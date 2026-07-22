@@ -38,9 +38,9 @@ RSpec.describe ActiveMutator::ConfigFile do
     )
   end
 
-  it "maps the operators key to operator_paths" do
+  it "loads the operators key" do
     write_config("operators:\n  - ops/custom.rb\n")
-    expect(described_class.load(root)).to eq(operator_paths: ["ops/custom.rb"])
+    expect(described_class.load(root)).to eq(operators: ["ops/custom.rb"])
   end
 
   it "accepts adaptive_timeout: false" do

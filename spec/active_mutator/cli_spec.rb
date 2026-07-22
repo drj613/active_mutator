@@ -170,11 +170,11 @@ RSpec.describe ActiveMutator::CLI do
 
     it "collects repeatable --operator paths" do
       config = described_class.parse(%w[--operator ./ops/a.rb --operator ./ops/b.rb])
-      expect(config.operator_paths).to eq(["./ops/a.rb", "./ops/b.rb"])
+      expect(config.operators).to eq(["./ops/a.rb", "./ops/b.rb"])
     end
 
-    it "defaults operator_paths to empty" do
-      expect(described_class.parse([]).operator_paths).to eq([])
+    it "defaults operators to empty" do
+      expect(described_class.parse([]).operators).to eq([])
     end
 
     it "defaults class_level on with cap 10" do

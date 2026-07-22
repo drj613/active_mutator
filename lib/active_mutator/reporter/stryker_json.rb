@@ -88,7 +88,17 @@ module ActiveMutator
       def covered_by(result)
         return nil unless @coverage_map
 
-        @coverage_map.examples_for(result.mutation.subject.file, result.mutation.lines)
+        subject = result.mutation.subject
+        # Class-body lines execute at load time, so per-line coverage never
+        # attributes examples to them (see Runner#examples_for_mutation). Mirror
+        # the scheduling substitution — every example that loaded the file — so
+        # the viewer shows real test linkage instead of an empty coveredBy.
+        if subject.class_body?
+          examples = @coverage_map.examples_covering_file(subject.file)
+          return examples.empty? ? nil : examples.sort
+        end
+
+        @coverage_map.examples_for(subject.file, result.mutation.lines)
       end
 
       def referenced_examples(results)

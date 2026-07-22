@@ -27,9 +27,6 @@ module ActiveMutator
       "class_level_closure_cap" => :positive_integer
     }.freeze
 
-    # YAML keys that don't match their Config member name.
-    RENAMES = { "operators" => :operator_paths }.freeze
-
     def self.load(root)
       path = File.join(root, FILENAME)
       return {} unless File.exist?(path)
@@ -42,7 +39,7 @@ module ActiveMutator
         validator = KEYS[key]
         raise Error, "#{FILENAME}: unknown config key: #{key}" unless validator
 
-        [RENAMES.fetch(key, key.to_sym), coerce(key, validator, value)]
+        [key.to_sym, coerce(key, validator, value)]
       end
     end
 
