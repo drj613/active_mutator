@@ -92,20 +92,19 @@ module ActiveMutator
     def class_walk(node, owned, &blk)
       if owned_statement?(node)
         owned << (node.location.start_offset...node.location.end_offset)
-        return
-      end
-      return if node.is_a?(Prism::BlockNode)
-
-      yield node
-      if concern_dsl_block?(node)
+      elsif node.is_a?(Prism::BlockNode)
+        # Pruned: a block's run-time context is unknown (see collect comment).
+      elsif concern_dsl_block?(node)
         # Inside a concern block the statements have no subject of their own, so
         # mutate everything (including nested def bodies) exactly like the
         # def-level #walk — do NOT recurse via class_walk (it would prune the
         # block) and do NOT mark the interior defs owned.
+        yield node
         walk(node.block.body, &blk)
-        return
+      else
+        yield node
+        node.compact_child_nodes.each { |child| class_walk(child, owned, &blk) }
       end
-      node.compact_child_nodes.each { |child| class_walk(child, owned, &blk) }
     end
 
     # The mutant is the whole file. The def-shaped fields are filled with the

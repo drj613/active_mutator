@@ -125,11 +125,31 @@ RSpec.describe ActiveMutator::Reporter::StrykerJson do
 
     map = instance_double(ActiveMutator::CoverageMap)
     # Per-line coverage would be empty for class-body lines; the reporter must
-    # substitute file-covering examples instead.
-    allow(map).to receive(:examples_covering_file).with(@file).and_return(["./spec/calc_spec.rb[1:2]"])
+    # substitute file-covering examples instead, sorted deterministically.
+    allow(map).to receive(:examples_covering_file).with(@file)
+      .and_return(["./spec/calc_spec.rb[1:2]", "./spec/calc_spec.rb[1:1]"])
     reporter.coverage_map = map
     report = report_after([result])
-    expect(report.dig("files", "lib/calc.rb", "mutants").first["coveredBy"]).to eq(["./spec/calc_spec.rb[1:2]"])
+    expect(report.dig("files", "lib/calc.rb", "mutants").first["coveredBy"])
+      .to eq(["./spec/calc_spec.rb[1:1]", "./spec/calc_spec.rb[1:2]"])
+  end
+
+  it "omits coveredBy for a class-body mutant when no example covers the file" do
+    source = File.read(@file)
+    subject = ActiveMutator::Subject.new(name: "Calc (class body)", file: @file,
+                                         byte_range: 0...source.bytesize, line_range: 1..3,
+                                         constant_scope: "Calc", kind: :class_body)
+    edit = ActiveMutator::Edit.new(range: 0...3, replacement: "", description: "delete `def`",
+                                   operator: "StatementDeletion")
+    mutation = ActiveMutator::Mutation.new(subject: subject, edit: edit, original_snippet: "def",
+                                           line: 1, mutated_file_source: "", mutated_def_source: "",
+                                           mutated_def_line: 1)
+    result = ActiveMutator::Result.new(mutation: mutation, status: :survived, details: nil)
+    map = instance_double(ActiveMutator::CoverageMap)
+    allow(map).to receive(:examples_covering_file).with(@file).and_return([])
+    reporter.coverage_map = map
+    report = report_after([result])
+    expect(report.dig("files", "lib/calc.rb", "mutants").first).not_to have_key("coveredBy")
   end
 
   it "sorts the aggregated testFiles example ids deterministically" do

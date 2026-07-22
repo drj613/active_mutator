@@ -149,12 +149,13 @@ module ActiveMutator
     # foreign object can raise Exception-level errors that are NOT StandardError
     # — the canonical case is an expired RSpec verifying double
     # (ExpiredTestDoubleError < MockExpectationError < Exception) left in
-    # ObjectSpace by another spec. Only genuinely fatal control-flow errors
-    # (signals, exit, out-of-memory) are re-raised so a run stays interruptible.
+    # ObjectSpace by another spec. Control-flow errors (a signal such as an
+    # interrupt, or an explicit exit) are re-raised so a run stays
+    # interruptible; everything else means "not a dependency, skip it".
     def carries?(mod, target)
       mod.ancestors.include?(target)
     rescue Exception => e # rubocop:disable Lint/RescueException
-      raise if e.is_a?(SignalException) || e.is_a?(SystemExit) || e.is_a?(NoMemoryError)
+      raise if e.is_a?(SignalException) || e.is_a?(SystemExit)
 
       false
     end
@@ -190,11 +191,11 @@ module ActiveMutator
       parts = name.split("::")
       leaf = parts.pop
       parent = parts.empty? ? Object : Object.const_get(parts.join("::"))
-      parent.send(:remove_const, leaf) if parent.const_defined?(leaf, false)
+      parent.send(:remove_const, leaf)
     rescue NameError
-      # A parent namespace earlier in the closure was already removed, taking
-      # this nested constant with it. Nothing to remove — the re-eval pass
-      # reinstates it from its own file.
+      # Either a parent namespace earlier in the closure was already removed
+      # (taking this nested constant with it), or the leaf is already gone.
+      # Nothing to remove — the re-eval pass reinstates it from its own file.
     end
   end
 end

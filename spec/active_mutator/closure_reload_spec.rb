@@ -286,6 +286,76 @@ RSpec.describe ActiveMutator::ClosureReload do
     bad # keep alive past the call
   end
 
+  # The scan re-raises control-flow errors so a run stays interruptible; a
+  # single flag keeps each bad module from poisoning later examples' scans.
+  [SystemExit, Interrupt].each do |control_error|
+    it "re-raises #{control_error} from the scan instead of swallowing it" do
+      file = load_source("cr_ctl_#{control_error}.rb", <<~RUBY, top_const: :"CrCtl#{control_error}")
+        class CrCtl#{control_error}
+          RATE = 5
+        end
+      RUBY
+      raising = true
+      bad = Module.new
+      bad.define_singleton_method(:ancestors) { raising ? raise(control_error) : [self] }
+      begin
+        expect { described_class.new(subject_for(file, "CrCtl#{control_error}"), File.read(file)).call }
+          .to raise_error(control_error)
+      ensure
+        raising = false
+      end
+      bad # keep alive past the call
+    end
+  end
+
+  it "removes a deeply nested constant before re-eval so stale nested members do not linger" do
+    file = load_source("cr_nested_stale.rb", <<~RUBY, top_const: :CrNS1)
+      module CrNS1
+        module CrNS2
+          class CrNS3
+            GONE = 1
+            KEPT = 2
+          end
+        end
+      end
+    RUBY
+    subject = ActiveMutator::SubjectFinder.call(file).find do |s|
+      s.class_body? && s.constant_scope == "CrNS1::CrNS2::CrNS3"
+    end || raise("no CrNS1::CrNS2::CrNS3 subject")
+    mutated = File.read(file).sub("      GONE = 1\n", "")
+    described_class.new(subject, mutated).call
+    expect(CrNS1::CrNS2::CrNS3.const_defined?(:GONE, false)).to be(false)
+    expect(CrNS1::CrNS2::CrNS3::KEPT).to eq(2)
+  end
+
+  it "skips (not kills/errors) when a pristine dependent can't re-eval in the chosen order" do
+    file = load_source("cr_dep_t.rb", <<~RUBY, top_const: :CrDepT)
+      module CrDepT
+        V = 1
+      end
+    RUBY
+    load_source("cr_dep_extra.rb", "module CrDepExtra\nend\n", top_const: :CrDepExtra)
+    # CrDepBee has a deeper instance-ancestry (extra include) than CrDepAye, so
+    # the depth sort re-evals Aye first — but Aye's body references CrDepBee::Y,
+    # which is removed and not yet reinstated. That NameError on a PRISTINE
+    # dependent is an honest Skip, not a MutantLoadError kill.
+    load_source("cr_dep_bee.rb", <<~RUBY, top_const: :CrDepBee)
+      class CrDepBee
+        include CrDepT
+        include CrDepExtra
+        Y = 9
+      end
+    RUBY
+    load_source("cr_dep_aye.rb", <<~RUBY, top_const: :CrDepAye)
+      class CrDepAye
+        include CrDepT
+        REF = CrDepBee::Y
+      end
+    RUBY
+    expect { described_class.new(subject_for(file, "CrDepT"), File.read(file)).call }
+      .to raise_error(described_class::Skip, /could not be reinstated/)
+  end
+
   it "raises MutantLoadError when the mutated target source fails to load" do
     file = load_source("cr_broken.rb", <<~RUBY, top_const: :CrBroken)
       class CrBroken

@@ -175,6 +175,21 @@ RSpec.describe ActiveMutator::ConfigFile do
     expect { described_class.load(root) }.to raise_error(ActiveMutator::Error, /class_level_closure_cap must be >= 1/)
   end
 
+  it "accepts a class_level_closure_cap of exactly 1 (the boundary)" do
+    write_config("class_level_closure_cap: 1\n")
+    expect(described_class.load(root)).to eq(class_level_closure_cap: 1)
+  end
+
+  it "rejects a non-integer class_level_closure_cap" do
+    write_config("class_level_closure_cap: 1.5\n")
+    expect { described_class.load(root) }.to raise_error(ActiveMutator::Error, /class_level_closure_cap must be an integer/)
+  end
+
+  it "rejects a string_list containing a non-string" do
+    write_config("requires:\n  - ok.rb\n  - 1\n")
+    expect { described_class.load(root) }.to raise_error(ActiveMutator::Error, /requires must be a list of strings/)
+  end
+
   it "rejects a non-boolean class_level" do
     write_config("class_level: 1\n")
     expect { described_class.load(root) }.to raise_error(ActiveMutator::Error, /class_level must be true or false/)

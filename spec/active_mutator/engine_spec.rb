@@ -351,6 +351,33 @@ RSpec.describe ActiveMutator::Engine do
       expect(descriptions).to include("replace `true` with `false`")
     end
 
+    it "does not treat a receiverless non-concern call (validates) as a concern block" do
+      # Guards concern_dsl_block?'s name check: dropping it would make the
+      # blockless `validates` call look like a concern block and descend into
+      # its (nil) block, crashing analysis.
+      analysis, = class_body_analysis(<<~RUBY)
+        class User
+          validates :email, presence: true
+          X = 1
+        end
+      RUBY
+      expect(analysis.mutations.map { |m| m.edit.description })
+        .to include("delete `validates :email, presence: true`")
+    end
+
+    it "does not treat a blockless concern-named call as a concern block" do
+      # Guards concern_dsl_block?'s block check: dropping it would make a bare
+      # `class_methods` (no block) look like a concern block and crash.
+      analysis, = class_body_analysis(<<~RUBY)
+        module M
+          extend ActiveSupport::Concern
+          class_methods
+          X = 1
+        end
+      RUBY
+      expect(analysis.mutations.map { |m| m.edit.description }).to include('replace `1` with `0`')
+    end
+
     it "does not delete defs nested in class-level control flow" do
       analysis, = class_body_analysis(<<~RUBY)
         class User
