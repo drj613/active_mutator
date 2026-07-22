@@ -264,5 +264,26 @@
     "description": "delete `private`",
     "original_snippet": "private",
     "ordinal": 0
+  },
+  {
+    "file": "lib/active_mutator/runner.rb",
+    "subject": "ActiveMutator::Runner#escalate_class_body_survivors",
+    "description": "delete `return results if candidates.empty?`",
+    "original_snippet": "return results if candidates.empty?",
+    "ordinal": 0
+  },
+  {
+    "file": "lib/active_mutator/runner.rb",
+    "subject": "ActiveMutator::Runner#escalate_class_body_survivors",
+    "description": "force condition to `false`",
+    "original_snippet": "candidates.empty?",
+    "ordinal": 0
+  },
+  {
+    "file": "lib/active_mutator/runner.rb",
+    "subject": "ActiveMutator::Runner#escalate_class_body_survivors",
+    "description": "unwrap `return`",
+    "original_snippet": "return results",
+    "ordinal": 0
   }
 ]
