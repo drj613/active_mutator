@@ -98,8 +98,10 @@ module ActiveMutator
         # Inside a concern block the statements have no subject of their own, so
         # mutate everything (including nested def bodies) exactly like the
         # def-level #walk — do NOT recurse via class_walk (it would prune the
-        # block) and do NOT mark the interior defs owned.
-        yield node
+        # block) and do NOT mark the interior defs owned. The concern call node
+        # itself is not yielded: the whole-block deletion edit already comes
+        # from the enclosing StatementsNode, and no operator targets a bare
+        # receiverless call.
         walk(node.block.body, &blk)
       else
         yield node

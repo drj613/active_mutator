@@ -365,6 +365,21 @@ RSpec.describe ActiveMutator::Engine do
         .to include("delete `validates :email, presence: true`")
     end
 
+    it "does not treat a concern-named call WITH a receiver as a concern block" do
+      # Guards concern_dsl_block?'s receiver.nil? check: dropping it would make
+      # `config.class_methods do … end` (a receiver'd call that merely shares
+      # the name) descend into the block and mutate its interior.
+      analysis, = class_body_analysis(<<~RUBY)
+        class User
+          X = 1
+          config.class_methods do
+            TOKEN = "z"
+          end
+        end
+      RUBY
+      expect(analysis.mutations.map { |m| m.edit.description }).not_to include('replace string with ""')
+    end
+
     it "does not treat a blockless concern-named call as a concern block" do
       # Guards concern_dsl_block?'s block check: dropping it would make a bare
       # `class_methods` (no block) look like a concern block and crash.

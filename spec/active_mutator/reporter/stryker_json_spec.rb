@@ -126,12 +126,14 @@ RSpec.describe ActiveMutator::Reporter::StrykerJson do
     map = instance_double(ActiveMutator::CoverageMap)
     # Per-line coverage would be empty for class-body lines; the reporter must
     # substitute file-covering examples instead, sorted deterministically.
+    # Three elements whose sorted order differs from their reverse, so the
+    # assertion distinguishes .sort from .reverse.
     allow(map).to receive(:examples_covering_file).with(@file)
-      .and_return(["./spec/calc_spec.rb[1:2]", "./spec/calc_spec.rb[1:1]"])
+      .and_return(["./spec/calc_spec.rb[1:2]", "./spec/calc_spec.rb[1:1]", "./spec/calc_spec.rb[1:3]"])
     reporter.coverage_map = map
     report = report_after([result])
     expect(report.dig("files", "lib/calc.rb", "mutants").first["coveredBy"])
-      .to eq(["./spec/calc_spec.rb[1:1]", "./spec/calc_spec.rb[1:2]"])
+      .to eq(["./spec/calc_spec.rb[1:1]", "./spec/calc_spec.rb[1:2]", "./spec/calc_spec.rb[1:3]"])
   end
 
   it "omits coveredBy for a class-body mutant when no example covers the file" do
