@@ -9,9 +9,15 @@ RSpec.describe ActiveMutator::ClosureReload do
 
   # ClosureReload scans every Module in ObjectSpace. Other specs (e.g.
   # worker_spec) create RSpec verifying doubles, which ARE Modules and linger
-  # as expired garbage until collected; touching one raises an Exception-level
-  # error the scan should never have to see. Collect them before we scan.
-  before { GC.start }
+  # as expired garbage until collected; touching an expired one raises
+  # ExpiredTestDoubleError (< Exception, NOT StandardError). Closure#carries?
+  # rescues Exception-level errors precisely so this leak cannot crash the scan
+  # (proved by the "cannot be introspected" example below), so no GC.start
+  # band-aid is needed here.
+  # `ClosureReload.cap` is process-global class state that Runner sets from
+  # config; reset it per example so a value leaked from another spec file can't
+  # make the bare `.call` examples here use a surprise cap.
+  before { described_class.cap = nil }
 
   after do
     defined_names.reverse_each do |name|
@@ -268,14 +274,23 @@ RSpec.describe ActiveMutator::ClosureReload do
         def rate = RATE
       end
     RUBY
-    # A leaked/expired test double: #ancestors raises. The whole-VM scan must
-    # skip it rather than crash the reload.
+    # A leaked/expired test double: #ancestors raises an EXCEPTION-LEVEL error
+    # (like RSpec's ExpiredTestDoubleError < Exception), not a StandardError.
+    # The whole-VM scan must skip it rather than crash the reload — a bare
+    # `raise "..."` (RuntimeError) would only exercise the StandardError path.
     bad = Module.new
-    def bad.ancestors = raise("expired double")
+    def bad.ancestors = raise(Exception, "expired double")
     mutated = File.read(file).sub("RATE = 5", "RATE = 8")
     described_class.new(subject_for(file, "CrIntrospect"), mutated).call
     expect(CrIntrospect::RATE).to eq(8)
     bad # keep alive past the call
+  end
+
+  it "defaults the closure cap to DEFAULT_CAP (10) when none is configured" do
+    # Runner sets .cap from config; with none set, .call falls back to
+    # DEFAULT_CAP. Pinning the value guards the fallback against silent drift.
+    expect(described_class::DEFAULT_CAP).to eq(10)
+    expect(described_class.cap).to eq(10)
   end
 
   it "skips when the closure exceeds the cap" do

@@ -64,6 +64,13 @@ module ActiveMutator
       sources.each { |name, _| remove_constant(name) }
       sources.each do |_, (file, src)|
         eval(src, TOPLEVEL_BINDING, file, 1) # rubocop:disable Security/Eval
+      rescue NameError => e
+        # A dependent's pristine source could not be re-evaled standalone in the
+        # order we chose — typically a cross-attacher reference the ancestry-depth
+        # sort doesn't capture (see the ordering note above). We cannot faithfully
+        # reinstate the closure, so this is an honest Skip, not a survived/killed
+        # verdict and not a bare `error`.
+        raise Skip, "reload re-eval failed (#{e.message}); closure could not be reinstated in dependency order"
       end
       nil
     end
@@ -121,9 +128,18 @@ module ActiveMutator
     # treat it as unrelated rather than aborting the whole scan. Trade-off: a
     # genuine attacher whose #ancestors raises would be silently dropped
     # (acceptable — pathological).
+    #
+    # The rescue is deliberately broader than StandardError: #ancestors on a
+    # foreign object can raise Exception-level errors that are NOT StandardError
+    # — the canonical case is an expired RSpec verifying double
+    # (ExpiredTestDoubleError < MockExpectationError < Exception) left in
+    # ObjectSpace by another spec. Only genuinely fatal control-flow errors
+    # (signals, exit, out-of-memory) are re-raised so a run stays interruptible.
     def carries?(mod, target)
       mod.ancestors.include?(target)
-    rescue StandardError
+    rescue Exception => e # rubocop:disable Lint/RescueException
+      raise if e.is_a?(SignalException) || e.is_a?(SystemExit) || e.is_a?(NoMemoryError)
+
       false
     end
 
@@ -160,7 +176,11 @@ module ActiveMutator
       parts = name.split("::")
       leaf = parts.pop
       parent = parts.empty? ? Object : Object.const_get(parts.join("::"))
-      parent.send(:remove_const, leaf)
+      parent.send(:remove_const, leaf) if parent.const_defined?(leaf, false)
+    rescue NameError
+      # A parent namespace earlier in the closure was already removed, taking
+      # this nested constant with it. Nothing to remove — the re-eval pass
+      # reinstates it from its own file.
     end
   end
 end
