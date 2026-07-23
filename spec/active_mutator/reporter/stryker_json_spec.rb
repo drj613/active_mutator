@@ -111,10 +111,70 @@ RSpec.describe ActiveMutator::Reporter::StrykerJson do
     expect(tests).to eq([{ "id" => "./spec/calc_spec.rb[1:1]", "name" => "./spec/calc_spec.rb[1:1]" }])
   end
 
+  it "fills class-body coveredBy from examples_covering_file, not per-line coverage" do
+    source = File.read(@file)
+    subject = ActiveMutator::Subject.new(name: "Calc (class body)", file: @file,
+                                         byte_range: 0...source.bytesize, line_range: 1..3,
+                                         constant_scope: "Calc", kind: :class_body)
+    edit = ActiveMutator::Edit.new(range: 0...3, replacement: "", description: "delete `def`",
+                                   operator: "StatementDeletion")
+    mutation = ActiveMutator::Mutation.new(subject: subject, edit: edit, original_snippet: "def",
+                                           line: 1, mutated_file_source: "", mutated_def_source: "",
+                                           mutated_def_line: 1)
+    result = ActiveMutator::Result.new(mutation: mutation, status: :survived, details: nil)
+
+    map = instance_double(ActiveMutator::CoverageMap)
+    # Per-line coverage would be empty for class-body lines; the reporter must
+    # substitute file-covering examples instead, sorted deterministically.
+    # Three elements whose sorted order differs from their reverse, so the
+    # assertion distinguishes .sort from .reverse.
+    allow(map).to receive(:examples_covering_file).with(@file)
+      .and_return(["./spec/calc_spec.rb[1:2]", "./spec/calc_spec.rb[1:1]", "./spec/calc_spec.rb[1:3]"])
+    reporter.coverage_map = map
+    report = report_after([result])
+    expect(report.dig("files", "lib/calc.rb", "mutants").first["coveredBy"])
+      .to eq(["./spec/calc_spec.rb[1:1]", "./spec/calc_spec.rb[1:2]", "./spec/calc_spec.rb[1:3]"])
+  end
+
+  it "omits coveredBy for a class-body mutant when no example covers the file" do
+    source = File.read(@file)
+    subject = ActiveMutator::Subject.new(name: "Calc (class body)", file: @file,
+                                         byte_range: 0...source.bytesize, line_range: 1..3,
+                                         constant_scope: "Calc", kind: :class_body)
+    edit = ActiveMutator::Edit.new(range: 0...3, replacement: "", description: "delete `def`",
+                                   operator: "StatementDeletion")
+    mutation = ActiveMutator::Mutation.new(subject: subject, edit: edit, original_snippet: "def",
+                                           line: 1, mutated_file_source: "", mutated_def_source: "",
+                                           mutated_def_line: 1)
+    result = ActiveMutator::Result.new(mutation: mutation, status: :survived, details: nil)
+    map = instance_double(ActiveMutator::CoverageMap)
+    allow(map).to receive(:examples_covering_file).with(@file).and_return([])
+    reporter.coverage_map = map
+    report = report_after([result])
+    expect(report.dig("files", "lib/calc.rb", "mutants").first).not_to have_key("coveredBy")
+  end
+
+  it "sorts the aggregated testFiles example ids deterministically" do
+    map = instance_double(ActiveMutator::CoverageMap)
+    allow(map).to receive(:examples_for)
+      .and_return(["./spec/calc_spec.rb[1:1]", "./spec/calc_spec.rb[1:3]", "./spec/calc_spec.rb[1:2]"])
+    reporter.coverage_map = map
+    report = report_after([build_result(:survived, file: @file)])
+    tests = report.dig("testFiles", "spec/calc_spec.rb", "tests").map { |t| t["id"] }
+    expect(tests).to eq(["./spec/calc_spec.rb[1:1]", "./spec/calc_spec.rb[1:2]", "./spec/calc_spec.rb[1:3]"])
+  end
+
   it "omits coveredBy and testFiles without a map" do
     report = report_after([build_result(:survived, file: @file)])
     expect(report.dig("files", "lib/calc.rb", "mutants").first).not_to have_key("coveredBy")
     expect(report).not_to have_key("testFiles")
+  end
+
+  it "maps skipped to Ignored with the reason" do
+    mutant = report_after([build_result(:skipped, file: @file, details: "constant not loaded")])
+             .dig("files", "lib/calc.rb", "mutants").first
+    expect(mutant["status"]).to eq("Ignored")
+    expect(mutant["statusReason"]).to eq("constant not loaded")
   end
 
   it "prints the report path and progress chars" do

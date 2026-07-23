@@ -3,7 +3,12 @@ require "stringio"
 
 RSpec.describe ActiveMutator::Worker do
   let(:writer) { StringIO.new }
-  let(:mutation) { instance_double(ActiveMutator::Mutation) }
+  # Default mutation is a def mutant, routed through the Inserter.
+  let(:mutation) do
+    instance_double(ActiveMutator::Mutation,
+                    subject: instance_double(ActiveMutator::Subject,
+                                             class_body?: false, file: "/tmp/thing.rb"))
+  end
   let(:rspec_runner) { instance_double(RSpec::Core::Runner) }
 
   def emitted
@@ -29,6 +34,13 @@ RSpec.describe ActiveMutator::Worker do
     allow(rspec_runner).to receive(:setup)
     allow(RSpec.world).to receive(:ordered_example_groups).and_return([])
     allow_any_instance_of(ActiveMutator::Inserter).to receive(:insert)
+    # Worker#run requires the subject file to guarantee the constant is
+    # loaded. Stub only THAT require (the fake path can't be loaded); let
+    # every other require (e.g. "rspec/core") hit the real Kernel#require so
+    # mutations of those arguments still surface.
+    allow_any_instance_of(described_class).to receive(:require).and_wrap_original do |orig, f|
+      f == mutation.subject.file ? nil : orig.call(f)
+    end
   end
 
   it "emits killed when examples fail" do
@@ -43,16 +55,19 @@ RSpec.describe ActiveMutator::Worker do
     expect(emitted).to eq("status" => "survived", "details" => nil)
   end
 
-  it "loads specs BEFORE inserting the mutation" do
+  it "requires the subject file, then inserts, all BEFORE loading the spec files" do
     calls = []
-    allow(rspec_runner).to receive(:setup) { calls << :setup }
+    allow_any_instance_of(described_class).to receive(:require) do |_, f|
+      calls << :require_subject if f == mutation.subject.file
+    end
     allow_any_instance_of(ActiveMutator::Inserter).to receive(:insert) { calls << :insert }
+    allow(rspec_runner).to receive(:setup) { calls << :setup }
     allow(rspec_runner).to receive(:run_specs) do
       calls << :run_specs
       0
     end
     run_worker
-    expect(calls).to eq(%i[setup insert run_specs])
+    expect(calls).to eq(%i[require_subject insert setup run_specs])
   end
 
   it "emits error when insertion raises" do
@@ -137,5 +152,58 @@ RSpec.describe ActiveMutator::Worker do
     allow(rspec_runner).to receive(:run_specs) { |groups| ran_groups = groups; 0 }
     run_worker
     expect(ran_groups).to eq([covering])
+  end
+
+  describe "class-body mutants" do
+    let(:mutation) do
+      subject = ActiveMutator::Subject.new(
+        name: "Thing (class body)", file: "/tmp/thing.rb",
+        byte_range: 0...10, line_range: 1..3,
+        constant_scope: "Thing", kind: :class_body, sclass: false
+      )
+      ActiveMutator::Mutation.new(
+        subject: subject,
+        edit: ActiveMutator::Edit.new(range: 8...9, replacement: "2", description: "x", operator: "Literal"),
+        original_snippet: "1", line: 2,
+        mutated_file_source: "class Thing\n  X = 2\nend\n",
+        mutated_def_source: "class Thing\n  X = 2\nend\n",
+        mutated_def_line: 1
+      )
+    end
+
+    # RSpec.describe SomeClass binds metadata[:described_class] to the constant
+    # at spec-LOAD time. A class-body mutant reloads the constant to a NEW
+    # object, so the reload MUST happen before setup loads the groups, or they
+    # bind the pre-mutation object and falsely survive.
+    it "reloads the class BEFORE loading the spec files" do
+      allow(rspec_runner).to receive(:run_specs).and_return(0)
+      calls = []
+      allow_any_instance_of(ActiveMutator::ClosureReload).to receive(:call) { calls << :reload }
+      allow(rspec_runner).to receive(:setup) { calls << :setup }
+      run_worker
+      expect(calls).to eq(%i[reload setup])
+    end
+
+    it "routes class-body mutants through ClosureReload, not the Inserter" do
+      allow(rspec_runner).to receive(:run_specs).and_return(0)
+      expect_any_instance_of(ActiveMutator::ClosureReload).to receive(:call)
+      expect_any_instance_of(ActiveMutator::Inserter).not_to receive(:insert)
+      run_worker
+      expect(emitted).to eq("status" => "survived", "details" => nil)
+    end
+
+    it "reports skipped with the reason when ClosureReload raises Skip" do
+      allow_any_instance_of(ActiveMutator::ClosureReload)
+        .to receive(:call).and_raise(ActiveMutator::ClosureReload::Skip, "constant Thing not loaded")
+      run_worker
+      expect(emitted).to eq("status" => "skipped", "details" => "constant Thing not loaded")
+    end
+
+    it "reports killed when ClosureReload raises MutantLoadError (mutation broke loading)" do
+      allow_any_instance_of(ActiveMutator::ClosureReload)
+        .to receive(:call).and_raise(ActiveMutator::ClosureReload::MutantLoadError, "boom")
+      run_worker
+      expect(emitted).to eq("status" => "killed", "details" => "mutated class failed to load: boom")
+    end
   end
 end

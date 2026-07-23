@@ -9,7 +9,7 @@ RSpec.describe ActiveMutator::Runner do
       root: "/project", preload_helper: nil, serial_patterns: ["spec/system/", "spec/features/"],
       browser_boot_seconds: 15.0, accept_survivors: false, exclude: [],
       max_mutants: nil, debug_plan: false, fail_at: nil, adaptive_timeout: true,
-      operator_paths: []
+      operators: [], class_level: true, class_level_closure_cap: 10
     )
   end
 
@@ -174,6 +174,17 @@ RSpec.describe ActiveMutator::Runner do
         .with(hash_including(calibrators: nil))
         .and_return(instance_double(ActiveMutator::Scheduler, run: []))
       runner.call
+    end
+
+    it "sets ClosureReload.cap from config before scheduling (forks inherit it)" do
+      original_cap = ActiveMutator::ClosureReload.cap
+      runner = stub_runner(config.with(class_level_closure_cap: 42))
+      allow(ActiveMutator::Scheduler).to receive(:new)
+        .and_return(instance_double(ActiveMutator::Scheduler, run: []))
+      runner.call
+      expect(ActiveMutator::ClosureReload.cap).to eq(42)
+    ensure
+      ActiveMutator::ClosureReload.cap = original_cap
     end
   end
 
@@ -598,6 +609,40 @@ RSpec.describe ActiveMutator::Runner do
         expect(runner.send(:discover_subjects).map(&:name)).to eq(["Keep#a"])
       end
     end
+
+    it "includes class-body subjects when class_level is enabled" do
+      Dir.mktmpdir do |dir|
+        FileUtils.mkdir_p(File.join(dir, "lib"))
+        File.write(File.join(dir, "lib", "keep.rb"), "class Keep\n  X = 1\n  def a = 2\nend\n")
+
+        runner = described_class.new(config.with(root: dir, class_level: true))
+        subjects = runner.send(:discover_subjects)
+        expect(subjects.map(&:kind)).to contain_exactly(:class_body, :instance)
+      end
+    end
+
+    it "excludes class-body subjects when class_level is disabled" do
+      Dir.mktmpdir do |dir|
+        FileUtils.mkdir_p(File.join(dir, "lib"))
+        File.write(File.join(dir, "lib", "keep.rb"), "class Keep\n  X = 1\n  def a = 2\nend\n")
+
+        runner = described_class.new(config.with(root: dir, class_level: false))
+        subjects = runner.send(:discover_subjects)
+        expect(subjects.map(&:kind)).to eq([:instance])
+        expect(subjects.map(&:name)).to eq(["Keep#a"])
+      end
+    end
+
+    it "sorts discovered files by path so subject order is deterministic" do
+      Dir.mktmpdir do |dir|
+        FileUtils.mkdir_p(File.join(dir, "lib"))
+        File.write(File.join(dir, "lib", "z_last.rb"), "class ZLast; def a; 1; end; end")
+        File.write(File.join(dir, "lib", "a_first.rb"), "class AFirst; def a; 1; end; end")
+
+        runner = described_class.new(config.with(root: dir))
+        expect(runner.send(:discover_subjects).map(&:name)).to eq(["AFirst#a", "ZLast#a"])
+      end
+    end
   end
 
   describe "#call" do
@@ -892,6 +937,77 @@ RSpec.describe ActiveMutator::Runner do
       plan = JSON.parse(out.string)
       expect(plan["planned"]).not_to be_empty
       expect(reporter.summary_results).to be_nil
+    end
+  end
+
+  describe "plan_work with class-body mutants" do
+    def class_body_mutation(file)
+      subject = ActiveMutator::Subject.new(
+        name: "User (class body)", file: file,
+        byte_range: 0...30, line_range: 1..3,
+        constant_scope: "User", kind: :class_body, sclass: false
+      )
+      ActiveMutator::Mutation.new(
+        subject: subject,
+        edit: ActiveMutator::Edit.new(range: 14...18, replacement: "false", description: "replace `true` with `false`", operator: "Literal"),
+        original_snippet: "true", line: 2,
+        mutated_file_source: "x", mutated_def_source: "x", mutated_def_line: 1
+      )
+    end
+
+    it "plans against file-covering examples plus the convention spec file" do
+      root = "/proj"
+      file = "/proj/app/models/user.rb"
+      map = instance_double(ActiveMutator::CoverageMap)
+      allow(map).to receive(:examples_covering_file).with(file)
+        .and_return(["./spec/controllers/a_spec.rb[1:1]", "./spec/workers/z_spec.rb[1:1]"])
+      allow(map).to receive(:examples_for_spec_file).with("spec/models/user_spec.rb").and_return(["./spec/models/user_spec.rb[1:1]"])
+      allow(map).to receive(:time_for).and_return(0.1)
+      runner = described_class.new(config.with(root: root))
+      items, pre = runner.plan_work([class_body_mutation(file)], map)
+      expect(pre).to be_empty
+      # Union of both sets, sorted so scheduling is deterministic. The
+      # convention-spec example sorts between the two file-covering ones,
+      # so the ordering distinguishes sort from reverse.
+      expect(items.first.example_ids).to eq(
+        ["./spec/controllers/a_spec.rb[1:1]", "./spec/models/user_spec.rb[1:1]", "./spec/workers/z_spec.rb[1:1]"]
+      )
+    end
+
+    it "strips a trailing slash on the root when deriving the convention spec" do
+      root = "/proj/"
+      file = "/proj/app/models/user.rb"
+      map = instance_double(ActiveMutator::CoverageMap)
+      allow(map).to receive(:examples_covering_file).with(file).and_return([])
+      allow(map).to receive(:examples_for_spec_file).with("spec/models/user_spec.rb").and_return(["./spec/models/user_spec.rb[1:1]"])
+      allow(map).to receive(:time_for).and_return(0.1)
+      runner = described_class.new(config.with(root: root))
+      items, = runner.plan_work([class_body_mutation(file)], map)
+      expect(items.first.example_ids).to eq(["./spec/models/user_spec.rb[1:1]"])
+    end
+
+    it "strips the first path segment for non-app/lib files when deriving the convention spec" do
+      root = "/proj"
+      file = "/proj/services/thing.rb"
+      map = instance_double(ActiveMutator::CoverageMap)
+      allow(map).to receive(:examples_covering_file).with(file).and_return([])
+      allow(map).to receive(:examples_for_spec_file).with("spec/thing_spec.rb").and_return(["./spec/thing_spec.rb[1:1]"])
+      allow(map).to receive(:time_for).and_return(0.1)
+      runner = described_class.new(config.with(root: root))
+      items, = runner.plan_work([class_body_mutation(file)], map)
+      expect(items.first.example_ids).to eq(["./spec/thing_spec.rb[1:1]"])
+    end
+
+    it "marks a class-body mutant uncovered when both sets are empty" do
+      root = "/proj"
+      file = "/proj/lib/thing.rb"
+      map = instance_double(ActiveMutator::CoverageMap)
+      allow(map).to receive(:examples_covering_file).with(file).and_return([])
+      allow(map).to receive(:examples_for_spec_file).with("spec/thing_spec.rb").and_return([])
+      runner = described_class.new(config.with(root: root))
+      items, pre = runner.plan_work([class_body_mutation(file)], map)
+      expect(items).to be_empty
+      expect(pre.map(&:status)).to eq([:uncovered])
     end
   end
 end

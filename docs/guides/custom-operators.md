@@ -9,7 +9,8 @@ Subclass `ActiveMutator::Operators::Base`. Subclassing IS registration — the b
 ```ruby
 # ops/nil_guard.rb
 class NilGuard < ActiveMutator::Operators::Base
-  # Called for every Prism AST node inside each mutated method body.
+  # Called for every Prism AST node inside each mutated method body
+  # (and each class-level node of a class-body subject).
   # Return an array of edits (or [] when the node doesn't apply).
   def edits(node)
     return [] unless node.is_a?(Prism::CallNode) && node.name == :fetch
@@ -25,6 +26,8 @@ Helpers available inside an operator:
 - `loc_range(loc)` — convert a Prism location to that byte range.
 
 Every mutated file is re-parsed before use; an edit producing invalid Ruby is dropped and counted, never run.
+
+Custom operators automatically apply to class-body nodes too (macro arguments, constants, scope/DSL lambdas on Zeitwerk-shaped files), not just method bodies. There is no API change: the engine passes those class-level nodes to `#edits(node)` the same way it passes method-body nodes.
 
 ## Loading
 

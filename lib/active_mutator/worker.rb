@@ -2,12 +2,22 @@ require "json"
 require "set"
 
 module ActiveMutator
-  # Runs INSIDE a fork. Order is critical: RSpec's setup phase loads the spec
-  # files, whose spec_helper/rails_helper loads the application. Only THEN
-  # can the mutation be inserted over the loaded original. Insert-first would
-  # NameError on any project not preloaded in the parent (all non-Rails
-  # projects), and loading app code after insertion would silently restore
-  # the original method.
+  # Runs INSIDE a fork. Order is critical: require the subject file, insert
+  # the mutation, THEN let RSpec's setup phase load the spec files. Inserting
+  # before spec-load matters because `RSpec.describe SomeClass` binds
+  # `metadata[:described_class]` to the constant AT LOAD TIME: a class-body
+  # mutant reloads the constant to a NEW object via ClosureReload, so a group
+  # loaded first would keep the pre-mutation object and falsely survive.
+  # Insert first and every group binds to the mutated object. (Def mutants
+  # class_eval the live class in place, same object either way, but share the
+  # ordering harmlessly.)
+  #
+  # The explicit `require` of the subject file guarantees the target constant
+  # exists before insertion regardless of preload: preloaded projects
+  # (Rails/Zeitwerk, or a preloaded spec helper) already have it in
+  # $LOADED_FEATURES so it's a no-op, while non-preloaded projects (plain
+  # gems whose spec files require the lib themselves, or --no-preload-helper)
+  # get it loaded here instead of relying on spec-load to define it.
   class Worker
     def self.run(mutation, example_ids, writer)
       new(mutation, example_ids, writer).run
@@ -23,19 +33,35 @@ module ActiveMutator
       require "rspec/core"
       devnull = File.open(File::NULL, "w")
       runner = RSpec::Core::Runner.new(RSpec::Core::ConfigurationOptions.new(@example_ids))
-      runner.setup(devnull, devnull)   # loads spec files -> loads the app
+      require @mutation.subject.file   # no-op if already loaded; guarantees the constant exists
+      insert_mutation                  # BEFORE setup: groups bind described_class to the mutated object
+      runner.setup(devnull, devnull)   # loads spec files
       # One failure kills the mutant; running the rest of the covering set
       # is pure waste inside the fork.
       RSpec.configuration.fail_fast = 1
-      Inserter.new.insert(@mutation)   # now the target constant exists
       after_fork_hygiene
       code = runner.run_specs(covering_groups)
       emit(code.zero? ? "survived" : "killed")
+    rescue ClosureReload::Skip => e
+      emit("skipped", details: e.message)
+    rescue ClosureReload::MutantLoadError => e
+      # The mutation made the class unloadable; a real suite would fail on it.
+      emit("killed", details: "mutated class failed to load: #{e.message}")
     rescue StandardError, ScriptError => e
       emit("error", details: "#{e.class}: #{e.message}")
     end
 
     private
+
+    # Def mutants class_eval over the live constant; class-body mutants
+    # cannot (macros accumulate) and go through whole-file closure reload.
+    def insert_mutation
+      if @mutation.subject.class_body?
+        ClosureReload.new(@mutation.subject, @mutation.mutated_file_source).call
+      else
+        Inserter.new.insert(@mutation)
+      end
+    end
 
     def after_fork_hygiene
       srand

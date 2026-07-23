@@ -38,9 +38,9 @@ RSpec.describe ActiveMutator::ConfigFile do
     )
   end
 
-  it "maps the operators key to operator_paths" do
+  it "loads the operators key" do
     write_config("operators:\n  - ops/custom.rb\n")
-    expect(described_class.load(root)).to eq(operator_paths: ["ops/custom.rb"])
+    expect(described_class.load(root)).to eq(operators: ["ops/custom.rb"])
   end
 
   it "accepts adaptive_timeout: false" do
@@ -163,5 +163,35 @@ RSpec.describe ActiveMutator::ConfigFile do
   it "treats an empty file as no config" do
     write_config("")
     expect(described_class.load(root)).to eq({})
+  end
+
+  it "accepts class_level and class_level_closure_cap" do
+    write_config("class_level: false\nclass_level_closure_cap: 25\n")
+    expect(described_class.load(root)).to eq(class_level: false, class_level_closure_cap: 25)
+  end
+
+  it "rejects a non-positive class_level_closure_cap" do
+    write_config("class_level_closure_cap: 0\n")
+    expect { described_class.load(root) }.to raise_error(ActiveMutator::Error, /class_level_closure_cap must be >= 1/)
+  end
+
+  it "accepts a class_level_closure_cap of exactly 1 (the boundary)" do
+    write_config("class_level_closure_cap: 1\n")
+    expect(described_class.load(root)).to eq(class_level_closure_cap: 1)
+  end
+
+  it "rejects a non-integer class_level_closure_cap" do
+    write_config("class_level_closure_cap: 1.5\n")
+    expect { described_class.load(root) }.to raise_error(ActiveMutator::Error, /class_level_closure_cap must be an integer/)
+  end
+
+  it "rejects a string_list containing a non-string" do
+    write_config("requires:\n  - ok.rb\n  - 1\n")
+    expect { described_class.load(root) }.to raise_error(ActiveMutator::Error, /requires must be a list of strings/)
+  end
+
+  it "rejects a non-boolean class_level" do
+    write_config("class_level: 1\n")
+    expect { described_class.load(root) }.to raise_error(ActiveMutator::Error, /class_level must be true or false/)
   end
 end
