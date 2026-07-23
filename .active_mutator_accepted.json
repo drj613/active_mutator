@@ -299,5 +299,33 @@
     "description": "delete `private`",
     "original_snippet": "private",
     "ordinal": 0
+  },
+  {
+    "file": "lib/active_mutator/closure_reload.rb",
+    "subject": "ActiveMutator::ClosureReload (class body)",
+    "description": "delete `private`",
+    "original_snippet": "private",
+    "ordinal": 0
+  },
+  {
+    "file": "lib/active_mutator/closure_reload.rb",
+    "subject": "ActiveMutator::ClosureReload#carries?",
+    "description": "delete `false`",
+    "original_snippet": "false",
+    "ordinal": 0
+  },
+  {
+    "file": "lib/active_mutator/engine.rb",
+    "subject": "ActiveMutator::Engine (class body)",
+    "description": "delete `private`",
+    "original_snippet": "private",
+    "ordinal": 0
+  },
+  {
+    "file": "lib/active_mutator/subject_finder.rb",
+    "subject": "ActiveMutator::SubjectFinder (class body)",
+    "description": "delete `private`",
+    "original_snippet": "private",
+    "ordinal": 0
   }
 ]
