@@ -55,7 +55,10 @@ RSpec.describe ActiveMutator::Worker do
     expect(emitted).to eq("status" => "survived", "details" => nil)
   end
 
-  it "requires the subject file, then inserts, all BEFORE loading the spec files" do
+  it "loads the spec files BEFORE requiring the subject and inserting (def mutants)" do
+    # A def mutant class_evals the live method, so it must be the last thing to
+    # touch it: loading specs/app first stops a reopened-class file from
+    # redefining the method back after insertion (false survivor).
     calls = []
     allow_any_instance_of(described_class).to receive(:require) do |_, f|
       calls << :require_subject if f == mutation.subject.file
@@ -67,7 +70,7 @@ RSpec.describe ActiveMutator::Worker do
       0
     end
     run_worker
-    expect(calls).to eq(%i[require_subject insert setup run_specs])
+    expect(calls).to eq(%i[setup require_subject insert run_specs])
   end
 
   it "emits error when insertion raises" do

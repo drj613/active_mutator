@@ -63,6 +63,24 @@ RSpec.describe ActiveMutator::Runner do
     expect(results.first.details).to be_nil
   end
 
+  it "keeps the survived verdict when escalation is inconclusive (timeout, not a kill)" do
+    mutation = mutation_for(user_file)
+    map = instance_double(ActiveMutator::CoverageMap)
+    allow(map).to receive(:examples_for_spec_file).with("spec/requests/signup_spec.rb")
+                                                  .and_return(["./spec/requests/signup_spec.rb[1:1]"])
+    allow(map).to receive(:time_for).and_return(0.1)
+    # Phase 2 times out on the wider spec set. A :timeout counts as detected in
+    # exit_code, so blindly taking it would report a real survivor as killed.
+    scheduler = instance_double(ActiveMutator::Scheduler, run: [result(mutation, :timeout)])
+
+    results = runner.escalate_class_body_survivors(
+      [result(mutation, :survived)], scheduler, map,
+      phase1_ids: { mutation => ["./spec/models/user_spec.rb[1:1]"] }
+    )
+    expect(results.first.status).to eq(:survived)
+    expect(results.first.details).to be_nil
+  end
+
   it "annotates a mutant that survives escalation" do
     mutation = mutation_for(user_file)
     map = instance_double(ActiveMutator::CoverageMap)

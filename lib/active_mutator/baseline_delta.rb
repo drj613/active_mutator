@@ -84,21 +84,13 @@ module ActiveMutator
       abs = File.join(root, rel)
       return [] unless File.exist?(abs)
 
-      constants = DefinedConstants.in_source(File.read(abs))
-      return [] if constants.empty?
+      pattern = constant_reference_pattern(File.read(abs))
+      return [] unless pattern
 
       all_specs = spec_contents.keys
 
       covering_specs = coverage_map.examples_covering_file(abs)
                                    .map { |id| spec_file_of(id) }.to_a.uniq
-      # Escaping is required: dynamic-namespace class definitions (e.g.
-      # `class (a)::Baz`, `class foo.bar::Baz`) make constant_path.slice carry
-      # regex metachars. Unescaped, "(a)::Baz" would match the literal text
-      # "a::Baz" — a false candidate.
-      # TODO(#11, Task 10 residual gap): a top-level `class ::Foo` yields the
-      # slice "::Foo", and /\b::Foo\b/ can never match (no word boundary
-      # before ":"), so such files are silently unscanned.
-      pattern = /\b(?:#{constants.map { |c| Regexp.escape(c) }.join("|")})\b/
       candidates = all_specs.filter_map do |spec_abs|
         spec_rel = spec_abs.delete_prefix(root).delete_prefix("/")
         next if covering_specs.include?(spec_rel)
@@ -118,6 +110,25 @@ module ActiveMutator
 
     def self.spec_file_of(example_id)
       example_id.sub(%r{\A\./}, "").sub(/\[.*\]\z/, "")
+    end
+
+    # Regexp matching any textual reference to a constant DEFINED in `source`,
+    # or nil when the source defines none. Shared by newly_covering_candidates
+    # and Runner's phase-2 escalation so the escaping/word-boundary rules live
+    # in one place.
+    #
+    # Escaping is required: dynamic-namespace class definitions (e.g.
+    # `class (a)::Baz`, `class foo.bar::Baz`) make constant_path.slice carry
+    # regex metachars. Unescaped, "(a)::Baz" would match the literal text
+    # "a::Baz" — a false candidate.
+    # TODO(#11, Task 10 residual gap): a top-level `class ::Foo` yields the
+    # slice "::Foo", and /\b::Foo\b/ can never match (no word boundary before
+    # ":"), so such files are silently unscanned.
+    def self.constant_reference_pattern(source)
+      constants = DefinedConstants.in_source(source)
+      return nil if constants.empty?
+
+      /\b(?:#{constants.map { |c| Regexp.escape(c) }.join("|")})\b/
     end
   end
 end

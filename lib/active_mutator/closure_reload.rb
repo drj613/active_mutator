@@ -111,8 +111,9 @@ module ActiveMutator
     # everything carrying the target already yields every transitive attacher:
     # an attacher-of-an-attacher (a subclass of an includer, an includer of an
     # includer) carries the target directly too. No BFS/dedup is needed — the
-    # dependency-correct re-eval order is imposed later by topological sort,
-    # not by discovery order.
+    # re-eval order is imposed later by pinning the target first and sorting the
+    # rest by ancestry depth (see #call), not by discovery order and not by a
+    # full topological sort (deliberately not attempted; see class docstring).
     def compute_closure(target)
       [target, *attachers(target)]
     end

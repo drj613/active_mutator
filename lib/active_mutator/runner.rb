@@ -36,7 +36,8 @@ module ActiveMutator
       scheduler = Scheduler.new(jobs: @config.jobs, on_result: @reporter.method(:on_result),
                                 calibrators: calibrators)
       results = scheduler.run(items) + pre_results
-      results = escalate_class_body_survivors(results, scheduler, map, phase1_ids: phase1_ids)
+      # Phase 2 runs on its own scheduler (built lazily inside), so pass nil.
+      results = escalate_class_body_survivors(results, nil, map, phase1_ids: phase1_ids)
 
       accept_survivors!(ledger, results, fingerprints, scanned_files) if @config.accept_survivors
 
@@ -70,6 +71,13 @@ module ActiveMutator
     # A class-body survivor is only DECLARED after every spec file that
     # references the constant has had its shot: re-enqueue against the
     # referencing files phase 1 didn't run, and take the escalated verdict.
+    #
+    # `scheduler` is injectable for unit tests; in the normal run it is nil and
+    # a dedicated escalation scheduler is built lazily (only when there is
+    # phase-2 work) with NO on_result — escalation is a refinement pass, and
+    # reporting through the live callback would print a second status char for a
+    # mutant already streamed in phase 1. The final summary reflects the
+    # escalated verdicts regardless.
     def escalate_class_body_survivors(results, scheduler, map, phase1_ids:)
       candidates = results.select { |r| r.status == :survived && r.mutation.subject.class_body? }
       # Perf gate: skip reading the whole spec suite into memory in the common
@@ -79,15 +87,23 @@ module ActiveMutator
       return results if candidates.empty?
 
       spec_contents = Dir[File.join(@config.root, "spec/**/*_spec.rb")].to_h { |f| [f, File.read(f)] }
+      patterns = {} # subject file => constant-reference pattern (parsed once per file)
       items = {}
       candidates.each do |r|
-        ids = escalation_examples(r.mutation, map, spec_contents, phase1_ids.fetch(r.mutation, []))
+        file = r.mutation.subject.file
+        pattern = patterns.fetch(file) do
+          patterns[file] = BaselineDelta.constant_reference_pattern(File.read(file))
+        end
+        next unless pattern
+
+        ids = escalation_examples(map, spec_contents, phase1_ids.fetch(r.mutation, []), pattern)
         next if ids.empty?
 
         items[r.mutation] = build_work_item(r.mutation, ids, map)
       end
       return results if items.empty?
 
+      scheduler ||= Scheduler.new(jobs: @config.jobs)
       escalated = scheduler.run(items.values).to_h { |res| [res.mutation, res] }
       results.map do |r|
         # A replacement only ever exists for a survived candidate (items is
@@ -95,11 +111,18 @@ module ActiveMutator
         replacement = escalated[r.mutation]
         next r unless replacement
 
-        if replacement.status == :survived
+        case replacement.status
+        when :killed
+          replacement
+        when :survived
           extra = items[r.mutation].example_ids.map { |id| BaselineDelta.spec_file_of(id) }.uniq.size
           replacement.with(details: "escalated (+#{extra} spec files)")
         else
-          replacement
+          # A timeout/error/skip in phase 2 did NOT prove a kill — the mutant
+          # already survived phase 1, so keep that verdict rather than letting
+          # an inconclusive escalation inflate the score (a :timeout counts as
+          # detected in exit_code/score).
+          r
         end
       end
     end
@@ -127,9 +150,10 @@ module ActiveMutator
                    timeout: timeout, lane: lane, variable: variable)
     end
 
-    # Spec files that textually reference a constant the subject's file
-    # defines (same approach as BaselineDelta.newly_covering_candidates),
-    # minus everything phase 1 already ran; returned as example ids.
+    # Spec files that textually match `pattern` (a constant-reference pattern
+    # for the subject's file, built via BaselineDelta.constant_reference_pattern
+    # so the escaping/word-boundary rules stay shared), minus everything phase 1
+    # already ran; returned as example ids.
     #
     # Two deliberate choices: (a) matching is TEXTUAL, so a constant named in a
     # comment or string still counts — intentional, since the worst case is a
@@ -137,11 +161,7 @@ module ActiveMutator
     # BaselineDelta.newly_covering_candidates there is intentionally NO fan-out
     # ceiling here — a class-body survivor gets every referencing spec its shot
     # before being declared.
-    def escalation_examples(mutation, map, spec_contents, phase1_example_ids)
-      constants = DefinedConstants.in_source(File.read(mutation.subject.file))
-      return [] if constants.empty?
-
-      pattern = /\b(?:#{constants.map { |c| Regexp.escape(c) }.join("|")})\b/
+    def escalation_examples(map, spec_contents, phase1_example_ids, pattern)
       phase1_files = phase1_example_ids.map { |id| BaselineDelta.spec_file_of(id) }.uniq
       spec_contents.filter_map do |abs, content|
         rel = abs.delete_prefix(@config.root.chomp("/") + "/")
@@ -303,8 +323,11 @@ module ActiveMutator
     # MAINTENANCE: any future flag that narrows the mutant set below "every
     # subject in the scanned files" MUST be added to this nil-trigger list,
     # or scoped accept runs will clobber out-of-scope ledger entries (#24).
+    # --no-class-level drops every class_body subject (discover_subjects), so a
+    # file's class-body fingerprint is absent even though the file is scanned;
+    # without this guard its accepted ledger entry looks stale and gets pruned.
     def prune_scope(subjects)
-      return nil if @config.subject_filter || @config.since || @config.max_mutants
+      return nil if @config.subject_filter || @config.since || @config.max_mutants || !@config.class_level
 
       subjects.map { |s| s.file.delete_prefix("#{@config.root}/") }.uniq
     end

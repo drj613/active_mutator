@@ -919,6 +919,16 @@ RSpec.describe ActiveMutator::Runner do
         expect(ledger).to have_received(:accept!).with(anything, anything, scanned_files: nil)
         expect(ledger).to have_received(:stale_entries).with(anything, scanned_files: nil)
       end
+
+      # #24: --no-class-level drops class_body subjects, so the file's class-body
+      # fingerprint is absent even though the file is scanned. Pruning would
+      # then delete accepted class-body entries as stale.
+      it "passes scanned_files: nil when --no-class-level narrows the subject set" do
+        surviving_scheduler!
+        call_runner(accept_survivors: true, class_level: false)
+        expect(ledger).to have_received(:accept!).with(anything, anything, scanned_files: nil)
+        expect(ledger).to have_received(:stale_entries).with(anything, scanned_files: nil)
+      end
     end
 
     it "prints the plan and skips execution with --debug-plan" do

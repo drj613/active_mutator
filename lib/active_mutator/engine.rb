@@ -10,7 +10,7 @@ module ActiveMutator
 
       return analyze_class_body(subject, source, result) if subject.class_body?
 
-      def_node = find_def(result.value, subject.byte_range.begin)
+      def_node = find_node(result.value, subject.byte_range.begin, Prism::DefNode)
       raise Error, "subject not found: #{subject.name}" unless def_node
 
       invalid = 0
@@ -25,7 +25,7 @@ module ActiveMutator
     private
 
     def analyze_class_body(subject, source, result)
-      class_node = find_class(result.value, subject.byte_range.begin)
+      class_node = find_node(result.value, subject.byte_range.begin, Prism::ClassNode, Prism::ModuleNode)
       raise Error, "subject not found: #{subject.name}" unless class_node
 
       invalid = 0
@@ -37,14 +37,14 @@ module ActiveMutator
       Analysis.new(mutations: mutations, invalid_count: invalid)
     end
 
-    def find_class(node, start_offset)
-      if (node.is_a?(Prism::ClassNode) || node.is_a?(Prism::ModuleNode)) &&
-         node.location.start_offset == start_offset
-        return node
-      end
+    # Depth-first search for the node of one of `types` whose byte range starts
+    # at `start_offset`. Def-level and class-body subject location share this;
+    # only the node type(s) differ (DefNode vs Class/ModuleNode).
+    def find_node(node, start_offset, *types)
+      return node if types.any? { |t| node.is_a?(t) } && node.location.start_offset == start_offset
 
       node.compact_child_nodes.each do |child|
-        found = find_class(child, start_offset)
+        found = find_node(child, start_offset, *types)
         return found if found
       end
       nil
@@ -120,7 +120,7 @@ module ActiveMutator
       mutated = Splicer.apply(source, [edit])
       parsed = Prism.parse(mutated)
       return [nil, false] unless parsed.success?
-      return [nil, false] unless find_class(parsed.value, subject.byte_range.begin)
+      return [nil, false] unless find_node(parsed.value, subject.byte_range.begin, Prism::ClassNode, Prism::ModuleNode)
 
       [Mutation.new(
         subject: subject,
@@ -131,16 +131,6 @@ module ActiveMutator
         mutated_def_source: mutated,
         mutated_def_line: 1
       ), true]
-    end
-
-    def find_def(node, start_offset)
-      return node if node.is_a?(Prism::DefNode) && node.location.start_offset == start_offset
-
-      node.compact_child_nodes.each do |child|
-        found = find_def(child, start_offset)
-        return found if found
-      end
-      nil
     end
 
     def collect_edits(def_node)
@@ -182,7 +172,7 @@ module ActiveMutator
       parsed = Prism.parse(mutated)
       return [nil, false] unless parsed.success?
 
-      new_def = find_def(parsed.value, subject.byte_range.begin)
+      new_def = find_node(parsed.value, subject.byte_range.begin, Prism::DefNode)
       return [nil, false] unless new_def
 
       [Mutation.new(
