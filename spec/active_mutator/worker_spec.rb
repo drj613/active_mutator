@@ -178,13 +178,16 @@ RSpec.describe ActiveMutator::Worker do
     # at spec-LOAD time. A class-body mutant reloads the constant to a NEW
     # object, so the reload MUST happen before setup loads the groups, or they
     # bind the pre-mutation object and falsely survive.
-    it "reloads the class BEFORE loading the spec files" do
+    it "requires the subject file, then reloads, all BEFORE loading the spec files" do
       allow(rspec_runner).to receive(:run_specs).and_return(0)
       calls = []
+      allow_any_instance_of(described_class).to receive(:require) do |_, f|
+        calls << :require_subject if f == mutation.subject.file
+      end
       allow_any_instance_of(ActiveMutator::ClosureReload).to receive(:call) { calls << :reload }
       allow(rspec_runner).to receive(:setup) { calls << :setup }
       run_worker
-      expect(calls).to eq(%i[reload setup])
+      expect(calls).to eq(%i[require_subject reload setup])
     end
 
     it "routes class-body mutants through ClosureReload, not the Inserter" do
