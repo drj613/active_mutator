@@ -263,6 +263,7 @@ survivors show inline on the PR diff. Pairs with the CI recipe:
 | `--[no-]adaptive-timeout` | on | scale timeout budgets from observed worker wall times (median utilization, grow-only, clamped 1x–4x; `--timeout-factor`/`--timeout-floor` set the starting budget) |
 | `--require FILE` | none | preload files (repeatable) |
 | `--operator FILE` | none | load a custom operator file before analysis (repeatable) |
+| `--[no-]class-level` | on | mutate class-level code (macros, constants, DSL/scope lambdas) via class-body subjects |
 | `--fail-at SCORE` | none (strict) | exit 0 if score >= SCORE even with survivors (opt-in relaxation for gradual adoption; 0 = report-only) |
 
 `--debug-plan` prints the planned mutant list as one JSON document
@@ -287,7 +288,10 @@ lists; the first `--serial-pattern` replaces them). Recognized keys:
 `requires`, `operators` (custom operator files, loaded before analysis; see
 [Custom operators](docs/guides/custom-operators.md)),
 `preload_helper` (a path, or `false` to skip preload),
-`adaptive_timeout` (`true`/`false`).
+`adaptive_timeout` (`true`/`false`),
+`class_level` (`true`/`false`, default `true` — mutate class-level code),
+`class_level_closure_cap` (integer, default `10` — max constants a
+class-body mutant may reload before it is `skipped`).
 Unknown keys and wrong types are errors, not silent no-ops.
 
 ```yaml
@@ -300,19 +304,66 @@ serial_patterns:
 fail_at: 90   # legacy suite: gate on score instead of zero-survivors
 ```
 
-## Known limits (v1.1)
+## Class-level mutation
 
-Method bodies only (no class-macro/constant mutation). RSpec only.
-Plain heredoc bodies ARE mutated (emptied); interpolated heredocs are
-skipped. `class << self` bodies are mutated as singleton subjects
-(`class << obj` and top-level `class << self` are skipped). Nested defs
-mutate as part of the enclosing method's body — they get no subject of
-their own (a directly-inserted mutant would be reverted whenever the
-outer method re-runs the `def`). The incremental baseline recovers the residual blind spot —
-constant-reference detection handles the common case since 0.2, and a few
-residual cases (pure indirection, partially-covering files, leaf-only or
-wrapper-only references, `class ::Foo`, `Data.define`/`Struct.new` value
-objects) are caught by nightly `--force-baseline`.
+Class-level code — macros (`validates`, `scope`, `has_many`), constants,
+and DSL/scope lambdas — IS mutated. Each Zeitwerk-shaped file gets a
+`… (class body)` subject alongside its method subjects, and the same
+operator set runs over its class-level statements. Because re-running a
+macro *accumulates* rather than replaces (calling `validates` twice adds a
+second validator), a class-body mutant can't be inserted with `class_eval`
+the way a `def` mutant is. Instead active_mutator removes the target
+constant and re-evaluates the whole mutated file, reloading anything
+attached to it (includers, subclasses, extenders) in dependency order. See
+[`docs/guides/how-it-works.md`](docs/guides/how-it-works.md) for the full
+closure-reload pipeline.
+
+Disable it with `--no-class-level` (or `class_level: false` in the config
+file). A class-body mutant whose closure can't be reloaded faithfully — the
+closure exceeds `class_level_closure_cap` (default `10`), the constant was
+reopened elsewhere, or an attacher is anonymous/native — is reported
+`skipped` (progress char `-`): listed but **not counted in the score**,
+because a mutant we can't insert faithfully must not be called survived or
+killed.
+
+## Known limits
+
+Method bodies **and** Zeitwerk-shaped class bodies are mutated; the
+remaining limits are:
+
+- **Class-body mutation requires a Zeitwerk-shaped file** — exactly one
+  top-level class/module per file. Multi-constant files and core-class
+  monkey-patches/reopens are not class-body-mutated (issue #32). Their
+  method bodies still are.
+- **Most code inside blocks is not mutated.** `ActiveSupport::Concern` DSL
+  blocks (`included`/`prepended`/`class_methods do … end`) ARE mutated — their
+  bodies re-run as class-level code in the includer (issue #31). Every other
+  block (`has_many :x do … end` and any `do … end`/`{ … }` body) is pruned to
+  avoid false survivors from mutating code whose run-time context is unknown.
+- **Constants captured by value go stale.** A reference that holds the
+  target *by value* rather than by ancestry — an alias (`ALIAS = SomeClass`),
+  a registry the class was pushed into, a memoized instance, a class
+  variable captured at load — keeps pointing at the pre-reload object after
+  the closure reload. Such stale references can produce false survivors.
+- **Whole-file re-eval re-runs class-body side effects.** The reload
+  re-evaluates the target and every attacher's class body, so non-idempotent
+  load-time side effects (global self-registration, descendant tracking) run
+  twice — which can double or mask a count a spec asserts on.
+- **`refine`-based modules are not discovered or reloaded.** Refinements
+  are anonymous and don't appear in normal `ancestors`.
+- **RSpec only.** Test selection, worker setup, and the world-group filter
+  are all RSpec-API-shaped.
+- **Method-body scope details:** plain heredoc bodies ARE mutated (emptied);
+  interpolated heredocs are skipped. `class << self` bodies are mutated as
+  singleton subjects (`class << obj` and top-level `class << self` are
+  skipped). Nested defs mutate as part of the enclosing method's body — they
+  get no subject of their own (a directly-inserted mutant would be reverted
+  whenever the outer method re-runs the `def`).
+- **The incremental baseline's residual blind spot:** constant-reference
+  detection handles the common case since 0.2; a few residual cases (pure
+  indirection, partially-covering files, leaf-only or wrapper-only
+  references, `class ::Foo`, `Data.define`/`Struct.new` value objects) are
+  caught by nightly `--force-baseline`.
 
 ## Guides
 

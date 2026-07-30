@@ -4,6 +4,62 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [0.2.0] - 2026-07-20
+
+### Added
+
+- **Operator plugin API**: define custom operators by subclassing
+  `ActiveMutator::Operators::Base` (subclassing is registration), loaded
+  via the repeatable `--operator FILE` flag or the `operators:` config-file
+  key. Relative paths resolve against the project root. See
+  `docs/guides/custom-operators.md`. The `Base` helpers (`edit`,
+  `loc_range`) and `Edit` members are semver-stable from this release.
+- **Heredoc mutation**: plain heredocs with a nonempty (dedented) body get
+  an "empty heredoc body" mutant. Interpolated heredocs are untouched.
+- **`class << self` mutation**: defs inside `class << self` within a
+  constant scope are now discovered as singleton subjects and re-inserted
+  through the singleton class. `class << obj` and top-level `class << self`
+  stay skipped, as do classes/modules declared inside `class << self`
+  (their constants live on the singleton class and are unreachable by
+  name).
+- **Nested def mutation**: bodies of defs nested inside another def are
+  mutated under the outer subject (a nested def re-executes on every outer
+  call, so a separate subject would produce phantom survivors).
+- **Broader CallSwap pack**: `all?` → `any?`, `take` ↔ `drop`,
+  `min_by` ↔ `max_by`, `sort` → `reverse`, `detect`/`find` → `first`.
+- **Project config file**: `.active_mutator.yml` at the project root,
+  layered under CLI flags (flags win).
+- `--fail-at SCORE`: opt-in gate — exit 0 when the mutation score meets
+  the threshold even with survivors.
+- **Adaptive timeout calibration** (on by default, `--no-adaptive-timeout`
+  to disable): grow-only budget scaling (1x–4x) from observed worker wall
+  times, so parallel-load slowdown doesn't turn honest kills into false
+  timeouts.
+- Delta refresh now re-runs non-covering spec files that reference a
+  changed file's constants, closing the newly-covering-example blind spot.
+- `--format stryker-json` (mutation-testing-report-schema v2) and
+  `--format github` (PR annotations for survivors).
+- Per-operator equivalent-rate metric in run summaries.
+- Subject expression language for `--subject` (`Foo::Bar#baz`, `Foo::Bar`,
+  `Foo::Bar*`, `Foo::Bar#*`).
+- `--exclude PAT` glob filtering (gitignore-like recursive semantics),
+  `--max-mutants N` deterministic sampling, and `--debug-plan` dry run.
+- Per-method opt-out via a `# active_mutator:skip` comment on the line
+  above a def.
+- Benchmark harness (`bin/bench`, `bin/bench-diff`) with a cross-run
+  Stryker report differ.
+
+### Fixed
+
+- Positional path arguments: nonexistent paths error out, non-Ruby file
+  args are rejected, overlapping path args are deduplicated.
+- Scoped `--accept-survivors` no longer clobbers out-of-scope ledger
+  entries; accepted fingerprints referencing missing files warn.
+- Covering-example lookup widened to the subject's whole line range.
+- Scheduler tolerates non-Hash JSON payloads from workers.
+- Unloadable operator files and operators raising during analysis fail
+  with attributed, friendly errors instead of raw stack traces.
+
 ## [0.1.1] - 2026-07-13
 
 ### Fixed

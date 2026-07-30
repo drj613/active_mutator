@@ -5,5 +5,6 @@ module ActiveMutator
                        :timeout_factor, :timeout_floor, :force_baseline, :root,
                        :preload_helper, :serial_patterns, :browser_boot_seconds,
                        :accept_survivors, :exclude, :max_mutants, :debug_plan,
-                       :fail_at, :adaptive_timeout, :operator_paths)
+                       :fail_at, :adaptive_timeout, :operators,
+                       :class_level, :class_level_closure_cap)
 end

@@ -1,7 +1,8 @@
 module ActiveMutator
   module Reporter
     class Terminal
-      CHARS = { killed: ".", survived: "S", timeout: "T", error: "E", uncovered: "U", accepted: "A" }.freeze
+      CHARS = { killed: ".", survived: "S", timeout: "T", error: "E", uncovered: "U", accepted: "A",
+                skipped: "-" }.freeze
 
       def initialize(out: $stdout)
         @out = out
@@ -21,6 +22,8 @@ module ActiveMutator
         @out.puts format("Mutation score: %.1f%%", score(counts) * 100)
         survivors = results.select { |r| r.status == :survived }
         print_survivors(survivors) unless survivors.empty?
+        skipped = results.select { |r| r.status == :skipped }
+        print_skipped(skipped) unless skipped.empty?
         stats = OperatorStats.call(results)
         noisy = stats.select { |_, s| s["survived"].positive? }
         print_operator_stats(noisy) unless noisy.empty?
@@ -54,6 +57,15 @@ module ActiveMutator
           @out.puts "    #{m.description}"
           @out.puts "    - #{m.original_snippet}"
           @out.puts "    + #{m.edit.replacement}"
+          @out.puts "    (#{result.details})" if result.details
+        end
+      end
+
+      def print_skipped(skipped)
+        @out.puts "", "Skipped mutants (not counted in the score):"
+        skipped.each do |result|
+          m = result.mutation
+          @out.puts "  #{m.subject.name} (#{m.subject.file}:#{m.line}): #{result.details}"
         end
       end
     end

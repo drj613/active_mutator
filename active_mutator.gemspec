@@ -18,12 +18,12 @@ Gem::Specification.new do |spec|
   spec.executables = ["active_mutator"]
   spec.metadata = {
     "rubygems_mfa_required" => "true",
-    "homepage_uri" => "https://github.com/drj613/active_mutator",
     "source_code_uri" => "https://github.com/drj613/active_mutator",
     "changelog_uri" => "https://github.com/drj613/active_mutator/blob/main/CHANGELOG.md",
     "bug_tracker_uri" => "https://github.com/drj613/active_mutator/issues"
   }
-  spec.add_dependency "prism", ">= 0.30"
-  spec.add_dependency "rspec-core", ">= 3.12" # worker + baseline_hooks require it at runtime
+  # prism is on 1.x; "~> 0.30" would exclude it. Upper-bound at the next major.
+  spec.add_dependency "prism", ">= 0.30", "< 2"
+  spec.add_dependency "rspec-core", "~> 3.12" # worker + baseline_hooks require it at runtime
   spec.add_development_dependency "rspec", "~> 3.13"
 end

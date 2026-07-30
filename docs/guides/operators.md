@@ -3,13 +3,23 @@
 Every mutation active_mutator can generate comes from one of the operators
 below. Each operator is a pure function: `edits(node) -> [Edit]` over a
 single Prism AST node (`lib/active_mutator/operators/*.rb`). The engine
-walks every node in a method body and asks each operator whether it
-applies. See `docs/guides/how-it-works.md` for the walk and validity gate.
+walks every node in a method body (and every class-level node of a
+class-body subject) and asks each operator whether it applies. See
+`docs/guides/how-it-works.md` for the walk and validity gate.
 
 An operator's mutants only matter if they can be killed. For each operator
 below, you'll find: what it targets, the exact edit(s) it emits, a
 concrete example, and what a **survivor** of that mutant tells you about
 your tests.
+
+The same operators also run over **class-body** nodes on Zeitwerk-shaped
+files — macro arguments, constants, and scope/DSL lambdas, not just method
+bodies (see `docs/guides/how-it-works.md` §4a). Nothing about an operator
+changes; the engine simply walks those class-level nodes too. So a
+`StatementDeletion` survivor on a `validates :name` line, for instance,
+means no test exercises that validation, and a `Literal` mutant on a
+default argument to a macro tells you the same thing macro-side that it
+would inside a method.
 
 ## ConditionalBoundary
 

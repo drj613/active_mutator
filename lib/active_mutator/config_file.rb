@@ -22,11 +22,10 @@ module ActiveMutator
       "requires" => :string_list,
       "operators" => :string_list,
       "preload_helper" => :preload_helper,
-      "adaptive_timeout" => :boolean
+      "adaptive_timeout" => :boolean,
+      "class_level" => :boolean,
+      "class_level_closure_cap" => :positive_integer
     }.freeze
-
-    # YAML keys that don't match their Config member name.
-    RENAMES = { "operators" => :operator_paths }.freeze
 
     def self.load(root)
       path = File.join(root, FILENAME)
@@ -40,7 +39,7 @@ module ActiveMutator
         validator = KEYS[key]
         raise Error, "#{FILENAME}: unknown config key: #{key}" unless validator
 
-        [RENAMES.fetch(key, key.to_sym), coerce(key, validator, value)]
+        [key.to_sym, coerce(key, validator, value)]
       end
     end
 
@@ -54,6 +53,10 @@ module ActiveMutator
       case validator
       when :integer
         raise Error, "#{FILENAME}: #{key} must be an integer" unless value.is_a?(Integer)
+        value
+      when :positive_integer
+        raise Error, "#{FILENAME}: #{key} must be an integer" unless value.is_a?(Integer)
+        raise Error, "#{FILENAME}: #{key} must be >= 1" unless value >= 1
         value
       when :number
         raise Error, "#{FILENAME}: #{key} must be a number" unless value.is_a?(Numeric)

@@ -16,7 +16,7 @@ what the design does not cover.
 `SubjectFinder` (`lib/active_mutator/subject_finder.rb`) is a `Prism::Visitor`.
 It parses one file and walks it. It tracks constant scope (`class`/`module`
 nesting) and yields a `Subject` (`{name, file, byte_range, line_range,
-constant_scope, kind}`) for every `def` it finds, for example
+constant_scope, kind, sclass}`) for every `def` it finds, for example
 `Billing::Calculator#total` or `Billing::Calculator.build`.
 
 Scope details worth knowing:
@@ -28,9 +28,16 @@ Scope details worth knowing:
   call `super`. Their bodies still mutate — the engine descends into them
   under the OUTER subject, because a directly-inserted nested-def mutant
   would be silently reverted every time the outer method re-runs the
-  `def`. In practice, active_mutator's unit of mutation is one outermost
-  method body: no class-macro calls (`validates`, `scope`, `has_many`),
-  no constants, no DSL blocks.
+  `def`.
+- **Class bodies are subjects too**, for Zeitwerk-shaped files (see §4a).
+  A file with exactly one top-level class/module also yields a
+  `"<Scope> (class body)"` subject covering its class-level code —
+  macros (`validates`, `scope`, `has_many`), constants, and DSL/scope
+  lambdas. `SubjectFinder.zeitwerk_shaped?` gates this: multi-constant
+  files and core-class reopens get method subjects only, because they have
+  no safe remove-and-reload story (issue #32). Class-level statements owned
+  by other subjects (`def`s, nested classes/modules, `class << self`) are
+  excluded from the class-body subject.
 
 `Runner#discover_subjects` globs `app/**/*.rb` and `lib/**/*.rb` (or
 whatever paths/`--subject`/`--since` narrow it to) and hands each file to
@@ -85,8 +92,9 @@ Consequences of this design:
 The full operator catalog, with before/after examples and what a survivor
 of each one means, is in `docs/guides/operators.md`.
 
-`Engine#analyze` walks only the target `DefNode`'s body. It stops at
-nested `def`s, since those are separate subjects. It asks every operator
+`Engine#analyze` walks the target `DefNode`'s body, descending INTO nested
+`def`s and mutating their bodies too (they get no subject of their own — see
+§1). It asks every operator
 whether it applies to each node, then builds one `Mutation` per surviving
 edit: the subject, the edit, the original snippet, the 1-based
 original-file line, and (critically) the **mutated `def` source**,
@@ -241,22 +249,35 @@ files. Nothing else runs. (`RSpec.shared_examples` is a separate registry
 and is unaffected either way.)
 
 **Per-fork worker lifecycle** (`Worker#run`):
-1. `runner.setup`: RSpec loads the covering spec files. This is also what
-   loads the application for any project that *isn't* preloaded in the
-   parent (plain gems with no `config/environment.rb`). That's why
-   insertion cannot happen first: inserting into a not-yet-defined
-   constant raises `NameError`, and loading app code after insertion would
-   silently overwrite the mutation with the original method.
-2. `Inserter#insert`: `class_eval`s (or top-level `eval`s) the mutated
-   `def` source, at the subject's original file and line (for accurate
-   backtraces), redefining the just-loaded method with its mutated body.
-3. `after_fork_hygiene`: reseed `srand`, and for Rails apps, clear and
+1. `require` the subject's file: guarantees the target constant is defined
+   before insertion, regardless of preload. Preloaded projects
+   (Rails/Zeitwerk, or a preloaded spec helper) already have it in
+   `$LOADED_FEATURES` so this is a no-op; non-preloaded projects (plain
+   gems whose individual spec files require the lib, or
+   `--no-preload-helper`) get it loaded here rather than depending on
+   spec-load to define it.
+2. Insert the mutation — *before* the spec files are loaded. A `def` mutant
+   goes through `Inserter#insert`, which `class_eval`s (or top-level
+   `eval`s) the mutated `def` source at the subject's original file and
+   line (for accurate backtraces), redefining the method *in place* on the
+   live class. A class-body mutant goes through `ClosureReload`, which
+   `remove_const`s the target and re-`eval`s the mutated whole-file source,
+   producing a **new** class object bound to the constant. Insertion must
+   precede spec-load because `RSpec.describe SomeClass` binds
+   `metadata[:described_class]` to the constant *at load time*: if the
+   groups loaded first, a class-body mutant's reload would swap the constant
+   to a new object while the already-loaded groups kept pointing at the
+   pre-mutation object — exercising unmutated code and falsely surviving.
+   Insert first and every group binds to the mutated object.
+3. `runner.setup`: RSpec loads the covering spec files (now binding
+   `described_class` to the mutated object).
+4. `after_fork_hygiene`: reseed `srand`, and for Rails apps, clear and
    re-establish `ActiveRecord::Base` connections. Forked child processes
    inherit the parent's file descriptors, including DB sockets, and
    sharing a connection across processes corrupts it.
-4. `runner.run_specs(covering_groups)`: run only the filtered groups from
+5. `runner.run_specs(covering_groups)`: run only the filtered groups from
    above, in-process.
-5. Emit a JSON status line over the pipe back to the parent and exit.
+6. Emit a JSON status line over the pipe back to the parent and exit.
 
 Fork gives correctness for free. There is no "un-mutate between
 mutations" step, because the mutated process is simply thrown away. The
@@ -265,6 +286,78 @@ between mutations, because they'd leak memoization, class-level state,
 and DB residue across mutations and silently corrupt results. The
 isolation guarantee is worth the process-boot cost, and that cost is
 exactly what the preload steps above exist to amortize.
+
+## 4a. Class-level mutation: closure reload
+
+A `def` mutant is inserted by `class_eval`ing the mutated method over the
+live class — same object, method redefined in place. **Class-level code
+cannot be inserted that way.** Re-running a macro *accumulates* state
+rather than replacing it: `class_eval`ing a class body that calls
+`validates :name` a second time adds a *second* validator, it does not
+swap the mutated one in. So a class-body mutant (`kind: :class_body`) goes
+through a different path — `ClosureReload`
+(`lib/active_mutator/closure_reload.rb`).
+
+**Remove and re-eval.** `ClosureReload` `remove_const`s the target and
+re-evaluates the *whole mutated file*, producing a **new** class object
+bound to the constant. But anything already attached to the OLD object
+would go stale — a class that `include`s the module, a subclass, an
+`extend` site all still point at the pre-remove object. So the reload
+computes the object's **closure** and reloads those too, from their
+*pristine* sources (only the target file is the mutated source).
+
+**One-pass closure discovery.** `attachers` does a single
+`ObjectSpace.each_object(Module)` scan for every module whose `ancestors`
+include the target: includers and subclasses carry it directly; `extend`
+sites carry it in their singleton class's ancestry, so singleton classes
+are mapped back through `attached_object`. Ruby's `ancestors` is
+transitive, so one scan already yields every *transitive* attacher — an
+includer-of-an-includer carries the target directly too — and no BFS is
+needed.
+
+**Dependency-first re-eval.** Members must be re-eval'd before their
+dependents or the dependent's file hits a `NameError`. The target is
+pinned first (every closure member depends on it), then the rest are
+sorted by ascending `ancestors.size` (a superclass before its subclass, an
+included module before its includer). Depth is captured while the
+constants are still live, since it can't be read after `remove_const`.
+
+**Guards → `skipped`.** Every situation where the reload can't be done
+faithfully raises `ClosureReload::Skip`, which the worker reports as
+`skipped` (not counted in the score — see §7):
+- the closure exceeds `class_level_closure_cap` (default `10`, set from
+  config via `ClosureReload.cap`);
+- the target constant is defined at a different file than the subject's
+  (a **reopened** constant);
+- a closure member is an **anonymous** class/module, has **no source
+  file** (native or dynamically defined), or its file **defines multiple
+  top-level constants** (re-evaling it would re-run macros on constants
+  that weren't removed);
+- an **object instance** (not a Module) was `extend`ed with the target.
+
+The fork dies after the run, so nothing is restored; there is no
+un-reload step.
+
+### The two-phase kill pipeline
+
+Class-level statements execute at **load time**, so line coverage never
+attributes any example to them — the naive "examples covering the mutated
+line" set would be empty, and every class-body mutant would look
+`uncovered`. `Runner#examples_for_mutation` substitutes a broader set for
+class-body subjects:
+
+- **Phase 1** runs the mutant against every example that covers **any line
+  of the subject's file** (it must have loaded the class) ∪ the examples of
+  the **convention spec file** (`app/models/foo.rb` → `spec/models/foo_spec.rb`).
+- **Phase 2 (escalation)** runs only if phase 1 declares a *survivor*.
+  Before a class-body survivor is final, `escalate_class_body_survivors`
+  re-enqueues it against every spec file that **textually references a
+  constant the subject's file defines** and that phase 1 didn't already
+  run. Matching is textual (a constant in a comment still counts — worst
+  case is a wasted run), and unlike the baseline delta there is **no
+  fan-out ceiling**: a class-body survivor gets every referencing spec its
+  shot. If escalation kills it, the kill wins; if it still survives, the
+  result is annotated `escalated (+N spec files)`.
 
 ## 5. Serial lane for browser-covered mutants
 
@@ -333,6 +426,7 @@ to restore the purely static budget.
 | `accepted` | matched a fingerprint in the acceptance ledger | no (reported, but excluded from the score) |
 | `uncovered` | no example covers the mutated line | no (reported loudly as coverage debt) |
 | `error` | the worker crashed, or the mutated code raised at `eval`/load time | reported separately, not scored |
+| `skipped` | a class-body mutant whose closure couldn't be reloaded faithfully (cap exceeded, reopened constant, anonymous/native/multi-constant attacher — see §4a) | no (listed under "Skipped mutants", excluded from the score; progress char `-`, Stryker `Ignored`) |
 | `invalid` | the mutated text failed to re-parse (discarded before scheduling) | no |
 
 `score = (killed + timeout) / (killed + timeout + survived)`. The process
@@ -369,9 +463,36 @@ silently pile up.
 
 ## Honest limits
 
-- **Method bodies only.** No class-macro, constant, or DSL-block mutation
-  (`validates`, `scope`, `has_many`, etc.). This follows from how subjects
-  are found (§1) and inserted (§4); it is not an accident.
+- **Class-body mutation requires a Zeitwerk-shaped file** — exactly one
+  top-level class/module (§1). Multi-constant files and core-class
+  monkey-patches/reopens get method subjects only, not a class-body subject
+  (issue #32); their method bodies are still mutated.
+- **Most code inside blocks is not mutated.** `ActiveSupport::Concern` DSL
+  blocks — `included`/`prepended`/`class_methods do … end` — ARE mutated,
+  since their bodies re-run as class-level code in the includer (issue #31).
+  Every *other* block (`has_many :x do … end` and any other `do … end`/`{ … }`
+  body) is pruned, because its run-time context is unknown and mutating it
+  risks false survivors. Note that a concern-block line executing ONLY at
+  include/load time (a macro, a bare constant) gets no per-example coverage,
+  so its mutant lands `uncovered`; lines run when a method is *called* from a
+  spec are covered and killable.
+- **Whole-file re-eval re-runs class-body side effects.** A closure reload
+  re-evaluates the target *and every attacher's* class body from source, so
+  non-idempotent load-time side effects run again — self-registration into a
+  global registry, `DescendantsTracker`-style hooks, observer wiring. A spec
+  asserting a count of such registrations can see it doubled (false kill) or
+  masked (false survival). Inherent to remove-and-reload.
+- **Constants captured by value go stale after a closure reload.** A
+  reference holding the target by value rather than by ancestry — an alias
+  (`ALIAS = SomeClass`), a registry the class was pushed into, a memoized
+  instance, a class var captured at load — keeps pointing at the pre-reload
+  object, and can produce false survivors. `refine`-based modules are
+  anonymous and aren't discovered/reloaded at all (§4a).
+- **Inter-attacher `extend` ordering (rare).** The re-eval order pins the
+  target first, then sorts the rest by instance-ancestor depth. An
+  `extend` relationship *between two non-target attachers* can still
+  re-eval out of order; a full topological sort is deliberately not
+  attempted (see the `ClosureReload` class comment).
 - **`class << obj` and top-level `class << self` are invisible** to
   subject discovery; `class << self` inside a class/module IS mutated (§1).
   Nested `def`s mutate only via their enclosing method's subject (§1).

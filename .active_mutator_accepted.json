@@ -173,5 +173,159 @@
     "description": "replace `0` with `1`",
     "original_snippet": "0",
     "ordinal": 2
+  },
+  {
+    "file": "lib/active_mutator/engine.rb",
+    "subject": "ActiveMutator::Engine#build_class_body_mutation",
+    "description": "return nil instead",
+    "original_snippet": "return [nil, false]",
+    "ordinal": 0
+  },
+  {
+    "file": "lib/active_mutator/engine.rb",
+    "subject": "ActiveMutator::Engine#build_class_body_mutation",
+    "description": "return nil instead",
+    "original_snippet": "return [nil, false]",
+    "ordinal": 1
+  },
+  {
+    "file": "lib/active_mutator/closure_reload.rb",
+    "subject": "ActiveMutator::ClosureReload#attachers",
+    "description": "replace `||` with `&&`",
+    "original_snippet": "||",
+    "ordinal": 0
+  },
+  {
+    "file": "lib/active_mutator/closure_reload.rb",
+    "subject": "ActiveMutator::ClosureReload#attachers",
+    "description": "keep only left operand",
+    "original_snippet": "mod.name || mod.inspect",
+    "ordinal": 0
+  },
+  {
+    "file": "lib/active_mutator/closure_reload.rb",
+    "subject": "ActiveMutator::ClosureReload#attachers",
+    "description": "keep only right operand",
+    "original_snippet": "mod.name || mod.inspect",
+    "ordinal": 0
+  },
+  {
+    "file": "lib/active_mutator/closure_reload.rb",
+    "subject": "ActiveMutator::ClosureReload#source_for",
+    "description": "keep only right operand",
+    "original_snippet": "file && File.exist?(file)",
+    "ordinal": 0
+  },
+  {
+    "file": "lib/active_mutator/closure_reload.rb",
+    "subject": "ActiveMutator::ClosureReload#single_constant_file?",
+    "description": "delete `return false unless result.success?`",
+    "original_snippet": "return false unless result.success?",
+    "ordinal": 0
+  },
+  {
+    "file": "lib/active_mutator/closure_reload.rb",
+    "subject": "ActiveMutator::ClosureReload#single_constant_file?",
+    "description": "force condition to `true`",
+    "original_snippet": "result.success?",
+    "ordinal": 0
+  },
+  {
+    "file": "lib/active_mutator/closure_reload.rb",
+    "subject": "ActiveMutator::ClosureReload#single_constant_file?",
+    "description": "unwrap `return`",
+    "original_snippet": "return false",
+    "ordinal": 0
+  },
+  {
+    "file": "lib/active_mutator/closure_reload.rb",
+    "subject": "ActiveMutator::ClosureReload#single_constant_file?",
+    "description": "return nil instead",
+    "original_snippet": "return false",
+    "ordinal": 0
+  },
+  {
+    "file": "lib/active_mutator/closure_reload.rb",
+    "subject": "ActiveMutator::ClosureReload#single_constant_file?",
+    "description": "replace `false` with `true`",
+    "original_snippet": "false",
+    "ordinal": 0
+  },
+  {
+    "file": "lib/active_mutator/runner.rb",
+    "subject": "ActiveMutator::Runner (class body)",
+    "description": "delete `private`",
+    "original_snippet": "private",
+    "ordinal": 0
+  },
+  {
+    "file": "lib/active_mutator/worker.rb",
+    "subject": "ActiveMutator::Worker (class body)",
+    "description": "delete `private`",
+    "original_snippet": "private",
+    "ordinal": 0
+  },
+  {
+    "file": "lib/active_mutator/runner.rb",
+    "subject": "ActiveMutator::Runner#escalate_class_body_survivors",
+    "description": "delete `return results if candidates.empty?`",
+    "original_snippet": "return results if candidates.empty?",
+    "ordinal": 0
+  },
+  {
+    "file": "lib/active_mutator/runner.rb",
+    "subject": "ActiveMutator::Runner#escalate_class_body_survivors",
+    "description": "force condition to `false`",
+    "original_snippet": "candidates.empty?",
+    "ordinal": 0
+  },
+  {
+    "file": "lib/active_mutator/runner.rb",
+    "subject": "ActiveMutator::Runner#escalate_class_body_survivors",
+    "description": "unwrap `return`",
+    "original_snippet": "return results",
+    "ordinal": 0
+  },
+  {
+    "file": "lib/active_mutator/reporter/terminal.rb",
+    "subject": "ActiveMutator::Reporter::Terminal (class body)",
+    "description": "delete `private`",
+    "original_snippet": "private",
+    "ordinal": 0
+  },
+  {
+    "file": "lib/active_mutator/reporter/stryker_json.rb",
+    "subject": "ActiveMutator::Reporter::StrykerJson (class body)",
+    "description": "delete `private`",
+    "original_snippet": "private",
+    "ordinal": 0
+  },
+  {
+    "file": "lib/active_mutator/closure_reload.rb",
+    "subject": "ActiveMutator::ClosureReload (class body)",
+    "description": "delete `private`",
+    "original_snippet": "private",
+    "ordinal": 0
+  },
+  {
+    "file": "lib/active_mutator/closure_reload.rb",
+    "subject": "ActiveMutator::ClosureReload#carries?",
+    "description": "delete `false`",
+    "original_snippet": "false",
+    "ordinal": 0
+  },
+  {
+    "file": "lib/active_mutator/engine.rb",
+    "subject": "ActiveMutator::Engine (class body)",
+    "description": "delete `private`",
+    "original_snippet": "private",
+    "ordinal": 0
+  },
+  {
+    "file": "lib/active_mutator/subject_finder.rb",
+    "subject": "ActiveMutator::SubjectFinder (class body)",
+    "description": "delete `private`",
+    "original_snippet": "private",
+    "ordinal": 0
   }
 ]
