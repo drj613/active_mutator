@@ -4,6 +4,47 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [0.3.0] - 2026-07-30
+
+### Added
+
+- **Class-level mutation** (`#2`): Rails-style macros (`validates`, `scope`),
+  constants, and DSL lambdas are now mutated, not just method bodies. Files
+  with exactly one top-level class/module (Zeitwerk shape) get a `:class_body`
+  subject covering their class-level code. Enabled by default; turn off with
+  `--no-class-level`.
+- **Closure reload**: class-level code can't be re-run with `class_eval`
+  (re-running `validates` accumulates a validator), so the worker
+  `remove_const`s the target plus its ObjectSpace closure — includers,
+  subclasses, extenders — and re-evals their files in dependency-first order,
+  mutated source for the target and pristine source for the rest.
+  `class_level_closure_cap` (default 10) bounds how large that closure may get.
+- **`ActiveSupport::Concern` DSL blocks**: code inside `included` and
+  `class_methods` blocks is mutated (`#31`).
+- **`skipped` status** for mutants whose closure can't be reloaded faithfully
+  (over cap, reopened constant, anonymous or native attacher). Skipped mutants
+  are left out of the score and shown by both reporters (`Ignored` in Stryker
+  JSON).
+- Class-body survivors are escalated to specs that reference the subject's
+  constant before being reported as survivors, so a mutant that only a
+  convention-named spec covers isn't miscounted.
+
+### Fixed
+
+- Worker requires the subject file before inserting a mutation, so RSpec's
+  `described_class` binds to the reloaded object and non-preloaded projects
+  keep working.
+- Gemspec dependency bounds: `prism` is pinned `>= 0.30, < 2` (it is on 1.x, so
+  `~> 0.30` would have excluded it) and the duplicate `homepage_uri` metadata
+  entry is gone.
+
+### Known limits
+
+Only Zeitwerk-shaped files are covered — multi-constant files and core-class
+reopens are out (`#32`). Code inside arbitrary blocks is not mutated (`#31`).
+By-value constant captures (`ALIAS = SomeClass`) and `refine`-based modules go
+stale across a reload.
+
 ## [0.2.0] - 2026-07-20
 
 ### Added
