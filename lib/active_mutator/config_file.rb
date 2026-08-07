@@ -19,7 +19,7 @@ module ActiveMutator
       "fail_at" => :score,
       "exclude" => :string_list,
       "serial_patterns" => :string_list,
-      "spec_paths" => :string_list,
+      "spec_paths" => :nonempty_string_list,
       "requires" => :string_list,
       "operators" => :string_list,
       "preload_helper" => :preload_helper,
@@ -75,6 +75,12 @@ module ActiveMutator
         unless value.is_a?(Array) && value.all?(String)
           raise Error, "#{FILENAME}: #{key} must be a list of strings"
         end
+        value
+      when :nonempty_string_list
+        unless value.is_a?(Array) && value.all?(String)
+          raise Error, "#{FILENAME}: #{key} must be a list of strings"
+        end
+        raise Error, "#{FILENAME}: #{key} must not be empty" if value.empty?
         value
       when :boolean
         unless [true, false].include?(value)
