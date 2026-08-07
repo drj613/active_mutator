@@ -66,7 +66,7 @@ module ActiveMutator
       end.parse(argv)
       options.delete(:serial_patterns_replaced)
       options.delete(:spec_paths_replaced)
-      options[:spec_paths] = options[:spec_paths].map { |sp| sp.chomp("/") }
+      options[:spec_paths] = options[:spec_paths].map { |sp| sp.sub(%r{/+\z}, "") }
       raise OptionParser::InvalidArgument, "--spec-path list must not be empty" if options[:spec_paths].empty?
 
       Config.new(paths: paths, root: Dir.pwd, **options)

@@ -133,6 +133,10 @@ RSpec.describe ActiveMutator::CLI do
       expect(described_class.parse(["--spec-path", "test/"]).spec_paths).to eq(["test"])
     end
 
+    it "normalizes repeated trailing slashes in --spec-path" do
+      expect(described_class.parse(["--spec-path", "test//"]).spec_paths).to eq(["test"])
+    end
+
     it "rejects an empty spec_paths list from a stubbed config" do
       allow(ActiveMutator::ConfigFile).to receive(:load).and_return(spec_paths: [])
       expect { described_class.parse([]) }
