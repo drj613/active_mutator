@@ -214,6 +214,15 @@ RSpec.describe ActiveMutator::Scheduler do
     end
   end
 
+  it "does not mask an install-time failure by restoring traps that were never captured" do
+    # If install_signal_handlers itself raises, previous_traps is nil; the
+    # ensure must skip restoration rather than crash on nil (which would
+    # replace the original error with a NoMethodError).
+    sched = scheduler(worker: ->(_m, _e, _w) {})
+    allow(sched).to receive(:install_signal_handlers).and_raise(ActiveMutator::Error, "boom")
+    expect { sched.run([]) }.to raise_error(ActiveMutator::Error, "boom")
+  end
+
   it "restores DEFAULT for signals whose previous handler was nil" do
     trap("USR1", proc {})
     scheduler(worker: ->(_m, _e, _w) {}).send(:restore_traps, { "USR1" => nil })
