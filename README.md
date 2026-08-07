@@ -258,6 +258,7 @@ survivors show inline on the PR diff. Pairs with the CI recipe:
 | `--force-baseline` | off | ignore cached coverage map |
 | `--preload-helper FILE` / `--no-preload-helper` | auto-detect | parent spec-helper preload |
 | `--serial-pattern PAT` | `spec/system/`, `spec/features/` | covering-path prefixes forced serial |
+| `--spec-path DIR` | `spec/` | where spec files live, relative to the project root (repeatable; the first use replaces the default `spec/`), e.g. `--spec-path engines/billing/spec --spec-path spec` |
 | `--browser-boot-seconds S` | 15 | serial-lane timeout bump |
 | `--timeout-factor F` / `--timeout-floor S` | 8 / 10 | mutation timeout budget |
 | `--[no-]adaptive-timeout` | on | scale timeout budgets from observed worker wall times (median utilization, grow-only, clamped 1x–4x; `--timeout-factor`/`--timeout-floor` set the starting budget) |
@@ -265,6 +266,11 @@ survivors show inline on the PR diff. Pairs with the CI recipe:
 | `--operator FILE` | none | load a custom operator file before analysis (repeatable) |
 | `--[no-]class-level` | on | mutate class-level code (macros, constants, DSL/scope lambdas) via class-body subjects |
 | `--fail-at SCORE` | none (strict) | exit 0 if score >= SCORE even with survivors (opt-in relaxation for gradual adoption; 0 = report-only) |
+
+`--spec-path` tells active_mutator where spec files live (coverage
+classification, digests, escalation); RSpec's own discovery is still the
+project's job — a project with specs under `test/` also needs
+`--default-path test` in its `.rspec`.
 
 `--debug-plan` prints the planned mutant list as one JSON document
 (`{"planned": [...], "pre_resolved": {...}}`) and exits without running
@@ -285,6 +291,8 @@ flags override file values (`--require` and `--exclude` add to the file's
 lists; the first `--serial-pattern` replaces them). Recognized keys:
 `jobs`, `format`, `timeout_factor`, `timeout_floor`,
 `browser_boot_seconds`, `fail_at`, `exclude`, `serial_patterns`,
+`spec_paths` (where spec files live, relative to the project root;
+replaces the default `spec`),
 `requires`, `operators` (custom operator files, loaded before analysis; see
 [Custom operators](docs/guides/custom-operators.md)),
 `preload_helper` (a path, or `false` to skip preload),
@@ -301,6 +309,9 @@ exclude:
   - lib/generated
 serial_patterns:
   - spec/system/
+spec_paths:
+  - engines/billing/spec
+  - spec
 fail_at: 90   # legacy suite: gate on score instead of zero-survivors
 ```
 

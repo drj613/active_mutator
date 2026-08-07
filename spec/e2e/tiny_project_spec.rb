@@ -41,4 +41,35 @@ RSpec.describe "tiny_project end-to-end", :e2e do
 
     expect(status.exitstatus).to eq(1) # survivors present
   end
+
+  it "finds specs under test/ with --spec-path" do
+    with_fixture_copy do |copy|
+      FileUtils.mv(File.join(copy, "spec"), File.join(copy, "test"))
+      # A project with specs under test/ configures rspec's own discovery
+      # itself; --spec-path tells active_mutator, --default-path tells rspec.
+      File.write(File.join(copy, ".rspec"),
+                 "--default-path test\n--require ./test/spec_helper\n")
+
+      stdout, stderr, status = Bundler.with_unbundled_env do
+        Open3.capture3(
+          { "BUNDLE_GEMFILE" => File.join(copy, "Gemfile") },
+          "bundle", "exec", "active_mutator", "lib", "--spec-path", "test",
+          "--format", "json", "--jobs", "2",
+          chdir: copy
+        )
+      end
+
+      data = begin
+        JSON.parse(stdout)
+      rescue JSON::ParserError
+        raise "active_mutator produced unparseable stdout (exit #{status.exitstatus}): " \
+              "#{stdout.inspect}\nstderr:\n#{stderr}"
+      end
+      results = data.fetch("results")
+
+      killed = results.select { |r| r["status"] == "killed" }
+      expect(killed).not_to be_empty, stderr
+      expect(results.map { |r| r["status"] }).to include("survived")
+    end
+  end
 end
