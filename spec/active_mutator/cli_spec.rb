@@ -103,6 +103,7 @@ RSpec.describe ActiveMutator::CLI do
         "Spec helper to preload in the parent (default: auto-detect)",
         "Skip spec-helper preload",
         "Covering-path prefix that forces the serial lane (repeatable; replaces defaults on first use)",
+        "Directory holding spec files, relative to root (repeatable; replaces the default spec/ on first use)",
         "Extra timeout budget for serial-lane mutants",
         "Scale timeout budgets from observed worker wall times (default: on)",
         "Record surviving mutants into the acceptance ledger",
@@ -117,6 +118,19 @@ RSpec.describe ActiveMutator::CLI do
         %w[--serial-pattern spec/browser/ --serial-pattern spec/slow/]
       )
       expect(config.serial_patterns).to eq(["spec/browser/", "spec/slow/"])
+    end
+
+    it "defaults spec_paths to [\"spec\"]" do
+      expect(described_class.parse([]).spec_paths).to eq(["spec"])
+    end
+
+    it "replaces the default on the first --spec-path and appends after" do
+      config = described_class.parse(["--spec-path", "engines/foo/spec", "--spec-path", "test"])
+      expect(config.spec_paths).to eq(["engines/foo/spec", "test"])
+    end
+
+    it "normalizes trailing slashes in --spec-path" do
+      expect(described_class.parse(["--spec-path", "test/"]).spec_paths).to eq(["test"])
     end
 
     it "aliases --changed to --since HEAD" do

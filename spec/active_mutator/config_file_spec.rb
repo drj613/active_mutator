@@ -43,6 +43,11 @@ RSpec.describe ActiveMutator::ConfigFile do
     expect(described_class.load(root)).to eq(operators: ["ops/custom.rb"])
   end
 
+  it "accepts spec_paths as a string list" do
+    write_config("spec_paths:\n  - engines/foo/spec\n  - test\n")
+    expect(described_class.load(root)[:spec_paths]).to eq(["engines/foo/spec", "test"])
+  end
+
   it "accepts adaptive_timeout: false" do
     write_config("adaptive_timeout: false\n")
     expect(described_class.load(root)[:adaptive_timeout]).to be false

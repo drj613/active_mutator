@@ -19,6 +19,7 @@ module ActiveMutator
       "fail_at" => :score,
       "exclude" => :string_list,
       "serial_patterns" => :string_list,
+      "spec_paths" => :string_list,
       "requires" => :string_list,
       "operators" => :string_list,
       "preload_helper" => :preload_helper,
