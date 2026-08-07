@@ -87,7 +87,7 @@ module ActiveMutator
       # its mutant is a known equivalent.)
       return results if candidates.empty?
 
-      spec_contents = Dir[File.join(@config.root, "spec/**/*_spec.rb")].to_h { |f| [f, File.read(f)] }
+      spec_contents = BaselineDelta.spec_file_contents(root: @config.root, spec_paths: @config.spec_paths)
       patterns = {} # subject file => constant-reference pattern (parsed once per file)
       items = {}
       candidates.each do |r|
@@ -208,7 +208,7 @@ module ActiveMutator
     def convention_spec_rel(file)
       rel = file.delete_prefix(@config.root.chomp("/") + "/").delete_suffix(".rb")
       rest = rel.sub(%r{\A[^/]+/}, "")
-      "spec/#{rest}_spec.rb"
+      "#{@config.spec_paths.first}/#{rest}_spec.rb"
     end
 
     def build_reporter
@@ -294,7 +294,11 @@ module ActiveMutator
       helper = if @config.preload_helper
                  File.expand_path(@config.preload_helper, @config.root)
                else
-                 %w[spec/rails_helper.rb spec/spec_helper.rb]
+                 # Precedence: within each spec path rails_helper wins over
+                 # spec_helper; earlier spec paths win over later ones — same
+                 # as today for the default ["spec"].
+                 @config.spec_paths
+                   .flat_map { |sp| ["#{sp}/rails_helper.rb", "#{sp}/spec_helper.rb"] }
                    .map { |p| File.join(@config.root, p) }
                    .find { |p| File.exist?(p) }
                end

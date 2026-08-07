@@ -951,6 +951,72 @@ RSpec.describe ActiveMutator::Runner do
     end
   end
 
+  describe "spec_paths threading" do
+    def class_body_mutation(file)
+      subject = ActiveMutator::Subject.new(
+        name: "User (class body)", file: file,
+        byte_range: 0...30, line_range: 1..3,
+        constant_scope: "User", kind: :class_body, sclass: false
+      )
+      ActiveMutator::Mutation.new(
+        subject: subject,
+        edit: ActiveMutator::Edit.new(range: 14...18, replacement: "false",
+                                      description: "replace `true` with `false`", operator: "Literal"),
+        original_snippet: "true", line: 2,
+        mutated_file_source: "x", mutated_def_source: "x", mutated_def_line: 1
+      )
+    end
+
+    it "escalation finds referencing specs under custom spec paths" do
+      Dir.mktmpdir do |root|
+        FileUtils.mkdir_p(File.join(root, "app/models"))
+        FileUtils.mkdir_p(File.join(root, "test"))
+        File.write(File.join(root, "app/models/user.rb"),
+                   "class User\n  validates :email, presence: true\nend\n")
+        File.write(File.join(root, "test/signup_spec.rb"),
+                   "RSpec.describe \"signup\" do\n  it { User }\nend\n")
+
+        cfg = ActiveMutator::CLI.parse([]).with(root: root, spec_paths: ["test"])
+        runner = described_class.new(cfg,
+                                     reporter: instance_double(ActiveMutator::Reporter::Terminal, on_result: nil))
+        m = class_body_mutation(File.join(root, "app/models/user.rb"))
+        survived = ActiveMutator::Result.new(mutation: m, status: :survived, details: nil)
+        map = instance_double(ActiveMutator::CoverageMap)
+        allow(map).to receive(:examples_for_spec_file).with("test/signup_spec.rb")
+                                                      .and_return(["./test/signup_spec.rb[1:1]"])
+        allow(map).to receive(:time_for).and_return(0.1)
+        scheduler = instance_double(ActiveMutator::Scheduler)
+        expect(scheduler).to receive(:run) do |items|
+          expect(items.size).to eq(1)
+          expect(items.first.example_ids).to eq(["./test/signup_spec.rb[1:1]"])
+          [ActiveMutator::Result.new(mutation: m, status: :killed, details: nil)]
+        end
+
+        results = runner.escalate_class_body_survivors([survived], scheduler, map, phase1_ids: {})
+        expect(results.map(&:status)).to eq([:killed])
+      end
+    end
+
+    it "builds the convention spec path from the first spec path" do
+      cfg = ActiveMutator::CLI.parse([]).with(root: "/proj", spec_paths: ["test", "spec"])
+      runner = described_class.new(cfg)
+      expect(runner.send(:convention_spec_rel, "/proj/lib/foo/bar.rb")).to eq("test/foo/bar_spec.rb")
+    end
+
+    it "finds the preload helper under a custom spec path" do
+      Dir.mktmpdir do |root|
+        FileUtils.mkdir_p(File.join(root, "test"))
+        File.write(File.join(root, "test/spec_helper.rb"), "$helper_loaded = true\n")
+        cfg = ActiveMutator::CLI.parse([]).with(root: root, spec_paths: ["test"])
+        described_class.new(cfg).send(:preload_spec_helper!)
+        expect($helper_loaded).to be true
+      ensure
+        $helper_loaded = nil
+        $LOAD_PATH.delete(File.join(root, "test"))
+      end
+    end
+  end
+
   describe "plan_work with class-body mutants" do
     def class_body_mutation(file)
       subject = ActiveMutator::Subject.new(
