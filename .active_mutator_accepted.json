@@ -313,12 +313,5 @@
     "description": "delete `private`",
     "original_snippet": "private",
     "ordinal": 0
-  },
-  {
-    "file": "lib/active_mutator/timeout_calibrator.rb",
-    "subject": "ActiveMutator::TimeoutCalibrator#median",
-    "description": "replace `.sort` with `.reverse`",
-    "original_snippet": "sort",
-    "ordinal": 0
   }
 ]

@@ -108,6 +108,15 @@ RSpec.describe ActiveMutator::TimeoutCalibrator do
     expect(cal.scale).to be_within(0.0001).of(1.0)
   end
 
+  it "computes the median by rank, not by reversed insertion order" do
+    cal = described_class.new
+    # Asymmetric insertion order: rank median is 0.5 (scale 2.0), but the
+    # middle of the REVERSED insertion order [0.5, 1.0, 1.0, 0.25, 0.25]
+    # is 1.0 (scale 4.0) — the window is insertion-ordered, not sorted.
+    [0.25, 0.25, 1.0, 1.0, 0.5].each { |u| rec(cal, u) }
+    expect(cal.scale).to be_within(0.0001).of(2.0)
+  end
+
   it "evicts the oldest sample as soon as the window overflows past WINDOW" do
     cal = described_class.new
     rec(cal, 0.25)                 # oldest; the 31st record must push it out
