@@ -161,6 +161,35 @@ RSpec.describe ActiveMutator::ClosureReload do
       .to raise_error(described_class::Skip, /no source file/)
   end
 
+  it "skips when an attacher's on-disk source no longer parses (never re-evals a broken file)" do
+    # The file can be corrupted/edited after the constant was loaded; the
+    # parse-success guard must reject it up front instead of re-evaling a
+    # broken partial AST.
+    mod_file = load_source("cr_broken_at_target.rb", <<~RUBY, top_const: :CrBrokenAtTarget)
+      module CrBrokenAtTarget
+        LIMIT = 5
+      end
+    RUBY
+    att_file = load_source("cr_broken_at.rb", <<~RUBY, top_const: :CrBrokenAt)
+      class CrBrokenAt
+        include CrBrokenAtTarget
+      end
+    RUBY
+    File.write(att_file, "class CrBrokenAt\n  def broken(\nend\n") # corrupted after load
+    subject = subject_for(mod_file, "CrBrokenAtTarget")
+    expect { described_class.new(subject, File.read(mod_file)).call }
+      .to raise_error(described_class::Skip, /not reloadable/)
+  end
+
+  it "skips instead of crashing when a closure member has no source location at all" do
+    # const_source_location returns [] for native constants, so `file` is nil.
+    # Unreachable through #call today (a native module cannot carry a runtime
+    # target), but source_for's contract is Skip-not-TypeError for nil files.
+    subject = instance_double(ActiveMutator::Subject, constant_scope: "CrNope", file: "cr_nope.rb")
+    expect { described_class.new(subject, "").send(:source_for, Enumerable) }
+      .to raise_error(described_class::Skip, /no source file/)
+  end
+
   it "reloads includers so module mutations reach them" do
     mod_file = load_source("cr_mixin.rb", <<~RUBY, top_const: :CrMixin)
       module CrMixin
