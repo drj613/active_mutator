@@ -21,6 +21,11 @@ RSpec.describe ActiveMutator::CoverageMap do
     expect(map.examples_for("/root/lib/a.rb", 99..99)).to eq([])
   end
 
+  it "returns examples in ascending id order (deterministic planning output)" do
+    expect(map.examples_for("/root/lib/a.rb", 3..4))
+      .to eq(["./spec/a_spec.rb[1:1]", "./spec/b_spec.rb[1:1]"])
+  end
+
   it "sums known example times, treating nil as zero" do
     expect(map.time_for(["./spec/a_spec.rb[1:1]", "./spec/b_spec.rb[1:1]", "unknown"])).to eq(0.75)
     nil_map = described_class.new("version" => 2, "records" => {},

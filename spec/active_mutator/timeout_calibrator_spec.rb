@@ -108,6 +108,16 @@ RSpec.describe ActiveMutator::TimeoutCalibrator do
     expect(cal.scale).to be_within(0.0001).of(1.0)
   end
 
+  it "evicts the oldest sample as soon as the window overflows past WINDOW" do
+    cal = described_class.new
+    rec(cal, 0.25)                 # oldest; the 31st record must push it out
+    15.times { rec(cal, 1.00) }
+    15.times { rec(cal, 0.25) }    # 31 recorded; only the newest 30 survive
+    # Window [1.0 x15, 0.25 x15]: median (0.25 + 1.0) / 2 = 0.625 -> scale 2.5.
+    # A window of 31 would keep the extra 0.25, making the median 0.25 -> 1.0.
+    expect(cal.scale).to be_within(0.0001).of(2.5)
+  end
+
   it "ignores recordings with a non-positive budget" do
     cal = described_class.new
     5.times { cal.record(5.0, 0.0) }
