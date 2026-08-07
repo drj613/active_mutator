@@ -25,7 +25,7 @@ module ActiveMutator
         end
         if map.version == 2
           delta = BaselineDelta.compute(old_digests: stored_digests(map), new_digests: digests,
-                                        coverage_map: map, root: @root)
+                                        coverage_map: map, root: @root, spec_paths: @spec_paths || ["spec"])
           unless delta.full?
             run_partial!(delta)
             stamp_digests(digests)

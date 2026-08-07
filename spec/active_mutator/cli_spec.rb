@@ -244,6 +244,12 @@ RSpec.describe ActiveMutator::CLI do
     it "works with no config file present" do
       expect(described_class.parse([]).fail_at).to be_nil
     end
+
+    it "normalizes trailing slashes in a config-file spec_paths value" do
+      File.write(".active_mutator.yml", "spec_paths:\n  - test/\n")
+      config = described_class.parse([])
+      expect(config.spec_paths).to eq(["test"])
+    end
   end
 
   describe ".run" do

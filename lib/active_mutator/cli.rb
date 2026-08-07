@@ -51,7 +51,7 @@ module ActiveMutator
         o.on("--spec-path DIR", "Directory holding spec files, relative to root (repeatable; replaces the default spec/ on first use)") do |v|
           options[:spec_paths] = [] unless options[:spec_paths_replaced]
           options[:spec_paths_replaced] = true
-          options[:spec_paths] << v.chomp("/")
+          options[:spec_paths] << v
         end
         o.on("--browser-boot-seconds S", Float, "Extra timeout budget for serial-lane mutants") { |v| options[:browser_boot_seconds] = v }
         o.on("--[no-]adaptive-timeout", "Scale timeout budgets from observed worker wall times (default: on)") { |v| options[:adaptive_timeout] = v }
@@ -66,6 +66,7 @@ module ActiveMutator
       end.parse(argv)
       options.delete(:serial_patterns_replaced)
       options.delete(:spec_paths_replaced)
+      options[:spec_paths] = options[:spec_paths].map { |sp| sp.chomp("/") }
 
       Config.new(paths: paths, root: Dir.pwd, **options)
     end
