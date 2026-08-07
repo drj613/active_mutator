@@ -5,10 +5,11 @@ require "json"
 module ActiveMutator
   # Runs the host suite once, instrumented, in a subprocess. Produces and
   # caches the CoverageMap. Invalidation is coarse: any digest change in
-  # {app,lib,spec}/**/*.rb triggers a full re-run.
+  # {app,lib}/**/*.rb or the configured spec paths triggers a full re-run.
   class Baseline
-    def initialize(root:, cache_dir: File.join(root, ".active_mutator"))
+    def initialize(root:, spec_paths: ["spec"], cache_dir: File.join(root, ".active_mutator"))
       @root = root
+      @spec_paths = spec_paths
       @cache_dir = cache_dir
       @out_path = File.join(cache_dir, "coverage.json")
     end
@@ -25,7 +26,7 @@ module ActiveMutator
         end
         if map.version == 2
           delta = BaselineDelta.compute(old_digests: stored_digests(map), new_digests: digests,
-                                        coverage_map: map, root: @root, spec_paths: @spec_paths || ["spec"])
+                                        coverage_map: map, root: @root, spec_paths: @spec_paths)
           unless delta.full?
             run_partial!(delta)
             stamp_digests(digests)
@@ -66,6 +67,7 @@ module ActiveMutator
         "ACTIVE_MUTATOR" => "1",
         "ACTIVE_MUTATOR_ROOT" => @root,
         "ACTIVE_MUTATOR_BASELINE_OUT" => out_path,
+        "ACTIVE_MUTATOR_SPEC_PATHS" => @spec_paths.join(":"),
         # RUBYOPT, not `rspec --require`: project .rspec requires (spec_helper
         # → app code) run before command-line requires, and Coverage misses
         # everything loaded before Coverage.start. -r fires before rspec boots.
@@ -126,7 +128,9 @@ module ActiveMutator
     end
 
     def current_digests
-      files = Dir[File.join(@root, "{app,lib,spec}/**/*.rb")].sort
+      files = Dir[File.join(@root, "{app,lib}/**/*.rb")]
+      files += @spec_paths.flat_map { |sp| Dir[File.join(@root, sp, "**", "*.rb")] }
+      files = files.uniq.sort
       files += [File.join(@root, "Gemfile.lock"), File.join(@root, ".rspec")].select { |f| File.exist?(f) }
       files.to_h { |f| [f.delete_prefix("#{@root}/"), Digest::SHA256.file(f).hexdigest] }
     end

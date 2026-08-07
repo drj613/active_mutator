@@ -13,7 +13,8 @@ module ActiveMutator
       ClosureReload.cap = @config.class_level_closure_cap
       preload!
       preload_spec_helper!
-      map = Baseline.new(root: @config.root).coverage_map(force: @config.force_baseline)
+      map = Baseline.new(root: @config.root, spec_paths: @config.spec_paths)
+              .coverage_map(force: @config.force_baseline)
       @reporter.coverage_map = map if @reporter.respond_to?(:coverage_map=)
       subjects = discover_subjects
       analyses = subjects.map { |s| Engine.new.analyze(s) }

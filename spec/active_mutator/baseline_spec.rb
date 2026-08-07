@@ -1,4 +1,5 @@
 require "fileutils"
+require "tmpdir"
 
 RSpec.describe ActiveMutator::Baseline, :integration do
   let(:root) { File.expand_path("../fixtures/tiny_project", __dir__) }
@@ -51,5 +52,23 @@ RSpec.describe ActiveMutator::Baseline, :integration do
     digests = baseline.send(:current_digests)
     expect(digests).to have_key("Gemfile.lock")
     expect(digests).to have_key(".rspec")
+  end
+
+  describe "spec_paths" do
+    it "includes custom spec paths in the digest scan" do
+      Dir.mktmpdir do |root|
+        FileUtils.mkdir_p(File.join(root, "test"))
+        File.write(File.join(root, "test/a_spec.rb"), "A")
+        baseline = described_class.new(root: root, spec_paths: ["test"])
+        digests = baseline.send(:current_digests)
+        expect(digests).to have_key("test/a_spec.rb")
+      end
+    end
+
+    it "exports spec paths to the baseline subprocess env" do
+      baseline = described_class.new(root: "/proj", spec_paths: ["test", "engines/foo/spec"])
+      env = baseline.send(:baseline_env, "/proj/.active_mutator/coverage.json")
+      expect(env["ACTIVE_MUTATOR_SPEC_PATHS"]).to eq("test:engines/foo/spec")
+    end
   end
 end
