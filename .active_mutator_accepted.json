@@ -7,20 +7,6 @@
     "ordinal": 0
   },
   {
-    "file": "lib/active_mutator/worker.rb",
-    "subject": "ActiveMutator::Worker#run",
-    "description": "delete `RSpec.configuration.fail_fast = 1`",
-    "original_snippet": "RSpec.configuration.fail_fast = 1",
-    "ordinal": 0
-  },
-  {
-    "file": "lib/active_mutator/worker.rb",
-    "subject": "ActiveMutator::Worker#run",
-    "description": "delete `after_fork_hygiene`",
-    "original_snippet": "after_fork_hygiene",
-    "ordinal": 0
-  },
-  {
     "file": "lib/active_mutator/subject_finder.rb",
     "subject": "ActiveMutator::SubjectFinder#initialize",
     "description": "delete `super()`",
@@ -72,57 +58,8 @@
   {
     "file": "lib/active_mutator/scheduler.rb",
     "subject": "ActiveMutator::Scheduler#run",
-    "description": "delete `results.concat(run_pool(items.select { |i| i.lane == :serial }, 1, running))`",
-    "original_snippet": "results.concat(run_pool(items.select { |i| i.lane == :serial }, 1, running))",
-    "ordinal": 0
-  },
-  {
-    "file": "lib/active_mutator/scheduler.rb",
-    "subject": "ActiveMutator::Scheduler#run",
     "description": "delete `results`",
     "original_snippet": "results",
-    "ordinal": 0
-  },
-  {
-    "file": "lib/active_mutator/scheduler.rb",
-    "subject": "ActiveMutator::Scheduler#run",
-    "description": "replace `1` with `0`",
-    "original_snippet": "1",
-    "ordinal": 0
-  },
-  {
-    "file": "lib/active_mutator/scheduler.rb",
-    "subject": "ActiveMutator::Scheduler#run",
-    "description": "replace `1` with `2`",
-    "original_snippet": "1",
-    "ordinal": 0
-  },
-  {
-    "file": "lib/active_mutator/scheduler.rb",
-    "subject": "ActiveMutator::Scheduler#run",
-    "description": "force condition to `true`",
-    "original_snippet": "previous_traps",
-    "ordinal": 0
-  },
-  {
-    "file": "lib/active_mutator/scheduler.rb",
-    "subject": "ActiveMutator::Scheduler#run_pool",
-    "description": "delete `sleep 0.02 unless running.empty?`",
-    "original_snippet": "sleep 0.02 unless running.empty?",
-    "ordinal": 0
-  },
-  {
-    "file": "lib/active_mutator/scheduler.rb",
-    "subject": "ActiveMutator::Scheduler#run_pool",
-    "description": "replace `<` with `<=`",
-    "original_snippet": "<",
-    "ordinal": 0
-  },
-  {
-    "file": "lib/active_mutator/scheduler.rb",
-    "subject": "ActiveMutator::Scheduler#run_pool",
-    "description": "force condition to `true`",
-    "original_snippet": "running.empty?",
     "ordinal": 0
   },
   {
@@ -211,44 +148,9 @@
   },
   {
     "file": "lib/active_mutator/closure_reload.rb",
-    "subject": "ActiveMutator::ClosureReload#source_for",
-    "description": "keep only right operand",
-    "original_snippet": "file && File.exist?(file)",
-    "ordinal": 0
-  },
-  {
-    "file": "lib/active_mutator/closure_reload.rb",
-    "subject": "ActiveMutator::ClosureReload#single_constant_file?",
-    "description": "delete `return false unless result.success?`",
-    "original_snippet": "return false unless result.success?",
-    "ordinal": 0
-  },
-  {
-    "file": "lib/active_mutator/closure_reload.rb",
-    "subject": "ActiveMutator::ClosureReload#single_constant_file?",
-    "description": "force condition to `true`",
-    "original_snippet": "result.success?",
-    "ordinal": 0
-  },
-  {
-    "file": "lib/active_mutator/closure_reload.rb",
-    "subject": "ActiveMutator::ClosureReload#single_constant_file?",
-    "description": "unwrap `return`",
-    "original_snippet": "return false",
-    "ordinal": 0
-  },
-  {
-    "file": "lib/active_mutator/closure_reload.rb",
     "subject": "ActiveMutator::ClosureReload#single_constant_file?",
     "description": "return nil instead",
     "original_snippet": "return false",
-    "ordinal": 0
-  },
-  {
-    "file": "lib/active_mutator/closure_reload.rb",
-    "subject": "ActiveMutator::ClosureReload#single_constant_file?",
-    "description": "replace `false` with `true`",
-    "original_snippet": "false",
     "ordinal": 0
   },
   {
@@ -326,6 +228,97 @@
     "subject": "ActiveMutator::SubjectFinder (class body)",
     "description": "delete `private`",
     "original_snippet": "private",
+    "ordinal": 0
+  },
+  {
+    "file": "lib/active_mutator/coverage_map.rb",
+    "subject": "ActiveMutator::CoverageMap (class body)",
+    "description": "delete `private`",
+    "original_snippet": "private",
+    "ordinal": 0
+  },
+  {
+    "file": "lib/active_mutator/defined_constants.rb",
+    "subject": "ActiveMutator::DefinedConstants (class body)",
+    "description": "delete `private_class_method :walk`",
+    "original_snippet": "private_class_method :walk",
+    "ordinal": 0
+  },
+  {
+    "file": "lib/active_mutator/defined_constants.rb",
+    "subject": "ActiveMutator::DefinedConstants (class body)",
+    "description": "delete `private_class_method :namespace_wrapper?`",
+    "original_snippet": "private_class_method :namespace_wrapper?",
+    "ordinal": 0
+  },
+  {
+    "file": "lib/active_mutator/operators/base.rb",
+    "subject": "ActiveMutator::Operators::Base.inherited",
+    "description": "delete `super`",
+    "original_snippet": "super",
+    "ordinal": 0
+  },
+  {
+    "file": "lib/active_mutator/operators/base.rb",
+    "subject": "ActiveMutator::Operators::Base (class body)",
+    "description": "delete `private`",
+    "original_snippet": "private",
+    "ordinal": 0
+  },
+  {
+    "file": "lib/active_mutator/operators/literal.rb",
+    "subject": "ActiveMutator::Operators::Literal (class body)",
+    "description": "delete `private`",
+    "original_snippet": "private",
+    "ordinal": 0
+  },
+  {
+    "file": "lib/active_mutator/operators/logical_operator.rb",
+    "subject": "ActiveMutator::Operators::LogicalOperator (class body)",
+    "description": "delete `private`",
+    "original_snippet": "private",
+    "ordinal": 0
+  },
+  {
+    "file": "lib/active_mutator/reporter/github.rb",
+    "subject": "ActiveMutator::Reporter::Github (class body)",
+    "description": "delete `private`",
+    "original_snippet": "private",
+    "ordinal": 0
+  },
+  {
+    "file": "lib/active_mutator/reporter/json.rb",
+    "subject": "ActiveMutator::Reporter::Json (class body)",
+    "description": "delete `private`",
+    "original_snippet": "private",
+    "ordinal": 0
+  },
+  {
+    "file": "lib/active_mutator/scheduler.rb",
+    "subject": "ActiveMutator::Scheduler (class body)",
+    "description": "delete `private`",
+    "original_snippet": "private",
+    "ordinal": 0
+  },
+  {
+    "file": "lib/active_mutator/subject_matcher.rb",
+    "subject": "ActiveMutator::SubjectMatcher (class body)",
+    "description": "delete `private`",
+    "original_snippet": "private",
+    "ordinal": 0
+  },
+  {
+    "file": "lib/active_mutator/timeout_calibrator.rb",
+    "subject": "ActiveMutator::TimeoutCalibrator (class body)",
+    "description": "delete `private`",
+    "original_snippet": "private",
+    "ordinal": 0
+  },
+  {
+    "file": "lib/active_mutator/timeout_calibrator.rb",
+    "subject": "ActiveMutator::TimeoutCalibrator#median",
+    "description": "replace `.sort` with `.reverse`",
+    "original_snippet": "sort",
     "ordinal": 0
   }
 ]
