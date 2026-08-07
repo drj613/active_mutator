@@ -70,5 +70,63 @@ RSpec.describe ActiveMutator::Baseline, :integration do
       env = baseline.send(:baseline_env, "/proj/.active_mutator/coverage.json")
       expect(env["ACTIVE_MUTATOR_SPEC_PATHS"]).to eq("test:engines/foo/spec")
     end
+
+    describe "cache invalidation on spec_paths change" do
+      def write_cache(out_path, digests, spec_paths: :omit)
+        data = { "version" => 2, "records" => {}, "times" => {}, "digests" => digests }
+        data["spec_paths"] = spec_paths unless spec_paths == :omit
+        File.write(out_path, JSON.generate(data))
+      end
+
+      it "forces a full refresh when the cached spec_paths differ from the configured ones, even if digests match" do
+        Dir.mktmpdir do |root|
+          cache_dir = File.join(root, ".active_mutator")
+          FileUtils.mkdir_p(cache_dir)
+          out_path = File.join(cache_dir, "coverage.json")
+          baseline = described_class.new(root: root, spec_paths: ["test"], cache_dir: cache_dir)
+          digests = baseline.send(:current_digests)
+          write_cache(out_path, digests, spec_paths: ["spec"])
+          allow(baseline).to receive(:run_baseline!)
+
+          map = baseline.coverage_map
+
+          expect(baseline.last_refresh).to eq(:full)
+          expect(baseline).to have_received(:run_baseline!)
+          expect(map).to be_a(ActiveMutator::CoverageMap)
+        end
+      end
+
+      it "does not force a full refresh for a pre-0.4.0 cache (no spec_paths key) under the default config" do
+        Dir.mktmpdir do |root|
+          cache_dir = File.join(root, ".active_mutator")
+          FileUtils.mkdir_p(cache_dir)
+          out_path = File.join(cache_dir, "coverage.json")
+          baseline = described_class.new(root: root, cache_dir: cache_dir)
+          digests = baseline.send(:current_digests)
+          write_cache(out_path, digests) # no spec_paths key at all
+          allow(baseline).to receive(:run_baseline!)
+
+          baseline.coverage_map
+
+          expect(baseline.last_refresh).to eq(:cached)
+          expect(baseline).not_to have_received(:run_baseline!)
+        end
+      end
+
+      it "stamps the configured spec_paths onto the cache" do
+        Dir.mktmpdir do |root|
+          cache_dir = File.join(root, ".active_mutator")
+          FileUtils.mkdir_p(cache_dir)
+          out_path = File.join(cache_dir, "coverage.json")
+          baseline = described_class.new(root: root, spec_paths: ["test"], cache_dir: cache_dir)
+          write_cache(out_path, {})
+          allow(baseline).to receive(:run_baseline!)
+
+          baseline.coverage_map
+
+          expect(JSON.parse(File.read(out_path))["spec_paths"]).to eq(["test"])
+        end
+      end
+    end
   end
 end

@@ -20,11 +20,17 @@ module ActiveMutator
       digests = current_digests
       if !force && File.exist?(@out_path)
         map = CoverageMap.load(@out_path)
-        if map.fresh?(digests)
+        # A spec_paths change silently degrades the delta classifier: files
+        # under a removed spec path just vanish from the digest scan, so
+        # BaselineDelta treats their stale example records as untouched
+        # source coverage instead of dropping them. Force a full rebuild
+        # whenever the configured spec_paths differ from what the cache was
+        # stamped with.
+        if stored_spec_paths(map) == @spec_paths && map.fresh?(digests)
           @last_refresh = :cached
           return map
         end
-        if map.version == 2
+        if stored_spec_paths(map) == @spec_paths && map.version == 2
           delta = BaselineDelta.compute(old_digests: stored_digests(map), new_digests: digests,
                                         coverage_map: map, root: @root, spec_paths: @spec_paths)
           unless delta.full?
@@ -85,6 +91,12 @@ module ActiveMutator
       JSON.parse(File.read(@out_path)).fetch("digests", {})
     end
 
+    # A pre-0.4.0 cache predates spec_paths and has no key; treat that as the
+    # old implicit default so existing default-config caches stay valid.
+    def stored_spec_paths(map)
+      JSON.parse(File.read(@out_path)).fetch("spec_paths", ["spec"])
+    end
+
     def run_partial!(delta)
       targets = delta.rerun_spec_files + delta.rerun_example_ids
       partial_out = File.join(@cache_dir, "partial.json")
@@ -124,6 +136,7 @@ module ActiveMutator
     def stamp_digests(digests)
       data = JSON.parse(File.read(@out_path))
       data["digests"] = digests
+      data["spec_paths"] = @spec_paths
       AtomicFile.write(@out_path, JSON.generate(data))
     end
 
