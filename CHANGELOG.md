@@ -4,6 +4,16 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [0.4.0] - 2026-08-07
+
+- `--spec-path` / `spec_paths` config: spec discovery, coverage baseline,
+  phase-2 escalation, and helper preload now honor non-standard spec
+  directories (#35). Default (`spec/`) unchanged. Changing `spec_paths`
+  between runs forces a full baseline; empty lists are a config error.
+- Equivalent-mutant ledger re-audited (#34): 15 previously-accepted mutants
+  are now killed by real tests, every remaining entry re-justified, and 12
+  previously-untracked full-run survivors recorded as equivalent (47 → 45).
+
 ## [0.3.0] - 2026-07-30
 
 ### Added
