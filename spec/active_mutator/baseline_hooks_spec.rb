@@ -55,5 +55,14 @@ RSpec.describe ActiveMutator::BaselineHooks do
       expect(payload["times"]).to eq(times)
       expect(payload).not_to have_key("map")
     end
+
+    it "records the expected example count when given" do
+      payload = described_class.build_payload({}, {}, expected_examples: 7)
+      expect(payload["expected_examples"]).to eq(7)
+    end
+
+    it "omits the expected example count when unknown" do
+      expect(described_class.build_payload({}, {})).not_to have_key("expected_examples")
+    end
   end
 end

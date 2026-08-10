@@ -54,6 +54,38 @@ RSpec.describe ActiveMutator::Baseline, :integration do
     expect(digests).to have_key(".rspec")
   end
 
+  describe "aborted-run detection" do
+    def write_payload(dir, records:, expected: :omit)
+      out = File.join(dir, "coverage.json")
+      data = { "version" => 2, "records" => records, "times" => {} }
+      data["expected_examples"] = expected unless expected == :omit
+      File.write(out, JSON.generate(data))
+      out
+    end
+
+    it "raises when the subprocess recorded fewer examples than it expected to run" do
+      Dir.mktmpdir do |dir|
+        out = write_payload(dir, records: { "./spec/a_spec.rb[1:1]" => [] }, expected: 3)
+        expect { described_class.new(root: dir).send(:verify_complete!, out) }
+          .to raise_error(ActiveMutator::BaselineFailed, /1 of 3/)
+      end
+    end
+
+    it "accepts a complete run" do
+      Dir.mktmpdir do |dir|
+        out = write_payload(dir, records: { "./spec/a_spec.rb[1:1]" => [] }, expected: 1)
+        expect { described_class.new(root: dir).send(:verify_complete!, out) }.not_to raise_error
+      end
+    end
+
+    it "accepts a payload without an expected count (pre-0.4.0 hooks)" do
+      Dir.mktmpdir do |dir|
+        out = write_payload(dir, records: {})
+        expect { described_class.new(root: dir).send(:verify_complete!, out) }.not_to raise_error
+      end
+    end
+  end
+
   describe "spec_paths" do
     it "includes custom spec paths in the digest scan" do
       Dir.mktmpdir do |root|

@@ -66,6 +66,25 @@ module ActiveMutator
       ok = system(env, "bundle", "exec", "rspec", chdir: @root, out: :err)
       raise BaselineFailed, "baseline suite failed, fix the suite before mutating" unless ok
       raise BaselineFailed, "baseline produced no coverage output" unless File.exist?(@out_path)
+
+      verify_complete!(@out_path)
+    end
+
+    # An aborted subprocess can still exit 0 with a partial map (RSpec
+    # rescues Errno::EPIPE and runs after(:suite)); stamping that as fresh
+    # silently reports every mutant uncovered. Payloads without the count
+    # predate this check and are accepted as-is.
+    def verify_complete!(out_path)
+      payload = JSON.parse(File.read(out_path))
+      expected = payload["expected_examples"]
+      return unless expected
+
+      recorded = payload.fetch("records", {}).size
+      return if recorded >= expected
+
+      raise BaselineFailed,
+            "baseline aborted early: #{recorded} of #{expected} examples recorded — " \
+            "re-run without interrupting the suite"
     end
 
     def baseline_env(out_path)
@@ -105,6 +124,8 @@ module ActiveMutator
         ok = system(env, "bundle", "exec", "rspec", *targets, chdir: @root, out: :err)
         raise BaselineFailed, "partial baseline run failed, fix the suite before mutating" unless ok
         raise BaselineFailed, "partial baseline produced no output" unless File.exist?(partial_out)
+
+        verify_complete!(partial_out)
       end
       merge_partial!(partial_out, delta)
     ensure
