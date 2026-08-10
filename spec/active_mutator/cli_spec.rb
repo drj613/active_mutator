@@ -137,6 +137,20 @@ RSpec.describe ActiveMutator::CLI do
       expect(described_class.parse(["--spec-path", "test//"]).spec_paths).to eq(["test"])
     end
 
+    it "prints the version and exits 0 for --version" do
+      code = nil
+      run = lambda do
+        ActiveMutator::CLI.run(["--version"])
+      rescue SystemExit
+        # OptionParser's built-in handler exits the process; that must not
+        # happen (and RSpec would silently swallow it mid-example).
+        :system_exit
+      end
+      expect { code = run.call }
+        .to output("active_mutator #{ActiveMutator::VERSION}\n").to_stdout
+      expect(code).to eq(0)
+    end
+
     it "rejects a blank --spec-path entry" do
       expect { described_class.parse(["--spec-path", ""]) }
         .to raise_error(OptionParser::InvalidArgument, /must not be blank/)

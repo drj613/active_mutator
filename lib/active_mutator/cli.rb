@@ -3,6 +3,13 @@ require "optparse"
 module ActiveMutator
   module CLI
     def self.run(argv)
+      # Handled before OptionParser: its built-in --version handler prints
+      # "version unknown" and exits the process.
+      if argv.include?("--version")
+        puts "active_mutator #{VERSION}"
+        return 0
+      end
+
       Runner.new(parse(argv)).call
     rescue OptionParser::ParseError, Error => e
       warn "active_mutator: #{e.message}"
