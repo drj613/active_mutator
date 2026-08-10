@@ -997,10 +997,11 @@ RSpec.describe ActiveMutator::Runner do
       end
     end
 
-    it "builds the convention spec path from the first spec path" do
+    it "builds a convention spec path under every configured spec path" do
       cfg = ActiveMutator::CLI.parse([]).with(root: "/proj", spec_paths: ["test", "spec"])
       runner = described_class.new(cfg)
-      expect(runner.send(:convention_spec_rel, "/proj/lib/foo/bar.rb")).to eq("test/foo/bar_spec.rb")
+      expect(runner.send(:convention_spec_rels, "/proj/lib/foo/bar.rb"))
+        .to eq(["test/foo/bar_spec.rb", "spec/foo/bar_spec.rb"])
     end
 
     it "finds the preload helper under a custom spec path" do

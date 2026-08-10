@@ -201,14 +201,15 @@ module ActiveMutator
     def examples_for_mutation(mutation, map)
       return map.examples_for(mutation.subject.file, coverage_lines(mutation)) unless mutation.subject.class_body?
 
-      (map.examples_covering_file(mutation.subject.file) |
-        map.examples_for_spec_file(convention_spec_rel(mutation.subject.file))).sort
+      convention_examples = convention_spec_rels(mutation.subject.file)
+                            .flat_map { |rel| map.examples_for_spec_file(rel) }
+      (map.examples_covering_file(mutation.subject.file) | convention_examples).sort
     end
 
-    def convention_spec_rel(file)
+    def convention_spec_rels(file)
       rel = file.delete_prefix(@config.root.chomp("/") + "/").delete_suffix(".rb")
       rest = rel.sub(%r{\A[^/]+/}, "")
-      "#{@config.spec_paths.first}/#{rest}_spec.rb"
+      @config.spec_paths.map { |sp| "#{sp}/#{rest}_spec.rb" }
     end
 
     def build_reporter
