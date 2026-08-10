@@ -103,6 +103,7 @@ RSpec.describe ActiveMutator::CLI do
         "Spec helper to preload in the parent (default: auto-detect)",
         "Skip spec-helper preload",
         "Covering-path prefix that forces the serial lane (repeatable; replaces defaults on first use)",
+        "Directory holding spec files, relative to root (repeatable; replaces the default spec/ on first use)",
         "Extra timeout budget for serial-lane mutants",
         "Scale timeout budgets from observed worker wall times (default: on)",
         "Record surviving mutants into the acceptance ledger",
@@ -117,6 +118,53 @@ RSpec.describe ActiveMutator::CLI do
         %w[--serial-pattern spec/browser/ --serial-pattern spec/slow/]
       )
       expect(config.serial_patterns).to eq(["spec/browser/", "spec/slow/"])
+    end
+
+    it "defaults spec_paths to [\"spec\"]" do
+      expect(described_class.parse([]).spec_paths).to eq(["spec"])
+    end
+
+    it "replaces the default on the first --spec-path and appends after" do
+      config = described_class.parse(["--spec-path", "engines/foo/spec", "--spec-path", "test"])
+      expect(config.spec_paths).to eq(["engines/foo/spec", "test"])
+    end
+
+    it "normalizes trailing slashes in --spec-path" do
+      expect(described_class.parse(["--spec-path", "test/"]).spec_paths).to eq(["test"])
+    end
+
+    it "normalizes repeated trailing slashes in --spec-path" do
+      expect(described_class.parse(["--spec-path", "test//"]).spec_paths).to eq(["test"])
+    end
+
+    it "prints the version and exits 0 for --version" do
+      code = nil
+      run = lambda do
+        ActiveMutator::CLI.run(["--version"])
+      rescue SystemExit
+        # OptionParser's built-in handler exits the process; that must not
+        # happen (and RSpec would silently swallow it mid-example).
+        :system_exit
+      end
+      expect { code = run.call }
+        .to output("active_mutator #{ActiveMutator::VERSION}\n").to_stdout
+      expect(code).to eq(0)
+    end
+
+    it "rejects a blank --spec-path entry" do
+      expect { described_class.parse(["--spec-path", ""]) }
+        .to raise_error(OptionParser::InvalidArgument, /must not be blank/)
+    end
+
+    it "rejects a slash-only --spec-path entry" do
+      expect { described_class.parse(["--spec-path", "/"]) }
+        .to raise_error(OptionParser::InvalidArgument, /must not be blank/)
+    end
+
+    it "rejects an empty spec_paths list from a stubbed config" do
+      allow(ActiveMutator::ConfigFile).to receive(:load).and_return(spec_paths: [])
+      expect { described_class.parse([]) }
+        .to raise_error(OptionParser::InvalidArgument, /--spec-path list must not be empty/)
     end
 
     it "aliases --changed to --since HEAD" do
@@ -229,6 +277,12 @@ RSpec.describe ActiveMutator::CLI do
 
     it "works with no config file present" do
       expect(described_class.parse([]).fail_at).to be_nil
+    end
+
+    it "normalizes trailing slashes in a config-file spec_paths value" do
+      File.write(".active_mutator.yml", "spec_paths:\n  - test/\n")
+      config = described_class.parse([])
+      expect(config.spec_paths).to eq(["test"])
     end
   end
 

@@ -43,6 +43,29 @@ RSpec.describe ActiveMutator::ConfigFile do
     expect(described_class.load(root)).to eq(operators: ["ops/custom.rb"])
   end
 
+  it "accepts spec_paths as a string list" do
+    write_config("spec_paths:\n  - engines/foo/spec\n  - test\n")
+    expect(described_class.load(root)[:spec_paths]).to eq(["engines/foo/spec", "test"])
+  end
+
+  it "rejects an empty spec_paths list" do
+    write_config("spec_paths: []\n")
+    expect { described_class.load(root) }
+      .to raise_error(ActiveMutator::Error, /\.active_mutator\.yml: spec_paths must not be empty/)
+  end
+
+  it "raises when spec_paths is not a list" do
+    write_config("spec_paths: spec\n")
+    expect { described_class.load(root) }
+      .to raise_error(ActiveMutator::Error, /spec_paths must be a list of strings/)
+  end
+
+  it "raises when spec_paths contains non-strings" do
+    write_config("spec_paths:\n  - 42\n")
+    expect { described_class.load(root) }
+      .to raise_error(ActiveMutator::Error, /spec_paths must be a list of strings/)
+  end
+
   it "accepts adaptive_timeout: false" do
     write_config("adaptive_timeout: false\n")
     expect(described_class.load(root)[:adaptive_timeout]).to be false

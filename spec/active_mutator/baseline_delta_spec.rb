@@ -81,6 +81,34 @@ RSpec.describe ActiveMutator::BaselineDelta do
     expect(compute({ "spec/shared_stuff.rb" => "x" }, {}).full?).to be(true)
   end
 
+  it "sorts rerun_example_ids rather than preserving discovery order" do
+    recs = {
+      "./spec/b_spec.rb[1:1]" => [["/project/lib/z.rb", 1]],
+      "./spec/a_spec.rb[1:1]" => [["/project/lib/z.rb", 2]],
+      "./spec/c_spec.rb[1:1]" => [["/project/lib/z.rb", 3]]
+    }
+    delta = compute({ "lib/z.rb" => "x" }, { "lib/z.rb" => "y" }, recs: recs)
+    expect(delta.rerun_example_ids)
+      .to eq(["./spec/a_spec.rb[1:1]", "./spec/b_spec.rb[1:1]", "./spec/c_spec.rb[1:1]"])
+  end
+
+  it "sorts drop_example_ids rather than preserving discovery order" do
+    recs = {
+      "./spec/a_spec.rb[2:1]" => [["/project/lib/z.rb", 1]],
+      "./spec/a_spec.rb[3:1]" => [["/project/lib/z.rb", 1]],
+      "./spec/a_spec.rb[1:1]" => [["/project/lib/z.rb", 2]]
+    }
+    delta = compute({ "spec/a_spec.rb" => "x" }, {}, recs: recs)
+    expect(delta.drop_example_ids)
+      .to eq(["./spec/a_spec.rb[1:1]", "./spec/a_spec.rb[2:1]", "./spec/a_spec.rb[3:1]"])
+  end
+
+  it "sorts drop_source_files rather than preserving discovery order" do
+    d = { "lib/z.rb" => "x", "lib/a.rb" => "y", "lib/m.rb" => "w" }
+    delta = compute(d, {}, recs: {})
+    expect(delta.drop_source_files).to eq(["/project/lib/a.rb", "/project/lib/m.rb", "/project/lib/z.rb"])
+  end
+
   it "goes full when non-rb keys change (Gemfile.lock, .rspec)" do
     expect(compute({ "Gemfile.lock" => "x" }, { "Gemfile.lock" => "y" }).full?).to be(true)
     expect(compute({ ".rspec" => "x" }, { ".rspec" => "y" }).full?).to be(true)
@@ -300,6 +328,44 @@ RSpec.describe ActiveMutator::BaselineDelta do
         )
         expect(delta.full?).to be(false)
         expect(delta.rerun_spec_files).to eq(["spec/a_spec.rb", "spec/b_spec.rb"])
+      end
+    end
+  end
+
+  describe "spec_paths" do
+    it "classifies files under a custom spec path as spec files" do
+      recs = { "./test/foo_spec.rb[1:1]" => [["/proj/lib/a.rb", 3]] }
+      delta = described_class.compute(
+        old_digests: { "test/foo_spec.rb" => "a" },
+        new_digests: { "test/foo_spec.rb" => "b" },
+        coverage_map: coverage_map(recs), root: "/proj", spec_paths: ["test"]
+      )
+      expect(delta.rerun_spec_files).to eq(["test/foo_spec.rb"])
+    end
+
+    it "treats support dirs under custom spec paths as full triggers" do
+      expect(described_class.full_trigger?("test/support/helpers.rb", spec_paths: ["test"])).to be true
+      expect(described_class.full_trigger?("spec/support/helpers.rb", spec_paths: ["test"])).to be false
+    end
+
+    it "globs spec contents from every configured spec path" do
+      Dir.mktmpdir do |root|
+        FileUtils.mkdir_p(File.join(root, "test"))
+        FileUtils.mkdir_p(File.join(root, "engines/foo/spec"))
+        File.write(File.join(root, "test/a_spec.rb"), "A")
+        File.write(File.join(root, "engines/foo/spec/b_spec.rb"), "B")
+        contents = described_class.spec_file_contents(root: root, spec_paths: ["test", "engines/foo/spec"])
+        expect(contents.keys.map { |k| k.delete_prefix("#{root}/") })
+          .to contain_exactly("test/a_spec.rb", "engines/foo/spec/b_spec.rb")
+      end
+    end
+
+    it "recurses into nested spec directories, not just the top level" do
+      Dir.mktmpdir do |root|
+        FileUtils.mkdir_p(File.join(root, "test/nested"))
+        File.write(File.join(root, "test/nested/deep_spec.rb"), "D")
+        contents = described_class.spec_file_contents(root: root, spec_paths: ["test"])
+        expect(contents.keys.map { |k| k.delete_prefix("#{root}/") }).to eq(["test/nested/deep_spec.rb"])
       end
     end
   end

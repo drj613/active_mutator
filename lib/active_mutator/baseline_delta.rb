@@ -15,10 +15,10 @@ module ActiveMutator
     # files, a full re-run is cheaper and simpler than a giant partial one.
     REFERENCE_FULL_RATIO = 0.5
 
-    def self.compute(old_digests:, new_digests:, coverage_map:, root:)
+    def self.compute(old_digests:, new_digests:, coverage_map:, root:, spec_paths: ["spec"])
       changed = (old_digests.keys | new_digests.keys)
                 .reject { |k| old_digests[k] == new_digests[k] }
-      return FULL if changed.any? { |k| full_trigger?(k) }
+      return FULL if changed.any? { |k| full_trigger?(k, spec_paths: spec_paths) }
 
       rerun_spec_files = []
       rerun_example_ids = []
@@ -35,7 +35,7 @@ module ActiveMutator
       changed.each do |rel|
         added = !old_digests.key?(rel)
         deleted = !new_digests.key?(rel)
-        if rel.start_with?("spec/")
+        if spec_paths.any? { |sp| rel.start_with?("#{sp}/") }
           owned = coverage_map.examples_for_spec_file(rel)
           if deleted
             # A deleted spec file with no records is support-like: other spec
@@ -54,7 +54,7 @@ module ActiveMutator
             rerun_example_ids.concat(coverage_map.examples_covering_file(abs))
           end
           unless deleted
-            spec_contents ||= Dir[File.join(root, "spec/**/*_spec.rb")].to_h { |f| [f, File.read(f)] }
+            spec_contents ||= spec_file_contents(root: root, spec_paths: spec_paths)
             candidates = newly_covering_candidates(root: root, rel: rel, coverage_map: coverage_map,
                                                    spec_contents: spec_contents)
             return FULL if candidates == :full
@@ -71,8 +71,17 @@ module ActiveMutator
                 drop_source_files: drop_source_files.uniq.sort)
     end
 
-    def self.full_trigger?(rel)
-      rel.start_with?("spec/support/") || !rel.end_with?(".rb")
+    def self.full_trigger?(rel, spec_paths: ["spec"])
+      spec_paths.any? { |sp| rel.start_with?("#{sp}/support/") } || !rel.end_with?(".rb")
+    end
+
+    # All *_spec.rb files under the configured spec paths, absolute path =>
+    # file content. Shared by the delta scan and Runner's phase-2 escalation
+    # so "where do specs live" is answered in exactly one place (#35).
+    def self.spec_file_contents(root:, spec_paths:)
+      spec_paths
+        .flat_map { |sp| Dir[File.join(root, sp, "**", "*_spec.rb")] }
+        .uniq.to_h { |f| [f, File.read(f)] }
     end
 
     # #11: an unchanged spec file can START covering a changed source file

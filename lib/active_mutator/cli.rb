@@ -3,6 +3,13 @@ require "optparse"
 module ActiveMutator
   module CLI
     def self.run(argv)
+      # Handled before OptionParser: its built-in --version handler prints
+      # "version unknown" and exits the process.
+      if argv.include?("--version")
+        puts "active_mutator #{VERSION}"
+        return 0
+      end
+
       Runner.new(parse(argv)).call
     rescue OptionParser::ParseError, Error => e
       warn "active_mutator: #{e.message}"
@@ -22,6 +29,7 @@ module ActiveMutator
         # boot cost (RSpec setup + spec file loading).
         requires: [], timeout_factor: 8.0, timeout_floor: 10.0, force_baseline: false,
         preload_helper: nil, serial_patterns: ["spec/system/", "spec/features/"],
+        spec_paths: ["spec"],
         browser_boot_seconds: 15.0, accept_survivors: false, exclude: [],
         max_mutants: nil, debug_plan: false, fail_at: nil, adaptive_timeout: true,
         operators: [], class_level: true, class_level_closure_cap: 10
@@ -47,6 +55,11 @@ module ActiveMutator
           options[:serial_patterns_replaced] = true
           options[:serial_patterns] << v
         end
+        o.on("--spec-path DIR", "Directory holding spec files, relative to root (repeatable; replaces the default spec/ on first use)") do |v|
+          options[:spec_paths] = [] unless options[:spec_paths_replaced]
+          options[:spec_paths_replaced] = true
+          options[:spec_paths] << v
+        end
         o.on("--browser-boot-seconds S", Float, "Extra timeout budget for serial-lane mutants") { |v| options[:browser_boot_seconds] = v }
         o.on("--[no-]adaptive-timeout", "Scale timeout budgets from observed worker wall times (default: on)") { |v| options[:adaptive_timeout] = v }
         o.on("--accept-survivors", "Record surviving mutants into the acceptance ledger") { options[:accept_survivors] = true }
@@ -59,6 +72,12 @@ module ActiveMutator
         end
       end.parse(argv)
       options.delete(:serial_patterns_replaced)
+      options.delete(:spec_paths_replaced)
+      options[:spec_paths] = options[:spec_paths].map { |sp| sp.sub(%r{/+\z}, "") }
+      raise OptionParser::InvalidArgument, "--spec-path list must not be empty" if options[:spec_paths].empty?
+      if options[:spec_paths].any? { |sp| sp.strip.empty? }
+        raise OptionParser::InvalidArgument, "--spec-path entries must not be blank"
+      end
 
       Config.new(paths: paths, root: Dir.pwd, **options)
     end

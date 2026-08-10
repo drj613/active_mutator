@@ -83,6 +83,9 @@ RSpec.describe ActiveMutator::Worker do
   end
 
   it "sets fail_fast so the first killing example ends the run" do
+    # Under self-mutation the OUTER worker's running frame has already set
+    # fail_fast = 1 globally; reset so THIS call's effect is what we observe.
+    RSpec.configuration.fail_fast = nil
     fail_fast_seen = nil
     allow(rspec_runner).to receive(:run_specs) do
       fail_fast_seen = RSpec.configuration.fail_fast

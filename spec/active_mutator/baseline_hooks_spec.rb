@@ -1,6 +1,11 @@
 require "active_mutator/baseline_hooks"
 
 RSpec.describe ActiveMutator::BaselineHooks do
+  it "initializes RECORDS and TIMES as empty hashes" do
+    expect(described_class::RECORDS).to be_a(Hash)
+    expect(described_class::TIMES).to be_a(Hash)
+  end
+
   describe ".diff_coverage" do
     it "returns [path, line] pairs whose hit count increased" do
       before = { "/root/lib/a.rb" => { lines: [1, 0, nil, 2] } }
@@ -24,6 +29,20 @@ RSpec.describe ActiveMutator::BaselineHooks do
       expect(described_class.diff_coverage({}, after, "/root"))
         .to eq([["/root/lib/a.rb", 1]])
     end
+
+    it "excludes files under configured spec paths from coverage hits" do
+      after = {
+        "/proj/test/a_spec.rb" => { lines: [1] },
+        "/proj/lib/a.rb" => { lines: [1] }
+      }
+      hits = described_class.diff_coverage({}, after, "/proj", spec_paths: ["test"])
+      expect(hits.map(&:first)).to eq(["/proj/lib/a.rb"])
+    end
+
+    it "defaults spec_paths to spec/" do
+      after = { "/proj/spec/a_spec.rb" => { lines: [1] } }
+      expect(described_class.diff_coverage({}, after, "/proj")).to be_empty
+    end
   end
 
   describe ".build_payload" do
@@ -35,6 +54,15 @@ RSpec.describe ActiveMutator::BaselineHooks do
       expect(payload["records"]).to eq(records)
       expect(payload["times"]).to eq(times)
       expect(payload).not_to have_key("map")
+    end
+
+    it "records the expected example count when given" do
+      payload = described_class.build_payload({}, {}, expected_examples: 7)
+      expect(payload["expected_examples"]).to eq(7)
+    end
+
+    it "omits the expected example count when unknown" do
+      expect(described_class.build_payload({}, {})).not_to have_key("expected_examples")
     end
   end
 end

@@ -3,7 +3,8 @@ require "etc"
 module ActiveMutator
   Config = Data.define(:paths, :since, :subject_filter, :jobs, :format, :requires,
                        :timeout_factor, :timeout_floor, :force_baseline, :root,
-                       :preload_helper, :serial_patterns, :browser_boot_seconds,
+                       :preload_helper, :serial_patterns, :spec_paths,
+                       :browser_boot_seconds,
                        :accept_survivors, :exclude, :max_mutants, :debug_plan,
                        :fail_at, :adaptive_timeout, :operators,
                        :class_level, :class_level_closure_cap)

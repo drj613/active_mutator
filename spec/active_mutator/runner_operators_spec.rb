@@ -15,6 +15,7 @@ RSpec.describe ActiveMutator::Runner, "#load_operators" do
       paths: ["lib"], since: nil, subject_filter: nil, jobs: 2, format: :terminal,
       requires: [], timeout_factor: 4.0, timeout_floor: 2.0, force_baseline: false,
       root: @root, preload_helper: nil, serial_patterns: [],
+      spec_paths: ["spec"],
       browser_boot_seconds: 15.0, accept_survivors: false, exclude: [],
       max_mutants: nil, debug_plan: false, fail_at: nil, adaptive_timeout: true,
       operators: operators, class_level: true, class_level_closure_cap: 10

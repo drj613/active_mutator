@@ -9,7 +9,8 @@ module ActiveMutator
     RECORDS = {}
     TIMES = {}
 
-    def self.diff_coverage(before, after, root)
+    def self.diff_coverage(before, after, root, spec_paths: ["spec"])
+      prefixes = spec_paths.map { |sp| "/#{sp}/" }
       hits = []
       after.each do |path, data|
         next unless path.start_with?(root)
@@ -19,7 +20,7 @@ module ActiveMutator
         # spec/fixtures/ tree), which would otherwise falsely exclude every
         # file under it.
         relative = path.delete_prefix(root)
-        next if relative.start_with?("/spec/")
+        next if prefixes.any? { |p| relative.start_with?(p) }
 
         before_lines = before.dig(path, :lines)
         data[:lines].each_with_index do |count, idx|
@@ -32,8 +33,10 @@ module ActiveMutator
       hits
     end
 
-    def self.build_payload(records, times)
-      { "version" => 2, "records" => records, "times" => times }
+    def self.build_payload(records, times, expected_examples: nil)
+      payload = { "version" => 2, "records" => records, "times" => times }
+      payload["expected_examples"] = expected_examples if expected_examples
+      payload
     end
   end
 end
@@ -51,16 +54,22 @@ if ENV["ACTIVE_MUTATOR_BASELINE_OUT"]
       elapsed = Process.clock_gettime(Process::CLOCK_MONOTONIC) - started
       after = Coverage.peek_result
       root = ENV.fetch("ACTIVE_MUTATOR_ROOT")
+      spec_paths = ENV.fetch("ACTIVE_MUTATOR_SPEC_PATHS", "spec").split(":")
       ActiveMutator::BaselineHooks::RECORDS[example.id] =
-        ActiveMutator::BaselineHooks.diff_coverage(before, after, root)
+        ActiveMutator::BaselineHooks.diff_coverage(before, after, root, spec_paths: spec_paths)
       # NOT example.execution_result.run_time: that is nil until after
       # around hooks complete.
       ActiveMutator::BaselineHooks::TIMES[example.id] = elapsed
     end
 
     config.after(:suite) do
+      # The expected count lets the parent detect an aborted run: RSpec
+      # swallows some mid-suite failures (e.g. Errno::EPIPE on a closed
+      # stdout) yet still runs after(:suite) and exits 0, which would stamp
+      # a partial coverage map as a fresh, trusted baseline.
       payload = ActiveMutator::BaselineHooks.build_payload(
-        ActiveMutator::BaselineHooks::RECORDS, ActiveMutator::BaselineHooks::TIMES
+        ActiveMutator::BaselineHooks::RECORDS, ActiveMutator::BaselineHooks::TIMES,
+        expected_examples: RSpec.world.example_count
       )
       File.write(ENV.fetch("ACTIVE_MUTATOR_BASELINE_OUT"), JSON.generate(payload))
     end

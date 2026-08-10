@@ -13,7 +13,8 @@ module ActiveMutator
       ClosureReload.cap = @config.class_level_closure_cap
       preload!
       preload_spec_helper!
-      map = Baseline.new(root: @config.root).coverage_map(force: @config.force_baseline)
+      map = Baseline.new(root: @config.root, spec_paths: @config.spec_paths)
+              .coverage_map(force: @config.force_baseline)
       @reporter.coverage_map = map if @reporter.respond_to?(:coverage_map=)
       subjects = discover_subjects
       analyses = subjects.map { |s| Engine.new.analyze(s) }
@@ -86,7 +87,7 @@ module ActiveMutator
       # its mutant is a known equivalent.)
       return results if candidates.empty?
 
-      spec_contents = Dir[File.join(@config.root, "spec/**/*_spec.rb")].to_h { |f| [f, File.read(f)] }
+      spec_contents = BaselineDelta.spec_file_contents(root: @config.root, spec_paths: @config.spec_paths)
       patterns = {} # subject file => constant-reference pattern (parsed once per file)
       items = {}
       candidates.each do |r|
@@ -200,14 +201,15 @@ module ActiveMutator
     def examples_for_mutation(mutation, map)
       return map.examples_for(mutation.subject.file, coverage_lines(mutation)) unless mutation.subject.class_body?
 
-      (map.examples_covering_file(mutation.subject.file) |
-        map.examples_for_spec_file(convention_spec_rel(mutation.subject.file))).sort
+      convention_examples = convention_spec_rels(mutation.subject.file)
+                            .flat_map { |rel| map.examples_for_spec_file(rel) }
+      (map.examples_covering_file(mutation.subject.file) | convention_examples).sort
     end
 
-    def convention_spec_rel(file)
+    def convention_spec_rels(file)
       rel = file.delete_prefix(@config.root.chomp("/") + "/").delete_suffix(".rb")
       rest = rel.sub(%r{\A[^/]+/}, "")
-      "spec/#{rest}_spec.rb"
+      @config.spec_paths.map { |sp| "#{sp}/#{rest}_spec.rb" }
     end
 
     def build_reporter
@@ -293,7 +295,11 @@ module ActiveMutator
       helper = if @config.preload_helper
                  File.expand_path(@config.preload_helper, @config.root)
                else
-                 %w[spec/rails_helper.rb spec/spec_helper.rb]
+                 # Precedence: within each spec path rails_helper wins over
+                 # spec_helper; earlier spec paths win over later ones — same
+                 # as today for the default ["spec"].
+                 @config.spec_paths
+                   .flat_map { |sp| ["#{sp}/rails_helper.rb", "#{sp}/spec_helper.rb"] }
                    .map { |p| File.join(@config.root, p) }
                    .find { |p| File.exist?(p) }
                end

@@ -9,3 +9,4 @@ Gemfile.lock
 *.gem
 bench/.cache/
 bench/results/
+.worktrees/
