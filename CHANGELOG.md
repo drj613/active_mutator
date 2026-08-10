@@ -4,7 +4,7 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
-## [0.4.0] - 2026-08-07
+## [0.4.0] - 2026-08-10
 
 - `--spec-path` / `spec_paths` config: spec discovery, coverage baseline,
   phase-2 escalation, and helper preload now honor non-standard spec
@@ -13,6 +13,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Equivalent-mutant ledger re-audited (#34): 15 previously-accepted mutants
   are now killed by real tests, every remaining entry re-justified, and 12
   previously-untracked full-run survivors recorded as equivalent (47 → 45).
+- An aborted baseline suite (e.g. output piped through a closed pipe) is no
+  longer stamped as a fresh coverage map; the run now fails loudly instead
+  of silently reporting every mutant uncovered.
+- Class-body convention specs are discovered under every configured spec
+  path, not just the first.
+- Blank `--spec-path` entries are rejected; `--version` prints the version.
 
 ## [0.3.0] - 2026-07-30
 

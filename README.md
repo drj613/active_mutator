@@ -270,7 +270,10 @@ survivors show inline on the PR diff. Pairs with the CI recipe:
 `--spec-path` tells active_mutator where spec files live (coverage
 classification, digests, escalation); RSpec's own discovery is still the
 project's job — a project with specs under `test/` also needs
-`--default-path test` in its `.rspec`.
+`--default-path test` in its `.rspec`. The serial-lane defaults stay
+`spec/system/` and `spec/features/` regardless of `--spec-path`; a
+custom spec root with browser specs should set `--serial-pattern`
+(e.g. `--serial-pattern test/system/`) itself.
 
 `--debug-plan` prints the planned mutant list as one JSON document
 (`{"planned": [...], "pre_resolved": {...}}`) and exits without running
