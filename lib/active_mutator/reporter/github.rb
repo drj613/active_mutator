@@ -22,7 +22,14 @@ module ActiveMutator
       def annotate(result)
         m = result.mutation
         file = m.subject.file.delete_prefix(@root.chomp("/") + "/")
-        message = "#{m.subject.name}: #{m.description} | - #{m.original_snippet} | + #{m.edit.replacement}"
+        # Newlines survive percent-encoding, so the annotation renders as a
+        # small diff instead of a pipe-separated one-liner.
+        message = <<~MSG.chomp
+          #{m.subject.name}: #{m.description}
+          - #{m.original_snippet}
+          + #{m.edit.replacement}
+          Every test still passed after this change. Add or strengthen a test that fails when it's applied.
+        MSG
         @out.puts "::warning file=#{file},line=#{m.line},title=Surviving mutant::#{encode(message)}"
       end
 

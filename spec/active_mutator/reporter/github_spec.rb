@@ -24,6 +24,14 @@ RSpec.describe ActiveMutator::Reporter::Github do
     expect(warnings.first).to include("replace `>` with `>=`")
   end
 
+  it "formats the message as a multi-line diff with a plain-English hint" do
+    reporter.summary([build_result(:survived)], invalid_count: 0)
+    warning = out.string.lines.find { |l| l.start_with?("::warning") }
+    expect(warning).to include(
+      "Calc#pos: replace `>` with `>=`%0A- x > 0%0A+ x >= 0%0AEvery test still passed"
+    )
+  end
+
   it "percent-encodes newlines and percents in the message" do
     result = build_result(:survived, description: "multi\nline 100%")
     reporter.summary([result], invalid_count: 0)
