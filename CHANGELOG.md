@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-08-31
+
 - GitHub annotations for surviving mutants now render as a multi-line diff
   (`- original` / `+ replacement`) with a plain-English hint, instead of a
   pipe-separated one-liner.
