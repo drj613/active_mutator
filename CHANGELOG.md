@@ -4,6 +4,14 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [Unreleased]
+
+- GitHub annotations for surviving mutants now render as a multi-line diff
+  (`- original` / `+ replacement`) with a plain-English hint, instead of a
+  pipe-separated one-liner.
+- `StatementDeletion` no longer mutates statements containing a heredoc;
+  deleting the node range left the heredoc body behind as unparseable text.
+
 ## [0.4.0] - 2026-08-10
 
 - `--spec-path` / `spec_paths` config: spec discovery, coverage baseline,

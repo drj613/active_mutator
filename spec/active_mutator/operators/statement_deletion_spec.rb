@@ -18,4 +18,19 @@ RSpec.describe ActiveMutator::Operators::StatementDeletion do
   it "deletes statements from an exactly-two-statement body" do
     expect(mutations_of("a\nb", operator)).to contain_exactly("\nb", "a\n")
   end
+
+  it "skips statements containing a heredoc, whose body lies outside the node range" do
+    source = "x = <<~MSG.chomp\n  hi\nMSG\ny = 1"
+    expect(mutations_of(source, operator)).to contain_exactly("x = <<~MSG.chomp\n  hi\nMSG\n")
+  end
+
+  it "still deletes statements with plain string literals, which respond to heredoc? with false" do
+    source = "x = \"hi\"\ny = 1"
+    expect(mutations_of(source, operator)).to contain_exactly("\ny = 1", "x = \"hi\"\n")
+  end
+
+  it "skips statements with a heredoc nested in an argument" do
+    source = "foo(<<~MSG)\n  hi\nMSG\ny = 1"
+    expect(mutations_of(source, operator)).to contain_exactly("foo(<<~MSG)\n  hi\nMSG\n")
+  end
 end

@@ -313,5 +313,12 @@
     "description": "delete `private`",
     "original_snippet": "private",
     "ordinal": 0
+  },
+  {
+    "file": "lib/active_mutator/operators/statement_deletion.rb",
+    "subject": "ActiveMutator::Operators::StatementDeletion (class body)",
+    "description": "delete `private`",
+    "original_snippet": "private",
+    "ordinal": 0
   }
 ]
