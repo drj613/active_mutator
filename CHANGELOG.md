@@ -18,6 +18,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   that changed in the same edit as a source file it covers: RSpec ran only the
   file's old example ids, so the new examples were never attached to the
   coverage map and mutants only they kill showed up as survivors.
+- Forked workers set `PGGSSENCMODE=disable` (unless already set): on macOS,
+  libpq's GSS negotiation after `fork()` segfaulted every def-level mutant
+  into "worker exited without reporting". That message now also carries the
+  last 20 lines of the worker's stderr, so the real crash is visible.
 
 ## [0.4.1] - 2026-08-31
 

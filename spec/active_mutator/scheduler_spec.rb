@@ -284,6 +284,43 @@ RSpec.describe ActiveMutator::Scheduler do
     expect(results.first.details).to eq("worker exited without reporting")
   end
 
+  it "attaches the last 20 lines of the child's stderr when it dies without reporting" do
+    worker = lambda do |_m, _e, _w|
+      25.times { |i| $stderr.puts "line #{i}" }
+      $stderr.puts "[BUG] Segmentation fault"
+      $stderr.flush
+      Process.exit!(1)
+    end
+    results = scheduler(worker: worker).run([item])
+    expect(results.map(&:status)).to eq([:error])
+    details = results.first.details
+    expect(details).to start_with("worker exited without reporting; stderr tail:\n")
+    expect(details).to end_with("[BUG] Segmentation fault")
+    expect(details).to include("line 24")
+    expect(details).not_to include("line 5\n")
+  end
+
+  it "does not clutter a reported result with the child's stderr" do
+    worker = lambda do |_m, _e, writer|
+      $stderr.puts "noise"
+      writer.puts(JSON.generate("status" => "killed", "details" => nil))
+    end
+    results = scheduler(worker: worker).run([item])
+    expect(results.first.details).to be_nil
+  end
+
+  it "disables libpq GSS encryption in the child unless the caller set it" do
+    worker = ->(_m, _e, writer) { writer.puts(JSON.generate("status" => "killed", "details" => ENV.fetch("PGGSSENCMODE"))) }
+    original = ENV.delete("PGGSSENCMODE")
+    begin
+      expect(scheduler(worker: worker).run([item]).first.details).to eq("disable")
+      ENV["PGGSSENCMODE"] = "prefer"
+      expect(scheduler(worker: worker).run([item]).first.details).to eq("prefer")
+    ensure
+      original ? ENV["PGGSSENCMODE"] = original : ENV.delete("PGGSSENCMODE")
+    end
+  end
+
   it "kills over-deadline workers and marks :timeout" do
     worker = ->(_m, _e, _w) { sleep 30 }
     started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
