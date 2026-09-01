@@ -338,7 +338,7 @@ RSpec.describe ActiveMutator::Engine do
       expect(descriptions).to include("replace `true` with `false`")
     end
 
-    it "mutates def bodies inside a `class_methods` block" do
+    it "leaves defs inside a `class_methods` block to their own subjects" do
       analysis, = class_body_analysis(<<~RUBY)
         module Auditable
           extend ActiveSupport::Concern
@@ -348,7 +348,45 @@ RSpec.describe ActiveMutator::Engine do
         end
       RUBY
       descriptions = analysis.mutations.map { |m| m.edit.description }
+      expect(descriptions).not_to include("replace `true` with `false`")
+      expect(descriptions).not_to include("delete `def audited? = true`")
+    end
+
+    it "still mutates non-def statements around a def inside an `included` block" do
+      analysis, = class_body_analysis(<<~RUBY)
+        module Auditable
+          extend ActiveSupport::Concern
+          included do
+            validates :name, presence: true
+            def label
+              "tracked"
+            end
+          end
+        end
+      RUBY
+      descriptions = analysis.mutations.map { |m| m.edit.description }
       expect(descriptions).to include("replace `true` with `false`")
+      expect(descriptions).not_to include('replace string with ""')
+    end
+
+    it "analyzes a `class_methods` def through its own subject" do
+      Dir.mktmpdir do |dir|
+        file = File.join(dir, "auditable.rb")
+        source = <<~RUBY
+          module Auditable
+            extend ActiveSupport::Concern
+            class_methods do
+              def audited? = true
+            end
+          end
+        RUBY
+        File.write(file, source)
+        subject = ActiveMutator::SubjectFinder.call(file).find { |s| s.name == "Auditable::ClassMethods#audited?" }
+        analysis = ActiveMutator::Engine.new.analyze(subject, source: source)
+        mutation = analysis.mutations.find { |m| m.edit.description == "replace `true` with `false`" }
+        expect(mutation.mutated_def_source).to eq("def audited? = false")
+        expect(mutation.mutated_def_line).to eq(4)
+      end
     end
 
     it "does not treat a receiverless non-concern call (validates) as a concern block" do

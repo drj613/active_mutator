@@ -7,7 +7,7 @@ RSpec.describe ActiveMutator::Worker do
   let(:mutation) do
     instance_double(ActiveMutator::Mutation,
                     subject: instance_double(ActiveMutator::Subject,
-                                             class_body?: false, file: "/tmp/thing.rb"))
+                                             reload?: false, file: "/tmp/thing.rb"))
   end
   let(:rspec_runner) { instance_double(RSpec::Core::Runner) }
 
@@ -198,6 +198,14 @@ RSpec.describe ActiveMutator::Worker do
       expect_any_instance_of(ActiveMutator::ClosureReload).to receive(:call)
       expect_any_instance_of(ActiveMutator::Inserter).not_to receive(:insert)
       run_worker
+    end
+
+    it "routes a concern `included` def (reload subject) through ClosureReload too" do
+      reload_subject = mutation.subject.with(name: "Thing#label", kind: :instance, reload: true)
+      allow(rspec_runner).to receive(:run_specs).and_return(0)
+      expect_any_instance_of(ActiveMutator::ClosureReload).to receive(:call)
+      expect_any_instance_of(ActiveMutator::Inserter).not_to receive(:insert)
+      described_class.new(mutation.with(subject: reload_subject), ["spec/x_spec.rb[1:1]"], writer).run
       expect(emitted).to eq("status" => "survived", "details" => nil)
     end
 

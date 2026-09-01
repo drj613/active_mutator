@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+- Defs inside ActiveSupport::Concern blocks now get def-level subjects:
+  `class_methods do` defs are `Scope::ClassMethods#name` subjects (inserted on
+  that module, like `module ClassMethods`), and `included`/`prepended` defs
+  are inserted via closure reload. They survive `--no-class-level`, and the
+  class-body subject no longer double-covers them.
+
 ## [0.4.1] - 2026-08-31
 
 - GitHub annotations for surviving mutants now render as a multi-line diff

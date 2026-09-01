@@ -79,6 +79,31 @@ module ActiveMutator
     def visit_block_node(node); end
 
     def visit_def_node(node)
+      add_def_subject(node)
+      # No `super`: nested defs get no subject of their own -- their bodies
+      # are mutated via the OUTER def (Engine#walk descends into them).
+    end
+
+    # ActiveSupport::Concern blocks are the exception to visit_block_node.
+    # `class_methods do` is module_eval'd into `Scope::ClassMethods`, so its
+    # defs are plain subjects on that constant, exactly as if written in
+    # `module ClassMethods`. `included`/`prepended` defs land on the includer,
+    # which Inserter cannot target; they are reload subjects (whole-file
+    # closure reload), which needs the same Zeitwerk-shape gate as class-body
+    # subjects.
+    def visit_call_node(node)
+      return super unless @sclass_depth.zero? && !@stack.empty? && ClassShape.concern_dsl_block?(node)
+
+      if node.name == :class_methods
+        with_scope("ClassMethods") { each_concern_def(node.block.body) { |d| add_def_subject(d) } }
+      elsif @class_level
+        each_concern_def(node.block.body) { |d| add_def_subject(d, reload: true) }
+      end
+    end
+
+    private
+
+    def add_def_subject(node, reload: false)
       return if @skip_lines.include?(node.location.start_line - 1)
 
       sclass = @sclass_depth.positive?
@@ -92,13 +117,20 @@ module ActiveMutator
         line_range: loc.start_line..loc.end_line,
         constant_scope: scope,
         kind: singleton ? :singleton : :instance,
-        sclass: sclass
+        sclass: sclass,
+        reload: reload
       )
-      # No `super`: nested defs get no subject of their own -- their bodies
-      # are mutated via the OUTER def (Engine#walk descends into them).
     end
 
-    private
+    def each_concern_def(node, &blk)
+      return if node.nil?
+
+      if node.is_a?(Prism::DefNode)
+        yield node
+      elsif !ClassShape.concern_def_boundary?(node)
+        node.compact_child_nodes.each { |child| each_concern_def(child, &blk) }
+      end
+    end
 
     # One subject for the class-level code of this class/module. Only if the
     # body has at least one statement the class-body walk can mutate: defs

@@ -634,6 +634,28 @@ RSpec.describe ActiveMutator::Runner do
       end
     end
 
+    it "keeps concern-block def subjects when class_level is disabled" do
+      Dir.mktmpdir do |dir|
+        FileUtils.mkdir_p(File.join(dir, "lib"))
+        File.write(File.join(dir, "lib", "ticketable.rb"), <<~RUBY)
+          module Ticketable
+            included do
+              validates :name, presence: true
+              def label = "x"
+            end
+            class_methods do
+              def build = new
+            end
+          end
+        RUBY
+
+        runner = described_class.new(config.with(root: dir, class_level: false))
+        subjects = runner.send(:discover_subjects)
+        expect(subjects.map(&:name)).to eq(["Ticketable#label", "Ticketable::ClassMethods#build"])
+        expect(subjects.map(&:kind)).to eq(%i[instance instance])
+      end
+    end
+
     it "sorts discovered files by path so subject order is deterministic" do
       Dir.mktmpdir do |dir|
         FileUtils.mkdir_p(File.join(dir, "lib"))

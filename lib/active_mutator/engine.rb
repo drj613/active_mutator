@@ -77,14 +77,7 @@ module ActiveMutator
 
     def owned_statement?(node) = ClassShape.owned_by_other_subject?(node)
 
-    # ActiveSupport::Concern DSL calls whose block body re-runs as class-level
-    # code in the includer, so it is in scope for class-body mutation.
-    CONCERN_BLOCK_CALLS = %i[included prepended class_methods].freeze
-
-    def concern_dsl_block?(node)
-      node.is_a?(Prism::CallNode) && node.receiver.nil? &&
-        CONCERN_BLOCK_CALLS.include?(node.name) && node.block.is_a?(Prism::BlockNode)
-    end
+    def concern_dsl_block?(node) = ClassShape.concern_dsl_block?(node)
 
     # No nil guard needed (unlike #walk): the entry node is the class body's
     # StatementsNode, guaranteed present for a class-body subject, and
@@ -95,17 +88,30 @@ module ActiveMutator
       elsif node.is_a?(Prism::BlockNode)
         # Pruned: a block's run-time context is unknown (see collect comment).
       elsif concern_dsl_block?(node)
-        # Inside a concern block the statements have no subject of their own, so
-        # mutate everything (including nested def bodies) exactly like the
-        # def-level #walk — do NOT recurse via class_walk (it would prune the
-        # block) and do NOT mark the interior defs owned. The concern call node
-        # itself is not yielded: the whole-block deletion edit already comes
-        # from the enclosing StatementsNode, and no operator targets a bare
-        # receiverless call.
-        walk(node.block.body, &blk)
+        # The concern call node itself is not yielded: the whole-block deletion
+        # edit already comes from the enclosing StatementsNode, and no operator
+        # targets a bare receiverless call.
+        concern_walk(node.block.body, owned, &blk)
       else
         yield node
         node.compact_child_nodes.each { |child| class_walk(child, owned, &blk) }
+      end
+    end
+
+    # Inside a concern block, defs are subjects of their own (SubjectFinder
+    # emits them; mirrors ClassShape.concern_dsl_block?), so they are owned
+    # here. Everything else mutates like the def-level #walk, including the
+    # interior of nested blocks, exactly as before defs got their own subjects.
+    def concern_walk(node, owned, &blk)
+      return if node.nil?
+
+      if node.is_a?(Prism::DefNode)
+        owned << (node.location.start_offset...node.location.end_offset)
+      elsif ClassShape.concern_def_boundary?(node)
+        walk(node, &blk)
+      else
+        yield node
+        node.compact_child_nodes.each { |child| concern_walk(child, owned, &blk) }
       end
     end
 
