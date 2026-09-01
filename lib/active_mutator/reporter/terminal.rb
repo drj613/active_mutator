@@ -22,6 +22,7 @@ module ActiveMutator
         @out.puts format("Mutation score: %.1f%%", score(counts) * 100)
         print_group("Surviving mutants:", results.select { |r| r.status == :survived })
         print_group("Errored mutants (not detected):", results.select { |r| r.status == :error })
+        print_group("Timed-out mutants (not detected):", results.select { |r| r.status == :timeout })
         skipped = results.select { |r| r.status == :skipped }
         print_skipped(skipped) unless skipped.empty?
         stats = OperatorStats.call(results)
@@ -29,11 +30,12 @@ module ActiveMutator
         print_operator_stats(noisy) unless noisy.empty?
       end
 
-      # A mutant that could not even be run is not detected; scoring it as
-      # anything else lets a broken worker read as a perfect pass.
+      # Only a real test failure is a detection. Errors and timeouts are
+      # non-verdicts; scoring them as passes let a broken worker or a tight
+      # budget read as 100%.
       def self.score(counts)
-        detected = counts.fetch(:killed, 0) + counts.fetch(:timeout, 0)
-        denominator = detected + counts.fetch(:survived, 0) + counts.fetch(:error, 0)
+        detected = counts.fetch(:killed, 0)
+        denominator = detected + %i[survived error timeout].sum { |s| counts.fetch(s, 0) }
         return 1.0 if denominator.zero?
 
         detected.to_f / denominator

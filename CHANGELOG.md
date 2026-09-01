@@ -26,6 +26,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   fail the run (exit 1, or via `--fail-at`), set the JSON `exit_reason` to
   `worker_errors`, and are listed with their details in the terminal summary.
   `error: 7, killed: 0` no longer prints "Mutation score: 100.0%".
+- Timed-out mutants count as not detected too: score is now
+  `killed / (killed + survived + error + timeout)`, timeouts fail the run
+  (JSON `exit_reason: timeouts`), and the terminal summary lists each one
+  with its elapsed time and budget so a hang and a tight budget look different.
 
 ## [0.4.1] - 2026-08-31
 

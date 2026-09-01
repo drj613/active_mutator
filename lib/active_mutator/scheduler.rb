@@ -105,7 +105,8 @@ module ActiveMutator
           running.delete(pid)
           entry[:reader].close
           entry[:stderr_file].close!
-          results << report(Result.new(mutation: entry[:item].mutation, status: :timeout, details: nil))
+          details = format("timed out after %.1fs (budget %.1fs)", now - entry[:started], entry[:budget])
+          results << report(Result.new(mutation: entry[:item].mutation, status: :timeout, details: details))
         end
       end
     end

@@ -327,6 +327,7 @@ RSpec.describe ActiveMutator::Scheduler do
     results = scheduler(worker: worker).run([item(timeout: 0.2)])
     elapsed = Process.clock_gettime(Process::CLOCK_MONOTONIC) - started
     expect(results.map(&:status)).to eq([:timeout])
+    expect(results.first.details).to match(/\Atimed out after \d+\.\ds \(budget 0\.2s\)\z/)
     expect(elapsed).to be < 5
   end
 

@@ -219,9 +219,11 @@ RSpec.describe ActiveMutator::Runner do
       expect(runner.exit_code(results(killed: 8, survived: 2))).to eq(1)
     end
 
-    it "counts timeouts as detected" do
-      runner = described_class.new(config.with(fail_at: 90.0))
-      expect(runner.exit_code(results(timeout: 9, survived: 1))).to eq(0)
+    it "counts timeouts as not detected" do
+      expect(described_class.new(config).exit_code(results(timeout: 7))).to eq(1)
+      runner = described_class.new(config.with(fail_at: 80.0))
+      expect(runner.exit_code(results(timeout: 7))).to eq(1)
+      expect(runner.exit_code(results(killed: 9, timeout: 1))).to eq(0)
     end
 
     it "exits 0 with no survivors regardless of other statuses" do
