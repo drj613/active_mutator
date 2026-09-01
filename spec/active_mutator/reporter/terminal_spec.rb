@@ -45,6 +45,21 @@ RSpec.describe ActiveMutator::Reporter::Terminal do
     expect(text).not_to include("active_mutator")
   end
 
+  it "counts errors as not detected in the score" do
+    expect(described_class.score({ killed: 0, error: 7 })).to eq(0.0)
+    expect(described_class.score({ killed: 3, error: 1 })).to eq(0.75)
+  end
+
+  it "lists errored mutants with their details like survivors" do
+    errored = result_with(:error, "worker exited without reporting; stderr tail:\n[BUG] Segmentation fault")
+    reporter.summary([errored], invalid_count: 0)
+    text = out.string
+    expect(text).to include("Mutation score: 0.0%")
+    expect(text).to include("\n\nErrored mutants (not detected):\n")
+    expect(text).to include("\n\n  Calculator#discount (lib/calculator.rb:11)\n")
+    expect(text).to include("[BUG] Segmentation fault")
+  end
+
   it "scores an empty run as 1.0" do
     expect(described_class.score({})).to eq(1.0)
   end

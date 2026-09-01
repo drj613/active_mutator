@@ -22,6 +22,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   libpq's GSS negotiation after `fork()` segfaulted every def-level mutant
   into "worker exited without reporting". That message now also carries the
   last 20 lines of the worker's stderr, so the real crash is visible.
+- Errored mutants count as not detected: they enter the score denominator,
+  fail the run (exit 1, or via `--fail-at`), set the JSON `exit_reason` to
+  `worker_errors`, and are listed with their details in the terminal summary.
+  `error: 7, killed: 0` no longer prints "Mutation score: 100.0%".
 
 ## [0.4.1] - 2026-08-31
 

@@ -17,11 +17,18 @@ module ActiveMutator
           "invalid" => invalid_count,
           "operators" => OperatorStats.call(results),
           "results" => results.map { |r| serialize(r) },
-          "exit_reason" => counts.fetch(:survived, 0).positive? ? "unaccepted_survivors" : "clean"
+          "exit_reason" => exit_reason(counts)
         )
       end
 
       private
+
+      def exit_reason(counts)
+        return "unaccepted_survivors" if counts.fetch(:survived, 0).positive?
+        return "worker_errors" if counts.fetch(:error, 0).positive?
+
+        "clean"
+      end
 
       def serialize(result)
         m = result.mutation

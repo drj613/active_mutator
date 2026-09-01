@@ -228,6 +228,17 @@ RSpec.describe ActiveMutator::Runner do
       runner = described_class.new(config.with(fail_at: 100.0))
       expect(runner.exit_code(results(uncovered: 3))).to eq(0)
     end
+
+    it "exits 1 when mutants errored, even with no survivors" do
+      expect(described_class.new(config).exit_code(results(error: 7))).to eq(1)
+    end
+
+    it "counts errors as not detected against fail_at" do
+      runner = described_class.new(config.with(fail_at: 80.0))
+      expect(runner.exit_code(results(error: 7))).to eq(1)
+      expect(runner.exit_code(results(killed: 9, error: 1))).to eq(0)
+      expect(runner.exit_code(results(killed: 7, error: 3))).to eq(1)
+    end
   end
 
   describe "#preload_spec_helper!" do

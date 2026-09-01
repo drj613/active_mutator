@@ -130,12 +130,12 @@ module ActiveMutator
     end
 
     def exit_code(results)
-      survived = results.count { |r| r.status == :survived }
-      return 0 if survived.zero?
+      undetected = results.count { |r| %i[survived error].include?(r.status) }
+      return 0 if undetected.zero?
       return 1 unless @config.fail_at
 
       detected = results.count { |r| %i[killed timeout].include?(r.status) }
-      score = detected * 100.0 / (detected + survived)
+      score = detected * 100.0 / (detected + undetected)
       score >= @config.fail_at ? 0 : 1
     end
 
