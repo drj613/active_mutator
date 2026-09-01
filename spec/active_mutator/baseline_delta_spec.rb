@@ -41,6 +41,15 @@ RSpec.describe ActiveMutator::BaselineDelta do
     expect(delta.rerun_example_ids).to eq(["./spec/a_spec.rb[1:1]"])
   end
 
+  it "does not also list example ids from a spec file that is re-run whole" do
+    # RSpec treats `spec/a_spec.rb spec/a_spec.rb[1:1]` as "only 1:1 from
+    # a_spec.rb", which would silently skip examples added in the same edit.
+    delta = compute({ "lib/a.rb" => "x", "spec/a_spec.rb" => "x" },
+                    { "lib/a.rb" => "y", "spec/a_spec.rb" => "y" })
+    expect(delta.rerun_spec_files).to eq(["spec/a_spec.rb"])
+    expect(delta.rerun_example_ids).to eq([])
+  end
+
   it "drops records for a deleted spec file that owned records" do
     delta = compute({ "spec/a_spec.rb" => "x" }, {})
     expect(delta.full?).to be(false)

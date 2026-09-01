@@ -25,6 +25,26 @@ RSpec.describe "Baseline delta refresh", :integration do
     end
   end
 
+  it "records an example added to a spec file that changed together with a source file it covers" do
+    with_fixture_copy do |root|
+      baseline = ActiveMutator::Baseline.new(root: root)
+      baseline.coverage_map
+      calculator = File.join(root, "lib/calculator.rb")
+      File.write(calculator, File.read(calculator).sub("42", "43"))
+      spec = File.join(root, "spec/calculator_spec.rb")
+      File.write(spec, File.read(spec).sub(/\nend\s*\z/, <<~RUBY))
+
+          it("covers the helper") { expect(calc.untested_helper).to eq(43) }
+        end
+      RUBY
+
+      map = baseline.coverage_map
+      expect(baseline.last_refresh).to eq(:partial)
+      expect(map.examples_for(calculator, 16..16)).to eq(["./spec/calculator_spec.rb[1:3]"])
+      expect(map.examples_for(calculator, 3..3)).not_to be_empty
+    end
+  end
+
   it "picks up a newly-covering example from an unchanged spec file (#11)" do
     with_fixture_copy do |root|
       # Two spec files. widget_spec covers Widget#size. helper_spec references

@@ -64,8 +64,13 @@ module ActiveMutator
         end
       end
 
+      # An example id passed alongside its own file makes RSpec run ONLY the
+      # listed ids from that file, so a changed spec file's new examples would
+      # never be recorded. A whole-file rerun subsumes the ids.
+      rerun_spec_files = rerun_spec_files.uniq.sort
+      rerun_example_ids = rerun_example_ids.reject { |id| rerun_spec_files.include?(spec_file_of(id)) }
       Delta.new(full: false,
-                rerun_spec_files: rerun_spec_files.uniq.sort,
+                rerun_spec_files: rerun_spec_files,
                 rerun_example_ids: rerun_example_ids.uniq.sort,
                 drop_example_ids: drop_example_ids.uniq.sort,
                 drop_source_files: drop_source_files.uniq.sort)

@@ -14,6 +14,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - A `--since`/`--subject` run that plans zero mutants no longer reports
   "Mutation score: 100.0%" and exits 0; it warns with the cause (including
   `--no-class-level`) and exits 1. `--allow-empty` opts back into exit 0.
+- Incremental baseline refresh no longer loses examples added to a spec file
+  that changed in the same edit as a source file it covers: RSpec ran only the
+  file's old example ids, so the new examples were never attached to the
+  coverage map and mutants only they kill showed up as survivors.
 
 ## [0.4.1] - 2026-08-31
 
