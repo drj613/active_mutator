@@ -131,7 +131,9 @@ discarded before scheduling and reported as a count only. Exit code is `1`
 if unaccepted survivors exist (or, with `--fail-at`, if the score is below
 the threshold), `0` otherwise, including when there are only `uncovered`,
 `accepted`, or `error` results. The JSON report's `exit_reason` field
-reflects survivor presence, independent of the `--fail-at` gate.
+reflects survivor presence, independent of the `--fail-at` gate. A `--since`
+or `--subject` run that plans zero mutants prints no score; it warns with the
+cause and exits `1` unless `--allow-empty` is given.
 
 When survivors exist, the summary also prints a per-operator table showing
 how often each operator's mutants survive, to help spot likely-equivalent
@@ -253,6 +255,7 @@ survivors show inline on the PR diff. Pairs with the CI recipe:
 | `--exclude PAT` | none | skip files matching glob during subject discovery (repeatable, gitignore-like) |
 | `--max-mutants N` | none | deterministic sample of the first N mutants (quick smoke run on huge scopes; accepted/uncovered mutants count against N) |
 | `--debug-plan` | off | print planned mutants as JSON and exit without running |
+| `--allow-empty` | off | exit 0 when `--since`/`--subject` plan no mutants (default: warn and exit 1) |
 | `--format terminal\|json\|stryker-json\|github` | terminal | report format |
 | `--accept-survivors` | off | record survivors to the acceptance ledger |
 | `--force-baseline` | off | ignore cached coverage map |

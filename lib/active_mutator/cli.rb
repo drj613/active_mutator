@@ -32,7 +32,7 @@ module ActiveMutator
         spec_paths: ["spec"],
         browser_boot_seconds: 15.0, accept_survivors: false, exclude: [],
         max_mutants: nil, debug_plan: false, fail_at: nil, adaptive_timeout: true,
-        operators: [], class_level: true, class_level_closure_cap: 10
+        operators: [], class_level: true, class_level_closure_cap: 10, allow_empty: false
       }
       options.merge!(ConfigFile.load(Dir.pwd))
       paths = OptionParser.new do |o|
@@ -66,6 +66,7 @@ module ActiveMutator
         o.on("--exclude PAT", "Skip files matching glob, relative to root (repeatable)") { |v| options[:exclude] << v }
         o.on("--max-mutants N", Integer, "Deterministically sample the first N mutants") { |v| options[:max_mutants] = v }
         o.on("--debug-plan", "Print the planned mutant list as JSON and exit") { options[:debug_plan] = true }
+        o.on("--allow-empty", "Exit 0 when --since/--subject plan no mutants (default: exit 1)") { options[:allow_empty] = true }
         o.on("--fail-at SCORE", Float, "Exit 0 if mutation score >= SCORE even with survivors (default: any survivor fails)") do |v|
           raise OptionParser::InvalidArgument, "--fail-at must be within 0..100" unless (0..100).cover?(v)
           options[:fail_at] = v

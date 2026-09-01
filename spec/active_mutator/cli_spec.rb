@@ -234,6 +234,11 @@ RSpec.describe ActiveMutator::CLI do
     it "turns class-level mutation off with --no-class-level" do
       expect(described_class.parse(["--no-class-level"]).class_level).to be(false)
     end
+
+    it "defaults allow_empty off and turns it on with --allow-empty" do
+      expect(described_class.parse([]).allow_empty).to be(false)
+      expect(described_class.parse(["--allow-empty"]).allow_empty).to be(true)
+    end
   end
 
   describe "config file layering" do

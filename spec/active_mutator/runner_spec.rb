@@ -10,7 +10,7 @@ RSpec.describe ActiveMutator::Runner do
       spec_paths: ["spec"],
       browser_boot_seconds: 15.0, accept_survivors: false, exclude: [],
       max_mutants: nil, debug_plan: false, fail_at: nil, adaptive_timeout: true,
-      operators: [], class_level: true, class_level_closure_cap: 10
+      operators: [], class_level: true, class_level_closure_cap: 10, allow_empty: false
     )
   end
 
@@ -727,6 +727,67 @@ RSpec.describe ActiveMutator::Runner do
         expect(item.keys).to contain_exactly("subject", "description", "file", "line", "lane", "timeout", "examples")
         expect(parsed["pre_resolved"]).to eq({})
       end
+    end
+
+    describe "empty plan" do
+      def run_empty(cfg)
+        reporter = instance_double(ActiveMutator::Reporter::Terminal, on_result: nil, summary: nil)
+        runner = described_class.new(cfg, reporter: reporter)
+        stub_call_collaborators(runner, [])
+        expect(ActiveMutator::Scheduler).not_to receive(:new)
+        result = nil
+        stderr = capture_stderr { result = runner.call }
+        [result, stderr, reporter]
+      end
+
+      it "exits 1 without a summary when --since plans no mutants" do
+        Dir.mktmpdir do |dir|
+          result, stderr, reporter = run_empty(config.with(root: dir, since: "main", class_level: false))
+          expect(result).to eq(1)
+          expect(stderr).to include("no mutants planned")
+          expect(stderr).to include("--since main matched no mutable code")
+          expect(stderr).to include("--no-class-level excludes class-body code")
+          expect(stderr).to include("--allow-empty")
+          expect(reporter).not_to have_received(:summary)
+        end
+      end
+
+      it "names the --subject filter as the cause" do
+        Dir.mktmpdir do |dir|
+          _, stderr, = run_empty(config.with(root: dir, subject_filter: "Foo#bar"))
+          expect(stderr).to include("--subject Foo#bar matched no subjects")
+          expect(stderr).not_to include("--since")
+        end
+      end
+
+      it "exits 0 with --allow-empty" do
+        Dir.mktmpdir do |dir|
+          result, stderr, reporter = run_empty(config.with(root: dir, since: "main", allow_empty: true))
+          expect(result).to eq(0)
+          expect(stderr).to include("no mutants planned")
+          expect(reporter).not_to have_received(:summary)
+        end
+      end
+
+      it "still prints the normal summary for an empty plan without --since or --subject" do
+        Dir.mktmpdir do |dir|
+          reporter = instance_double(ActiveMutator::Reporter::Terminal, on_result: nil, summary: nil)
+          runner = described_class.new(config.with(root: dir), reporter: reporter)
+          stub_call_collaborators(runner, [])
+          allow(ActiveMutator::Scheduler).to receive(:new).and_return(instance_double(ActiveMutator::Scheduler, run: []))
+          expect(runner.call).to eq(0)
+          expect(reporter).to have_received(:summary)
+        end
+      end
+    end
+
+    def capture_stderr
+      original = $stderr
+      $stderr = StringIO.new
+      yield
+      $stderr.string
+    ensure
+      $stderr = original
     end
 
     it "debug_plan rounds timeouts to exactly two decimals" do

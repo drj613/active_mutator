@@ -25,7 +25,8 @@ module ActiveMutator
       "preload_helper" => :preload_helper,
       "adaptive_timeout" => :boolean,
       "class_level" => :boolean,
-      "class_level_closure_cap" => :positive_integer
+      "class_level_closure_cap" => :positive_integer,
+      "allow_empty" => :boolean
     }.freeze
 
     def self.load(root)

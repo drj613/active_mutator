@@ -29,6 +29,7 @@ module ActiveMutator
 
       items, pre_results, phase1_ids = plan_work(mutations, map, ledger: ledger, fingerprints: fingerprints)
       return debug_plan(items, pre_results) if @config.debug_plan
+      return empty_plan_exit if mutations.empty? && (@config.since || @config.subject_filter)
 
       pre_results.each { |r| @reporter.on_result(r) }
       calibrators = if @config.adaptive_timeout
@@ -139,6 +140,22 @@ module ActiveMutator
     end
 
     private
+
+    # A scoped run that plans nothing must not report "100%" and pass --fail-at:
+    # the usual cause is a --since range or --subject filter that matched no
+    # mutable code, or class-body code dropped by --no-class-level (#23 covers
+    # the zero-subject case for explicit paths).
+    def empty_plan_exit
+      causes = []
+      causes << "--since #{@config.since} matched no mutable code" if @config.since
+      causes << "--subject #{@config.subject_filter} matched no subjects" if @config.subject_filter
+      causes << "--no-class-level excludes class-body code" unless @config.class_level
+      warn "active_mutator: no mutants planned (#{causes.join("; ")})"
+      return 0 if @config.allow_empty
+
+      warn "active_mutator: exiting 1; pass --allow-empty if an empty plan is expected"
+      1
+    end
 
     # Single source of truth for lane/timeout/variable derivation, shared by
     # phase-1 planning and phase-2 escalation so the two never drift.

@@ -11,6 +11,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   that module, like `module ClassMethods`), and `included`/`prepended` defs
   are inserted via closure reload. They survive `--no-class-level`, and the
   class-body subject no longer double-covers them.
+- A `--since`/`--subject` run that plans zero mutants no longer reports
+  "Mutation score: 100.0%" and exits 0; it warns with the cause (including
+  `--no-class-level`) and exits 1. `--allow-empty` opts back into exit 0.
 
 ## [0.4.1] - 2026-08-31
 
