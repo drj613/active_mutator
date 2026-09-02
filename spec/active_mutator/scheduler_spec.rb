@@ -1,5 +1,6 @@
 require "json"
 require "tempfile"
+require "timeout"
 require "tmpdir"
 
 RSpec.describe ActiveMutator::Scheduler do
@@ -9,6 +10,12 @@ RSpec.describe ActiveMutator::Scheduler do
 
   def scheduler(worker:, jobs: 2, on_result: nil, calibrators: nil)
     described_class.new(jobs: jobs, worker: worker, on_result: on_result, calibrators: calibrators)
+  end
+
+  # For runs whose worker outlives its budget: a scheduler that never enforces
+  # the deadline (or reaps a still-running child) must fail, not hang the suite.
+  def run_bounded(sched, items, seconds: 3)
+    Timeout.timeout(seconds) { sched.run(items) }
   end
 
   # SIGKILL delivery is asynchronous; poll briefly before declaring a leak.
@@ -235,7 +242,7 @@ RSpec.describe ActiveMutator::Scheduler do
     worker = ->(_m, _e, _w) { sleep 30 }
     sched = described_class.new(jobs: 2, worker: worker, orphaned: orphaned)
     started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
-    expect { sched.run([item, item, item]) }
+    expect { run_bounded(sched, [item, item, item]) }
       .to raise_error(ActiveMutator::Scheduler::OrphanedError, /parent process died/)
     elapsed = Process.clock_gettime(Process::CLOCK_MONOTONIC) - started
     expect(elapsed).to be < 5 # workers were killed, not waited out
@@ -249,7 +256,7 @@ RSpec.describe ActiveMutator::Scheduler do
     end
     orphaned = -> { File.read(pid_file).lines.size >= 2 } # both workers running
     sched = described_class.new(jobs: 2, worker: worker, orphaned: orphaned)
-    expect { sched.run([item, item]) }
+    expect { run_bounded(sched, [item, item]) }
       .to raise_error(ActiveMutator::Scheduler::OrphanedError)
     pids = File.readlines(pid_file).map(&:to_i)
     expect(pids.size).to eq(2)
@@ -284,12 +291,50 @@ RSpec.describe ActiveMutator::Scheduler do
     expect(results.first.details).to eq("worker exited without reporting")
   end
 
+  it "attaches the last 20 lines of the child's stderr when it dies without reporting" do
+    worker = lambda do |_m, _e, _w|
+      25.times { |i| $stderr.puts "line #{i}" }
+      $stderr.puts "[BUG] Segmentation fault"
+      $stderr.flush
+      Process.exit!(1)
+    end
+    results = scheduler(worker: worker).run([item])
+    expect(results.map(&:status)).to eq([:error])
+    details = results.first.details
+    expect(details).to start_with("worker exited without reporting; stderr tail:\n")
+    expect(details).to end_with("[BUG] Segmentation fault")
+    expect(details).to include("line 24")
+    expect(details).not_to include("line 5\n")
+  end
+
+  it "does not clutter a reported result with the child's stderr" do
+    worker = lambda do |_m, _e, writer|
+      $stderr.puts "noise"
+      writer.puts(JSON.generate("status" => "killed", "details" => nil))
+    end
+    results = scheduler(worker: worker).run([item])
+    expect(results.first.details).to be_nil
+  end
+
+  it "disables libpq GSS encryption in the child unless the caller set it" do
+    worker = ->(_m, _e, writer) { writer.puts(JSON.generate("status" => "killed", "details" => ENV.fetch("PGGSSENCMODE"))) }
+    original = ENV.delete("PGGSSENCMODE")
+    begin
+      expect(scheduler(worker: worker).run([item]).first.details).to eq("disable")
+      ENV["PGGSSENCMODE"] = "prefer"
+      expect(scheduler(worker: worker).run([item]).first.details).to eq("prefer")
+    ensure
+      original ? ENV["PGGSSENCMODE"] = original : ENV.delete("PGGSSENCMODE")
+    end
+  end
+
   it "kills over-deadline workers and marks :timeout" do
     worker = ->(_m, _e, _w) { sleep 30 }
     started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
-    results = scheduler(worker: worker).run([item(timeout: 0.2)])
+    results = run_bounded(scheduler(worker: worker), [item(timeout: 0.2)])
     elapsed = Process.clock_gettime(Process::CLOCK_MONOTONIC) - started
     expect(results.map(&:status)).to eq([:timeout])
+    expect(results.first.details).to match(/\Atimed out after \d+\.\ds \(budget 0\.2s\)\z/)
     expect(elapsed).to be < 5
   end
 
@@ -301,7 +346,7 @@ RSpec.describe ActiveMutator::Scheduler do
       File.write(pid_file, Process.pid.to_s)
       sleep 30
     end
-    results = scheduler(worker: worker).run([item(timeout: 0.3)])
+    results = run_bounded(scheduler(worker: worker), [item(timeout: 0.3)])
     expect(results.map(&:status)).to eq([:timeout])
     pid = File.read(pid_file).to_i
     expect(pid).to be > 0
@@ -356,8 +401,8 @@ RSpec.describe ActiveMutator::Scheduler do
       # the sleeping worker must be reaped as a timeout.
       cal = fake_calibrator(budget: 0.2)
       worker = ->(_m, _e, _w) { sleep 30 }
-      results = scheduler(worker: worker, calibrators: { parallel: cal, serial: cal })
-                .run([item(timeout: 60.0)])
+      results = run_bounded(scheduler(worker: worker, calibrators: { parallel: cal, serial: cal }),
+                            [item(timeout: 60.0)])
       expect(results.map(&:status)).to eq([:timeout])
     end
 
@@ -394,13 +439,13 @@ RSpec.describe ActiveMutator::Scheduler do
     it "does not record timed-out forks (their true wall time is unknown)" do
       cal = fake_calibrator(budget: 0.2)
       worker = ->(_m, _e, _w) { sleep 30 }
-      scheduler(worker: worker, calibrators: { parallel: cal, serial: cal }).run([item(timeout: 60.0)])
+      run_bounded(scheduler(worker: worker, calibrators: { parallel: cal, serial: cal }), [item(timeout: 60.0)])
       expect(cal).not_to have_received(:record)
     end
 
     it "runs on static budgets when no calibrators are given" do
       worker = ->(_m, _e, _w) { sleep 30 }
-      results = scheduler(worker: worker).run([item(timeout: 0.2)])
+      results = run_bounded(scheduler(worker: worker), [item(timeout: 0.2)])
       expect(results.map(&:status)).to eq([:timeout])
     end
 

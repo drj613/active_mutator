@@ -16,4 +16,10 @@ module Trackable
       "tracked"
     end
   end
+
+  class_methods do
+    def tracked_kind
+      "tracked-kind"
+    end
+  end
 end

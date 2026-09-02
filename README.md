@@ -58,7 +58,7 @@ changed and nothing noticed. A survivor is not a hypothetical. It is the
 exact line, the exact before and after diff, and proof that no assertion
 depends on the difference.
 
-Mutation score is `(killed + timeout) / (killed + timeout + survived)`.
+Mutation score is `(killed + timeout) / (killed + timeout + survived + error)`.
 100% is usually not the right target. Some mutants are behaviorally
 *equivalent* to the original and can never be killed by any test. That is
 why active_mutator has a committed acceptance ledger. It lets you close
@@ -121,17 +121,20 @@ Each character on the progress line is one mutant, printed as it finishes:
 |---|---|---|
 | `.` | `killed` | a covering test failed. Good, the mutant is dead |
 | `S` | `survived` | every covering test passed. This is a test gap |
-| `T` | `timeout` | ran past its time budget. Counted as detected (likely an infinite loop) |
-| `E` | `error` | the worker crashed, or the mutated code raised outside a test assertion |
+| `T` | `timeout` | ran past its time budget. Counts as detected (the mutant likely made a loop never end), and the summary lists each one with elapsed vs budget so a tight budget is visible |
+| `E` | `error` | the worker crashed, or the mutated code raised outside a test assertion. Not detected: counts against the score and fails the run |
 | `U` | `uncovered` | no test executes the mutated line at all. This is coverage debt, worse than a survivor |
 | `A` | `accepted` | matches a known-equivalent entry in the acceptance ledger. Excluded from the score |
 
 `invalid` mutants (edits that don't even re-parse as valid Ruby) are
 discarded before scheduling and reported as a count only. Exit code is `1`
-if unaccepted survivors exist (or, with `--fail-at`, if the score is below
-the threshold), `0` otherwise, including when there are only `uncovered`,
-`accepted`, or `error` results. The JSON report's `exit_reason` field
-reflects survivor presence, independent of the `--fail-at` gate.
+if unaccepted survivors or errors exist (or, with `--fail-at`, if the score
+is below the threshold), `0` otherwise, including when there are only
+`uncovered` or `accepted` results. The JSON report's `exit_reason` field
+(`unaccepted_survivors`, `worker_errors`, `clean`) is independent of the
+`--fail-at` gate. A `--since`
+or `--subject` run that plans zero mutants prints no score; it warns with the
+cause and exits `1` unless `--allow-empty` is given.
 
 When survivors exist, the summary also prints a per-operator table showing
 how often each operator's mutants survive, to help spot likely-equivalent
@@ -198,7 +201,7 @@ score is below the threshold). Mistyped positional paths (a file that
 doesn't exist, or a non-`.rb` file) are an error (exit 2) instead of a
 vacuous green run.
 
-Score = (killed + timeout) / (killed + timeout + survived).
+Score = (killed + timeout) / (killed + timeout + survived + error).
 
 ## The dev loop
 
@@ -253,6 +256,7 @@ survivors show inline on the PR diff. Pairs with the CI recipe:
 | `--exclude PAT` | none | skip files matching glob during subject discovery (repeatable, gitignore-like) |
 | `--max-mutants N` | none | deterministic sample of the first N mutants (quick smoke run on huge scopes; accepted/uncovered mutants count against N) |
 | `--debug-plan` | off | print planned mutants as JSON and exit without running |
+| `--allow-empty` | off | exit 0 when `--since`/`--subject` plan no mutants (default: warn and exit 1) |
 | `--format terminal\|json\|stryker-json\|github` | terminal | report format |
 | `--accept-survivors` | off | record survivors to the acceptance ledger |
 | `--force-baseline` | off | ignore cached coverage map |
@@ -400,6 +404,19 @@ Issues and pull requests welcome. Run `bundle exec rspec` before sending a
 change. Also run `bundle exec active_mutator --changed` on your own diff
 before sending a change that touches `lib/`. This is a good idea for the
 same reason you'd want it run on any other codebase.
+
+If a run dies with `baseline suite failed` and a `LoadError` mentioning
+`bundler-2.x/lib/gems/bundler-2.x/exe/bundle`, your Ruby manager (seen with
+mise) breaks nested `bundle exec`: the baseline shells out to `bundle exec
+rspec`, and bundler's exported `RUBYLIB` makes the inner binstub resolve the
+wrong path. Skip the outer bundler instead:
+
+```sh
+ruby -Ilib exe/active_mutator lib --since origin/main   # same as the CI mutation job
+```
+
+The `:e2e` specs nest `bundle exec` on their own inside the fixture project,
+so on such a machine they fail either way; rely on the CI `e2e` job for those.
 
 ## License
 

@@ -44,6 +44,21 @@ RSpec.describe ActiveMutator::Inserter do
     expect(SclassHost.bar).to eq(2)
   end
 
+  it "reaches the includer's singleton through a concern's ClassMethods module" do
+    concern = Module.new do
+      def self.class_methods(&block)
+        const_set(:ClassMethods, Module.new) unless const_defined?(:ClassMethods, false)
+        const_get(:ClassMethods).module_eval(&block)
+      end
+      class_methods { def kind = :original }
+    end
+    stub_const("ConcernFixture", concern)
+    stub_const("ConcernHost", Class.new.extend(ConcernFixture::ClassMethods))
+
+    inserter.insert(mutation_stub(scope: "ConcernFixture::ClassMethods", def_source: "def kind = :mutated"))
+    expect(ConcernHost.kind).to eq(:mutated)
+  end
+
   it "evals top-level subjects (nil constant_scope) at main scope" do
     inserter.insert(mutation_stub(scope: nil,
                                   def_source: "def am_inserter_spec_toplevel = :toplevel"))

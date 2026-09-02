@@ -43,7 +43,7 @@ module ActiveMutator
       require "rspec/core"
       devnull = File.open(File::NULL, "w")
       runner = RSpec::Core::Runner.new(RSpec::Core::ConfigurationOptions.new(@example_ids))
-      if @mutation.subject.class_body?
+      if @mutation.subject.reload?
         require @mutation.subject.file # no-op if already loaded; guarantees the constant exists
         insert_mutation                # BEFORE setup: groups bind described_class to the mutated object
         runner.setup(devnull, devnull) # loads spec files
@@ -70,9 +70,10 @@ module ActiveMutator
     private
 
     # Def mutants class_eval over the live constant; class-body mutants
-    # cannot (macros accumulate) and go through whole-file closure reload.
+    # cannot (macros accumulate) and go through whole-file closure reload, as
+    # do defs inside `included`/`prepended` blocks (they live on the includer).
     def insert_mutation
-      if @mutation.subject.class_body?
+      if @mutation.subject.reload?
         ClosureReload.new(@mutation.subject, @mutation.mutated_file_source).call
       else
         Inserter.new.insert(@mutation)

@@ -56,11 +56,13 @@ RSpec.describe "class_level_project end-to-end", :e2e do
     expect(killed.call("Auditable (class body)", "replace string with \"\""))
       .to be(true), stderr
 
-    # 3. Trackable concern-body: a mutation INSIDE an `included do ... end`
-    #    block is killed — proving concern-block mutants (issue #31) are both
-    #    produced and propagated into the includer via closure reload + the
-    #    concern's include-time block replay.
-    expect(killed.call("Trackable (class body)", "replace string with \"\""))
+    # 3. Trackable concern defs: the def INSIDE `included do ... end` is its own
+    #    reload subject, killed via closure reload + the concern's include-time
+    #    block replay; the def inside `class_methods do` is a plain def subject
+    #    on Trackable::ClassMethods, killed through Inserter's class_eval.
+    expect(killed.call("Trackable#tracking_label", "replace string with \"\""))
+      .to be(true), stderr
+    expect(killed.call("Trackable::ClassMethods#tracked_kind", "replace string with \"\""))
       .to be(true), stderr
 
     # 4. killed-count >= 4 (not an exact score: operator-catalog growth must

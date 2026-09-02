@@ -1,4 +1,5 @@
 require "json"
+require "tempfile"
 
 module ActiveMutator
   # Fork pool: one fork per WorkItem, capped at `jobs` concurrent forks.
@@ -62,13 +63,20 @@ module ActiveMutator
       raise OrphanedError, "parent process died; aborting mutation run"
     end
 
+    STDERR_TAIL_LINES = 20
+
     def spawn(item, running)
       reader, writer = IO.pipe
+      stderr_file = Tempfile.new("active_mutator-worker")
       pid = fork do
         reader.close
         Process.setpgid(0, 0)          # own process group: deadline kill reaps grandchildren too
         $stdout.reopen(File::NULL)     # app code that prints must not corrupt parent's report
-        $stderr.reopen(File::NULL)     # ditto for warnings (RSpec/app noise interleaves with reports)
+        $stderr.reopen(stderr_file.path, "w") # kept for the crash report, never shown otherwise
+        # After fork(), libpq's GSS encryption negotiation touches Apple
+        # frameworks and segfaults the child on macOS; disabling it is
+        # harmless everywhere else.
+        ENV["PGGSSENCMODE"] ||= "disable"
         @worker.call(item.mutation, item.example_ids, writer)
         writer.close
         Process.exit!(0)
@@ -78,7 +86,7 @@ module ActiveMutator
       budget = calibrator ? calibrator.budget_for(item) : item.timeout
       log_scale(calibrator, item.lane)
       started = now
-      running[pid] = { reader: reader, item: item, started: started,
+      running[pid] = { reader: reader, item: item, started: started, stderr_file: stderr_file,
                        budget: budget, deadline: started + budget }
     end
 
@@ -96,7 +104,9 @@ module ActiveMutator
           kill(pid)
           running.delete(pid)
           entry[:reader].close
-          results << report(Result.new(mutation: entry[:item].mutation, status: :timeout, details: nil))
+          entry[:stderr_file].close!
+          details = format("timed out after %.1fs (budget %.1fs)", now - entry[:started], entry[:budget])
+          results << report(Result.new(mutation: entry[:item].mutation, status: :timeout, details: details))
         end
       end
     end
@@ -104,13 +114,14 @@ module ActiveMutator
     def finish(entry)
       payload = entry[:reader].read.to_s
       entry[:reader].close
+      stderr_tail = stderr_tail(entry[:stderr_file])
       data = payload.empty? ? nil : JSON.parse(payload)
       # A self-mutation of Worker#emit can produce well-formed JSON without a
       # "status" key (or with a non-Hash root); treat any unusable payload as
       # a worker error instead of crashing the whole run.
       reported = data.is_a?(Hash) && data.key?("status")
       status = reported ? data["status"].to_sym : :error
-      details = reported ? data["details"] : "worker exited without reporting"
+      details = reported ? data["details"] : unreported_details(stderr_tail)
     rescue JSON::ParserError
       report(Result.new(mutation: entry[:item].mutation, status: :error,
                         details: "worker emitted unparseable payload"))
@@ -121,6 +132,20 @@ module ActiveMutator
     def report(result)
       @on_result&.call(result)
       result
+    end
+
+    # The child wrote through its own descriptor (reopened by path), so this
+    # handle is still at offset 0: no rewind needed.
+    def stderr_tail(file)
+      file.read.to_s.lines.last(STDERR_TAIL_LINES).join.strip
+    ensure
+      file.close!
+    end
+
+    def unreported_details(stderr_tail)
+      return "worker exited without reporting" if stderr_tail.empty?
+
+      "worker exited without reporting; stderr tail:\n#{stderr_tail}"
     end
 
     def kill(pid)

@@ -20,8 +20,9 @@ module ActiveMutator
         end
         @out.puts "invalid (discarded): #{invalid_count}"
         @out.puts format("Mutation score: %.1f%%", score(counts) * 100)
-        survivors = results.select { |r| r.status == :survived }
-        print_survivors(survivors) unless survivors.empty?
+        print_group("Surviving mutants:", results.select { |r| r.status == :survived })
+        print_group("Errored mutants (not detected):", results.select { |r| r.status == :error })
+        print_group("Timed-out mutants (counted as detected):", results.select { |r| r.status == :timeout })
         skipped = results.select { |r| r.status == :skipped }
         print_skipped(skipped) unless skipped.empty?
         stats = OperatorStats.call(results)
@@ -29,9 +30,12 @@ module ActiveMutator
         print_operator_stats(noisy) unless noisy.empty?
       end
 
+      # A timeout is a detection (the mutant changed behavior enough to hang,
+      # the same convention as Stryker and PIT). An error is a non-verdict:
+      # scoring it as a pass let a broken worker read as 100%.
       def self.score(counts)
         detected = counts.fetch(:killed, 0) + counts.fetch(:timeout, 0)
-        denominator = detected + counts.fetch(:survived, 0)
+        denominator = detected + counts.fetch(:survived, 0) + counts.fetch(:error, 0)
         return 1.0 if denominator.zero?
 
         detected.to_f / denominator
@@ -49,9 +53,11 @@ module ActiveMutator
         end
       end
 
-      def print_survivors(survivors)
-        @out.puts "", "Surviving mutants:"
-        survivors.each do |result|
+      def print_group(title, group)
+        return if group.empty?
+
+        @out.puts "", title
+        group.each do |result|
           m = result.mutation
           @out.puts "", "  #{m.subject.name} (#{m.subject.file}:#{m.line})"
           @out.puts "    #{m.description}"

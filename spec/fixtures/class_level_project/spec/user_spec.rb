@@ -20,6 +20,10 @@ RSpec.describe User do
     expect(User.new("a@b.c").tracking_label).to eq("tracked")
   end
 
+  it "exposes the tracked kind via a concern `class_methods` block" do
+    expect(User.tracked_kind).to eq("tracked-kind")
+  end
+
   # Uses described_class (not the bare constant) on purpose: this is the case
   # that regressed when class-body mutants were reloaded AFTER the example
   # group bound described_class. If the `validates :email` macro is deleted or

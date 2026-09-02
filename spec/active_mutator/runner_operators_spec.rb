@@ -18,7 +18,7 @@ RSpec.describe ActiveMutator::Runner, "#load_operators" do
       spec_paths: ["spec"],
       browser_boot_seconds: 15.0, accept_survivors: false, exclude: [],
       max_mutants: nil, debug_plan: false, fail_at: nil, adaptive_timeout: true,
-      operators: operators, class_level: true, class_level_closure_cap: 10
+      operators: operators, class_level: true, class_level_closure_cap: 10, allow_empty: false
     )
   end
 

@@ -13,8 +13,16 @@ module MiniConcern
     (@included_blocks ||= []) << block
   end
 
+  # Mirrors ActiveSupport::Concern#class_methods: the block is module_eval'd
+  # into a real `ClassMethods` constant that the includer then extends.
+  def class_methods(&block)
+    mod = const_defined?(:ClassMethods, false) ? const_get(:ClassMethods) : const_set(:ClassMethods, Module.new)
+    mod.module_eval(&block)
+  end
+
   def append_features(base)
     super
+    base.extend(const_get(:ClassMethods)) if const_defined?(:ClassMethods, false)
     (@included_blocks ||= []).each { |b| base.class_eval(&b) }
   end
 end

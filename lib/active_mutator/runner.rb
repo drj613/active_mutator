@@ -29,6 +29,7 @@ module ActiveMutator
 
       items, pre_results, phase1_ids = plan_work(mutations, map, ledger: ledger, fingerprints: fingerprints)
       return debug_plan(items, pre_results) if @config.debug_plan
+      return empty_plan_exit if mutations.empty? && (@config.since || @config.subject_filter)
 
       pre_results.each { |r| @reporter.on_result(r) }
       calibrators = if @config.adaptive_timeout
@@ -119,7 +120,7 @@ module ActiveMutator
           extra = items[r.mutation].example_ids.map { |id| BaselineDelta.spec_file_of(id) }.uniq.size
           replacement.with(details: "escalated (+#{extra} spec files)")
         else
-          # A timeout/error/skip in phase 2 did NOT prove a kill — the mutant
+          # A timeout/error/skip in phase 2 did NOT prove a kill; the mutant
           # already survived phase 1, so keep that verdict rather than letting
           # an inconclusive escalation inflate the score (a :timeout counts as
           # detected in exit_code/score).
@@ -129,16 +130,32 @@ module ActiveMutator
     end
 
     def exit_code(results)
-      survived = results.count { |r| r.status == :survived }
-      return 0 if survived.zero?
+      undetected = results.count { |r| %i[survived error].include?(r.status) }
+      return 0 if undetected.zero?
       return 1 unless @config.fail_at
 
       detected = results.count { |r| %i[killed timeout].include?(r.status) }
-      score = detected * 100.0 / (detected + survived)
+      score = detected * 100.0 / (detected + undetected)
       score >= @config.fail_at ? 0 : 1
     end
 
     private
+
+    # A scoped run that plans nothing must not report "100%" and pass --fail-at:
+    # the usual cause is a --since range or --subject filter that matched no
+    # mutable code, or class-body code dropped by --no-class-level (#23 covers
+    # the zero-subject case for explicit paths).
+    def empty_plan_exit
+      causes = []
+      causes << "--since #{@config.since} matched no mutable code" if @config.since
+      causes << "--subject #{@config.subject_filter} matched no subjects" if @config.subject_filter
+      causes << "--no-class-level excludes class-body code" unless @config.class_level
+      warn "active_mutator: no mutants planned (#{causes.join("; ")})"
+      return 0 if @config.allow_empty
+
+      warn "active_mutator: exiting 1; pass --allow-empty if an empty plan is expected"
+      1
+    end
 
     # Single source of truth for lane/timeout/variable derivation, shared by
     # phase-1 planning and phase-2 escalation so the two never drift.

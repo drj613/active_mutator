@@ -43,5 +43,24 @@ module ActiveMutator
       node.is_a?(Prism::DefNode) || node.is_a?(Prism::ClassNode) ||
         node.is_a?(Prism::ModuleNode) || node.is_a?(Prism::SingletonClassNode)
     end
+
+    # ActiveSupport::Concern DSL calls whose block body re-runs as class-level
+    # code in the includer (`included`, `prepended`) or is module_eval'd into
+    # the concern's ClassMethods module (`class_methods`). SubjectFinder gives
+    # the defs inside their own subjects; Engine's class-body walk owns the rest.
+    CONCERN_BLOCK_CALLS = %i[included prepended class_methods].freeze
+
+    def concern_dsl_block?(node)
+      node.is_a?(Prism::CallNode) && node.receiver.nil? &&
+        CONCERN_BLOCK_CALLS.include?(node.name) && node.block.is_a?(Prism::BlockNode)
+    end
+
+    # Where the search for concern-block defs stops: a def below one of these
+    # is not on the concern's scope, so it gets no subject (same limit as
+    # SubjectFinder#visit_block_node) and stays with the class-body walk.
+    def concern_def_boundary?(node)
+      node.is_a?(Prism::BlockNode) || node.is_a?(Prism::ClassNode) ||
+        node.is_a?(Prism::ModuleNode) || node.is_a?(Prism::SingletonClassNode)
+    end
   end
 end

@@ -185,6 +185,175 @@ RSpec.describe ActiveMutator::SubjectFinder do
     expect(subjects.map(&:name)).to eq(["Wrap (class body)", "Wrap#visible"])
   end
 
+  describe "ActiveSupport::Concern blocks" do
+    let(:source) do
+      <<~RUBY
+        module Ticketable
+          extend ActiveSupport::Concern
+
+          included do
+            validates :name, presence: true
+            def label
+              "tracked"
+            end
+          end
+
+          class_methods do
+            def ticketable? = true
+            def build(attrs)
+              new(attrs)
+            end
+          end
+        end
+      RUBY
+    end
+
+    it "gives each def inside the concern blocks a def-level subject" do
+      names = subjects_of(source).reject(&:class_body?).map(&:name)
+      expect(names).to eq(["Ticketable#label", "Ticketable::ClassMethods#ticketable?", "Ticketable::ClassMethods#build"])
+    end
+
+    it "scopes `class_methods` defs to Scope::ClassMethods, like `module ClassMethods`" do
+      build = subjects_of(source).find { |s| s.name == "Ticketable::ClassMethods#build" }
+      expect(build.constant_scope).to eq("Ticketable::ClassMethods")
+      expect(build.kind).to eq(:instance)
+      expect(build.reload?).to be(false)
+      expect(build.line_range).to eq(13..15)
+    end
+
+    it "marks `included` defs as reload subjects on the concern itself" do
+      label = subjects_of(source).find { |s| s.name == "Ticketable#label" }
+      expect(label.constant_scope).to eq("Ticketable")
+      expect(label.kind).to eq(:instance)
+      expect(label.reload?).to be(true)
+      expect(label.line_range).to eq(6..8)
+    end
+
+    it "keeps the macro inside `included` in the class-body subject" do
+      body = subjects_of(source).find(&:class_body?)
+      expect(body.name).to eq("Ticketable (class body)")
+    end
+
+    it "treats `def self.x` inside `class_methods` as a singleton of ClassMethods" do
+      subjects = subjects_of(<<~RUBY)
+        module Ticketable
+          class_methods do
+            def self.registry = []
+          end
+        end
+      RUBY
+      registry = subjects.reject(&:class_body?)
+      expect(registry.map(&:name)).to eq(["Ticketable::ClassMethods.registry"])
+      expect(registry.first.kind).to eq(:singleton)
+    end
+
+    it "honors active_mutator:skip on a concern-block def" do
+      subjects = subjects_of(<<~RUBY)
+        module Ticketable
+          class_methods do
+            # active_mutator:skip
+            def skipped = 1
+            def kept = 2
+          end
+        end
+      RUBY
+      expect(subjects.reject(&:class_body?).map(&:name)).to eq(["Ticketable::ClassMethods#kept"])
+    end
+
+    it "does not emit reload subjects for `included` defs in a non-Zeitwerk-shaped file" do
+      subjects = subjects_of(<<~RUBY)
+        module Ticketable
+          included do
+            def label = 1
+          end
+        end
+        module Other
+          def x = 1
+        end
+      RUBY
+      expect(subjects.map(&:name)).to eq(["Other#x"])
+    end
+
+    it "gives no subject to a def below a block, class, module, or `class << self` inside a concern block" do
+      subjects = subjects_of(<<~RUBY)
+        module Ticketable
+          class_methods do
+            some_dsl do
+              def in_block = 1
+            end
+            class Inner
+              def in_class = 1
+            end
+            module InnerMod
+              def in_module = 1
+            end
+            class << self
+              def in_sclass = 1
+            end
+            def kept = 1
+          end
+        end
+      RUBY
+      expect(subjects.reject(&:class_body?).map(&:name)).to eq(["Ticketable::ClassMethods#kept"])
+    end
+
+    it "tolerates empty concern blocks" do
+      subjects = subjects_of(<<~RUBY)
+        module Ticketable
+          included do
+          end
+          class_methods do
+          end
+        end
+      RUBY
+      expect(subjects.map(&:name)).to eq(["Ticketable (class body)"])
+    end
+
+    it "ignores a concern block outside any constant scope" do
+      subjects = subjects_of(<<~RUBY)
+        class_methods do
+          def orphan = 1
+        end
+      RUBY
+      expect(subjects).to eq([])
+    end
+
+    it "ignores a concern block inside `class << self`" do
+      subjects = subjects_of(<<~RUBY)
+        module Ticketable
+          class << self
+            class_methods do
+              def hidden = 1
+            end
+          end
+        end
+      RUBY
+      expect(subjects).to eq([])
+    end
+
+    it "still visits the def argument of a non-concern call (`private def`)" do
+      subjects = subjects_of(<<~RUBY)
+        class Ticket
+          private def secret = 1
+        end
+      RUBY
+      expect(subjects.map(&:name)).to eq(["Ticket (class body)", "Ticket#secret"])
+    end
+
+    it "ignores a concern-named call with a receiver or without a block" do
+      subjects = subjects_of(<<~RUBY)
+        module Ticketable
+          config.class_methods do
+            def hidden = 1
+          end
+          class_methods
+          def visible = 2
+        end
+      RUBY
+      expect(subjects.map(&:name)).to eq(["Ticketable (class body)", "Ticketable#visible"])
+    end
+  end
+
   it "records byte_range covering the whole def" do
     source = "class A\n  def b\n    1\n  end\nend\n"
     subject = subjects_of(source).first

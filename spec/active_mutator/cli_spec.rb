@@ -109,7 +109,8 @@ RSpec.describe ActiveMutator::CLI do
         "Record surviving mutants into the acceptance ledger",
         "Skip files matching glob, relative to root (repeatable)",
         "Deterministically sample the first N mutants",
-        "Print the planned mutant list as JSON and exit"
+        "Print the planned mutant list as JSON and exit",
+        "Exit 0 when --since/--subject plan no mutants (default: exit 1)"
       ].each { |desc| expect(help).to include(desc) }
     end
 
@@ -234,6 +235,11 @@ RSpec.describe ActiveMutator::CLI do
     it "turns class-level mutation off with --no-class-level" do
       expect(described_class.parse(["--no-class-level"]).class_level).to be(false)
     end
+
+    it "defaults allow_empty off and turns it on with --allow-empty" do
+      expect(described_class.parse([]).allow_empty).to be(false)
+      expect(described_class.parse(["--allow-empty"]).allow_empty).to be(true)
+    end
   end
 
   describe "config file layering" do
@@ -277,6 +283,11 @@ RSpec.describe ActiveMutator::CLI do
 
     it "works with no config file present" do
       expect(described_class.parse([]).fail_at).to be_nil
+    end
+
+    it "reads allow_empty from the config file" do
+      File.write(".active_mutator.yml", "allow_empty: true\n")
+      expect(described_class.parse([]).allow_empty).to be(true)
     end
 
     it "normalizes trailing slashes in a config-file spec_paths value" do

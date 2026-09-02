@@ -6,6 +6,30 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+- Defs inside ActiveSupport::Concern blocks now get def-level subjects:
+  `class_methods do` defs are `Scope::ClassMethods#name` subjects (inserted on
+  that module, like `module ClassMethods`), and `included`/`prepended` defs
+  are inserted via closure reload. They survive `--no-class-level`, and the
+  class-body subject no longer double-covers them.
+- A `--since`/`--subject` run that plans zero mutants no longer reports
+  "Mutation score: 100.0%" and exits 0; it warns with the cause (including
+  `--no-class-level`) and exits 1. `--allow-empty` opts back into exit 0.
+- Incremental baseline refresh no longer loses examples added to a spec file
+  that changed in the same edit as a source file it covers: RSpec ran only the
+  file's old example ids, so the new examples were never attached to the
+  coverage map and mutants only they kill showed up as survivors.
+- Forked workers set `PGGSSENCMODE=disable` (unless already set): on macOS,
+  libpq's GSS negotiation after `fork()` segfaulted every def-level mutant
+  into "worker exited without reporting". That message now also carries the
+  last 20 lines of the worker's stderr, so the real crash is visible.
+- Errored mutants count as not detected: they enter the score denominator,
+  fail the run (exit 1, or via `--fail-at`), set the JSON `exit_reason` to
+  `worker_errors`, and are listed with their details in the terminal summary.
+  `error: 7, killed: 0` no longer prints "Mutation score: 100.0%".
+- Timed-out mutants still count as detected, but the terminal summary now
+  lists each one with its elapsed time and budget so a hang and a tight
+  budget look different.
+
 ## [0.4.1] - 2026-08-31
 
 - GitHub annotations for surviving mutants now render as a multi-line diff
