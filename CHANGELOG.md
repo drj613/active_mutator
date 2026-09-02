@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-09-02
+
 - Defs inside ActiveSupport::Concern blocks now get def-level subjects:
   `class_methods do` defs are `Scope::ClassMethods#name` subjects (inserted on
   that module, like `module ClassMethods`), and `included`/`prepended` defs
