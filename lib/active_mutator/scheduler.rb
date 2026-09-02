@@ -134,8 +134,9 @@ module ActiveMutator
       result
     end
 
+    # The child wrote through its own descriptor (reopened by path), so this
+    # handle is still at offset 0: no rewind needed.
     def stderr_tail(file)
-      file.rewind
       file.read.to_s.lines.last(STDERR_TAIL_LINES).join.strip
     ensure
       file.close!

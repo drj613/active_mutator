@@ -320,5 +320,12 @@
     "description": "delete `private`",
     "original_snippet": "private",
     "ordinal": 0
+  },
+  {
+    "file": "lib/active_mutator/scheduler.rb",
+    "subject": "ActiveMutator::Scheduler#spawn",
+    "description": "replace string with \"\"",
+    "original_snippet": "\"active_mutator-worker\"",
+    "ordinal": 0
   }
 ]
