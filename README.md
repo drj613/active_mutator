@@ -405,6 +405,19 @@ change. Also run `bundle exec active_mutator --changed` on your own diff
 before sending a change that touches `lib/`. This is a good idea for the
 same reason you'd want it run on any other codebase.
 
+If a run dies with `baseline suite failed` and a `LoadError` mentioning
+`bundler-2.x/lib/gems/bundler-2.x/exe/bundle`, your Ruby manager (seen with
+mise) breaks nested `bundle exec`: the baseline shells out to `bundle exec
+rspec`, and bundler's exported `RUBYLIB` makes the inner binstub resolve the
+wrong path. Skip the outer bundler instead:
+
+```sh
+ruby -Ilib exe/active_mutator lib --since origin/main   # same as the CI mutation job
+```
+
+The `:e2e` specs nest `bundle exec` on their own inside the fixture project,
+so on such a machine they fail either way; rely on the CI `e2e` job for those.
+
 ## License
 
 [MIT](LICENSE).
