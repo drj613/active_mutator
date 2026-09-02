@@ -58,7 +58,7 @@ changed and nothing noticed. A survivor is not a hypothetical. It is the
 exact line, the exact before and after diff, and proof that no assertion
 depends on the difference.
 
-Mutation score is `killed / (killed + survived + error + timeout)`.
+Mutation score is `(killed + timeout) / (killed + timeout + survived + error)`.
 100% is usually not the right target. Some mutants are behaviorally
 *equivalent* to the original and can never be killed by any test. That is
 why active_mutator has a committed acceptance ledger. It lets you close
@@ -121,17 +121,17 @@ Each character on the progress line is one mutant, printed as it finishes:
 |---|---|---|
 | `.` | `killed` | a covering test failed. Good, the mutant is dead |
 | `S` | `survived` | every covering test passed. This is a test gap |
-| `T` | `timeout` | ran past its time budget. Not detected: it may be an infinite loop or a tight budget, so the summary shows elapsed vs budget |
+| `T` | `timeout` | ran past its time budget. Counts as detected (the mutant likely made a loop never end), and the summary lists each one with elapsed vs budget so a tight budget is visible |
 | `E` | `error` | the worker crashed, or the mutated code raised outside a test assertion. Not detected: counts against the score and fails the run |
 | `U` | `uncovered` | no test executes the mutated line at all. This is coverage debt, worse than a survivor |
 | `A` | `accepted` | matches a known-equivalent entry in the acceptance ledger. Excluded from the score |
 
 `invalid` mutants (edits that don't even re-parse as valid Ruby) are
 discarded before scheduling and reported as a count only. Exit code is `1`
-if unaccepted survivors, errors, or timeouts exist (or, with `--fail-at`, if the score
+if unaccepted survivors or errors exist (or, with `--fail-at`, if the score
 is below the threshold), `0` otherwise, including when there are only
 `uncovered` or `accepted` results. The JSON report's `exit_reason` field
-(`unaccepted_survivors`, `worker_errors`, `timeouts`, `clean`) is independent of the
+(`unaccepted_survivors`, `worker_errors`, `clean`) is independent of the
 `--fail-at` gate. A `--since`
 or `--subject` run that plans zero mutants prints no score; it warns with the
 cause and exits `1` unless `--allow-empty` is given.
@@ -193,7 +193,7 @@ end
 ```
 
 Statuses: `killed` (test failed, this is good), `survived` (test gap),
-`timeout` (not detected), `uncovered` (no covering example, this is
+`timeout` (counts as detected), `uncovered` (no covering example, this is
 coverage debt), `accepted` (known-equivalent, see ledger), `error`,
 `invalid` (discarded).
 Exit code is 1 if unaccepted survivors exist (or, with `--fail-at`, if the
@@ -201,7 +201,7 @@ score is below the threshold). Mistyped positional paths (a file that
 doesn't exist, or a non-`.rb` file) are an error (exit 2) instead of a
 vacuous green run.
 
-Score = killed / (killed + survived + error + timeout).
+Score = (killed + timeout) / (killed + timeout + survived + error).
 
 ## The dev loop
 

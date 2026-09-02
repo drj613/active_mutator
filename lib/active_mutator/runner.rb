@@ -121,18 +121,20 @@ module ActiveMutator
           replacement.with(details: "escalated (+#{extra} spec files)")
         else
           # A timeout/error/skip in phase 2 did NOT prove a kill; the mutant
-          # already survived phase 1, so keep that verdict.
+          # already survived phase 1, so keep that verdict rather than letting
+          # an inconclusive escalation inflate the score (a :timeout counts as
+          # detected in exit_code/score).
           r
         end
       end
     end
 
     def exit_code(results)
-      undetected = results.count { |r| %i[survived error timeout].include?(r.status) }
+      undetected = results.count { |r| %i[survived error].include?(r.status) }
       return 0 if undetected.zero?
       return 1 unless @config.fail_at
 
-      detected = results.count { |r| r.status == :killed }
+      detected = results.count { |r| %i[killed timeout].include?(r.status) }
       score = detected * 100.0 / (detected + undetected)
       score >= @config.fail_at ? 0 : 1
     end

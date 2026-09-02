@@ -26,7 +26,6 @@ module ActiveMutator
       def exit_reason(counts)
         return "unaccepted_survivors" if counts.fetch(:survived, 0).positive?
         return "worker_errors" if counts.fetch(:error, 0).positive?
-        return "timeouts" if counts.fetch(:timeout, 0).positive?
 
         "clean"
       end

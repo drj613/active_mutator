@@ -56,7 +56,7 @@ RSpec.describe ActiveMutator::Reporter::Json do
     expect(JSON.parse(out.string)["exit_reason"]).to eq("clean")
   end
 
-  it "reports exit_reason worker_errors when mutants errored and none survived" do
+  def result_with(status, details)
     subject_ = ActiveMutator::Subject.new(
       name: "Calculator#discount", file: "lib/calculator.rb",
       byte_range: 0...1, line_range: 10..13, constant_scope: "Calculator", kind: :instance
@@ -67,9 +67,25 @@ RSpec.describe ActiveMutator::Reporter::Json do
       original_snippet: "<", line: 11,
       mutated_file_source: "", mutated_def_source: "", mutated_def_line: 10
     )
-    reporter.summary([ActiveMutator::Result.new(mutation: mutation, status: :error, details: "boom")], invalid_count: 0)
+    ActiveMutator::Result.new(mutation: mutation, status: status, details: details)
+  end
+
+  it "reports exit_reason worker_errors when mutants errored and none survived" do
+    reporter.summary([result_with(:error, "boom")], invalid_count: 0)
     data = JSON.parse(out.string)
     expect(data["exit_reason"]).to eq("worker_errors")
     expect(data["score"]).to eq(0.0)
+  end
+
+  it "reports exit_reason clean when mutants only timed out (a timeout is a detection)" do
+    reporter.summary([result_with(:timeout, "timed out after 1.0s (budget 0.5s)")], invalid_count: 0)
+    data = JSON.parse(out.string)
+    expect(data["exit_reason"]).to eq("clean")
+    expect(data["score"]).to eq(1.0)
+  end
+
+  it "ranks survivors over errors in exit_reason" do
+    reporter.summary([result_with(:survived, nil), result_with(:error, "boom")], invalid_count: 0)
+    expect(JSON.parse(out.string)["exit_reason"]).to eq("unaccepted_survivors")
   end
 end

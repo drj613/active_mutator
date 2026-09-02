@@ -31,7 +31,7 @@ RSpec.describe ActiveMutator::Reporter::Terminal do
     reporter.summary(results, invalid_count: 2)
     text = out.string
     expect(text).to include("killed: 2", "timeout: 1", "survived: 1", "invalid (discarded): 2")
-    expect(text).to include("Mutation score: 50.0%") # 2/(2+1+1)
+    expect(text).to include("Mutation score: 75.0%") # (2+1)/(2+1+1)
     expect(text).to include("Calculator#discount", "lib/calculator.rb:11")
     expect(text).to include("replace `<` with `<=`")
     expect(text).to include("- <", "+ <=")
@@ -45,19 +45,20 @@ RSpec.describe ActiveMutator::Reporter::Terminal do
     expect(text).not_to include("active_mutator")
   end
 
-  it "counts errors and timeouts as not detected in the score" do
+  it "counts errors as not detected and timeouts as detected in the score" do
     expect(described_class.score({ killed: 0, error: 7 })).to eq(0.0)
-    expect(described_class.score({ killed: 0, timeout: 7 })).to eq(0.0)
+    expect(described_class.score({ killed: 0, timeout: 7 })).to eq(1.0)
     expect(described_class.score({ killed: 3, error: 1 })).to eq(0.75)
-    expect(described_class.score({ killed: 3, timeout: 1 })).to eq(0.75)
+    expect(described_class.score({ killed: 3, timeout: 1 })).to eq(1.0)
+    expect(described_class.score({ timeout: 3, survived: 1 })).to eq(0.75)
   end
 
   it "lists timed-out mutants with elapsed time and budget" do
     timed_out = result_with(:timeout, "timed out after 12.3s (budget 12.0s)")
     reporter.summary([timed_out], invalid_count: 0)
     text = out.string
-    expect(text).to include("Mutation score: 0.0%")
-    expect(text).to include("\n\nTimed-out mutants (not detected):\n")
+    expect(text).to include("Mutation score: 100.0%")
+    expect(text).to include("\n\nTimed-out mutants (counted as detected):\n")
     expect(text).to include("timed out after 12.3s (budget 12.0s)")
   end
 
@@ -69,6 +70,11 @@ RSpec.describe ActiveMutator::Reporter::Terminal do
     expect(text).to include("\n\nErrored mutants (not detected):\n")
     expect(text).to include("\n\n  Calculator#discount (lib/calculator.rb:11)\n")
     expect(text).to include("[BUG] Segmentation fault")
+  end
+
+  it "omits the survivor, error, and timeout sections when those groups are empty" do
+    reporter.summary([result(:killed)], invalid_count: 0)
+    expect(out.string).not_to include("Surviving mutants", "Errored mutants", "Timed-out mutants")
   end
 
   it "scores an empty run as 1.0" do
