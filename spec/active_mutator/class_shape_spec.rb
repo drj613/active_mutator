@@ -46,4 +46,36 @@ RSpec.describe ActiveMutator::ClassShape do
       end
     end
   end
+
+  def first_statement(source) = Prism.parse(source).value.statements.body.first
+
+  describe ".concern_dsl_block?" do
+    {
+      "included do; end" => true, "prepended do; end" => true, "class_methods do; end" => true,
+      "class_methods" => false, "config.class_methods do; end" => false, "validates :x do; end" => false
+    }.each do |source, concern|
+      it "returns #{concern} for `#{source}`" do
+        expect(described_class.concern_dsl_block?(first_statement(source))).to be(concern)
+      end
+    end
+  end
+
+  describe ".concern_def_boundary?" do
+    {
+      "class C; end" => true, "module M; end" => true, "class << self; end" => true,
+      "def m; end" => false, "validates :x" => false, "X = 1" => false
+    }.each do |source, boundary|
+      it "returns #{boundary} for `#{source}`" do
+        expect(described_class.concern_def_boundary?(first_statement(source))).to be(boundary)
+      end
+    end
+
+    it "returns true for a block node" do
+      expect(described_class.concern_def_boundary?(first_statement("foo { }").block)).to be(true)
+    end
+
+    it "returns false for the call node that owns a block" do
+      expect(described_class.concern_def_boundary?(first_statement("foo { }"))).to be(false)
+    end
+  end
 end

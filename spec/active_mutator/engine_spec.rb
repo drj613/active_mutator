@@ -369,6 +369,33 @@ RSpec.describe ActiveMutator::Engine do
       expect(descriptions).not_to include('replace string with ""')
     end
 
+    it "mutates a def below a nested block inside a concern block as class-body code (it has no subject)" do
+      analysis, = class_body_analysis(<<~RUBY)
+        module Auditable
+          extend ActiveSupport::Concern
+          included do
+            has_many :events do
+              def recent? = true
+            end
+          end
+        end
+      RUBY
+      descriptions = analysis.mutations.map { |m| m.edit.description }
+      expect(descriptions).to include("replace `true` with `false`")
+    end
+
+    it "tolerates an empty concern block" do
+      analysis, = class_body_analysis(<<~RUBY)
+        module Auditable
+          extend ActiveSupport::Concern
+          included do
+          end
+        end
+      RUBY
+      descriptions = analysis.mutations.map { |m| m.edit.description }
+      expect(descriptions).to include("delete `included do`")
+    end
+
     it "analyzes a `class_methods` def through its own subject" do
       Dir.mktmpdir do |dir|
         file = File.join(dir, "auditable.rb")

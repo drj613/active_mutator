@@ -41,6 +41,12 @@ RSpec.describe ActiveMutator::BaselineDelta do
     expect(delta.rerun_example_ids).to eq(["./spec/a_spec.rb[1:1]"])
   end
 
+  it "sorts re-run spec files regardless of digest order" do
+    delta = compute({ "spec/b_spec.rb" => "x", "spec/a_spec.rb" => "x" },
+                    { "spec/b_spec.rb" => "y", "spec/a_spec.rb" => "y" })
+    expect(delta.rerun_spec_files).to eq(["spec/a_spec.rb", "spec/b_spec.rb"])
+  end
+
   it "does not also list example ids from a spec file that is re-run whole" do
     # RSpec treats `spec/a_spec.rb spec/a_spec.rb[1:1]` as "only 1:1 from
     # a_spec.rb", which would silently skip examples added in the same edit.

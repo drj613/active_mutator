@@ -274,6 +274,72 @@ RSpec.describe ActiveMutator::SubjectFinder do
       expect(subjects.map(&:name)).to eq(["Other#x"])
     end
 
+    it "gives no subject to a def below a block, class, module, or `class << self` inside a concern block" do
+      subjects = subjects_of(<<~RUBY)
+        module Ticketable
+          class_methods do
+            some_dsl do
+              def in_block = 1
+            end
+            class Inner
+              def in_class = 1
+            end
+            module InnerMod
+              def in_module = 1
+            end
+            class << self
+              def in_sclass = 1
+            end
+            def kept = 1
+          end
+        end
+      RUBY
+      expect(subjects.reject(&:class_body?).map(&:name)).to eq(["Ticketable::ClassMethods#kept"])
+    end
+
+    it "tolerates empty concern blocks" do
+      subjects = subjects_of(<<~RUBY)
+        module Ticketable
+          included do
+          end
+          class_methods do
+          end
+        end
+      RUBY
+      expect(subjects.map(&:name)).to eq(["Ticketable (class body)"])
+    end
+
+    it "ignores a concern block outside any constant scope" do
+      subjects = subjects_of(<<~RUBY)
+        class_methods do
+          def orphan = 1
+        end
+      RUBY
+      expect(subjects).to eq([])
+    end
+
+    it "ignores a concern block inside `class << self`" do
+      subjects = subjects_of(<<~RUBY)
+        module Ticketable
+          class << self
+            class_methods do
+              def hidden = 1
+            end
+          end
+        end
+      RUBY
+      expect(subjects).to eq([])
+    end
+
+    it "still visits the def argument of a non-concern call (`private def`)" do
+      subjects = subjects_of(<<~RUBY)
+        class Ticket
+          private def secret = 1
+        end
+      RUBY
+      expect(subjects.map(&:name)).to eq(["Ticket (class body)", "Ticket#secret"])
+    end
+
     it "ignores a concern-named call with a receiver or without a block" do
       subjects = subjects_of(<<~RUBY)
         module Ticketable

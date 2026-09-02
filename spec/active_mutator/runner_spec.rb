@@ -219,11 +219,11 @@ RSpec.describe ActiveMutator::Runner do
       expect(runner.exit_code(results(killed: 8, survived: 2))).to eq(1)
     end
 
-    it "counts timeouts as not detected" do
-      expect(described_class.new(config).exit_code(results(timeout: 7))).to eq(1)
-      runner = described_class.new(config.with(fail_at: 80.0))
-      expect(runner.exit_code(results(timeout: 7))).to eq(1)
-      expect(runner.exit_code(results(killed: 9, timeout: 1))).to eq(0)
+    it "counts timeouts as detected" do
+      expect(described_class.new(config).exit_code(results(timeout: 7))).to eq(0)
+      runner = described_class.new(config.with(fail_at: 90.0))
+      expect(runner.exit_code(results(timeout: 9, survived: 1))).to eq(0)
+      expect(runner.exit_code(results(timeout: 8, survived: 2))).to eq(1)
     end
 
     it "exits 0 with no survivors regardless of other statuses" do
@@ -757,9 +757,9 @@ RSpec.describe ActiveMutator::Runner do
         Dir.mktmpdir do |dir|
           result, stderr, reporter = run_empty(config.with(root: dir, since: "main", class_level: false))
           expect(result).to eq(1)
-          expect(stderr).to include("no mutants planned")
-          expect(stderr).to include("--since main matched no mutable code")
-          expect(stderr).to include("--no-class-level excludes class-body code")
+          expect(stderr).to include("no mutants planned (--since main matched no mutable code; " \
+                                    "--no-class-level excludes class-body code)")
+          expect(stderr).not_to include("--subject")
           expect(stderr).to include("--allow-empty")
           expect(reporter).not_to have_received(:summary)
         end
@@ -768,8 +768,8 @@ RSpec.describe ActiveMutator::Runner do
       it "names the --subject filter as the cause" do
         Dir.mktmpdir do |dir|
           _, stderr, = run_empty(config.with(root: dir, subject_filter: "Foo#bar"))
-          expect(stderr).to include("--subject Foo#bar matched no subjects")
-          expect(stderr).not_to include("--since")
+          expect(stderr).to include("no mutants planned (--subject Foo#bar matched no subjects)")
+          expect(stderr).not_to include("--since", "--no-class-level")
         end
       end
 
