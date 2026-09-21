@@ -782,6 +782,47 @@ RSpec.describe ActiveMutator::Runner do
         end
       end
 
+      it "does not build the baseline when --since plans no mutants" do
+        Dir.mktmpdir do |dir|
+          result, = run_empty(config.with(root: dir, since: "main", allow_empty: true))
+          expect(result).to eq(0)
+          expect(ActiveMutator::Baseline).not_to have_received(:new)
+        end
+      end
+
+      it "does not build the baseline when --subject plans no mutants" do
+        Dir.mktmpdir do |dir|
+          result, = run_empty(config.with(root: dir, subject_filter: "Foo#bar"))
+          expect(result).to eq(1)
+          expect(ActiveMutator::Baseline).not_to have_received(:new)
+        end
+      end
+
+      it "prints an empty --debug-plan without building the baseline" do
+        Dir.mktmpdir do |dir|
+          runner = described_class.new(config.with(root: dir, since: "main", debug_plan: true))
+          stub_call_collaborators(runner, [])
+          result = nil
+          output = capture_stdout { result = runner.call }
+          expect(result).to eq(0)
+          expect(JSON.parse(output)).to eq("planned" => [], "pre_resolved" => {})
+          expect(ActiveMutator::Baseline).not_to have_received(:new)
+        end
+      end
+
+      it "builds the baseline exactly once when a scoped plan has mutants" do
+        Dir.mktmpdir do |dir|
+          reporter = instance_double(ActiveMutator::Reporter::Terminal, on_result: nil, summary: nil)
+          runner = described_class.new(config.with(root: dir, since: "main"), reporter: reporter)
+          stub_call_collaborators(runner, [mutation(line: 1)])
+          scheduler = instance_double(ActiveMutator::Scheduler, run: [])
+          allow(ActiveMutator::Scheduler).to receive(:new).and_return(scheduler)
+          runner.call
+          expect(ActiveMutator::Baseline).to have_received(:new).once
+          expect(reporter).to have_received(:summary)
+        end
+      end
+
       it "still prints the normal summary for an empty plan without --since or --subject" do
         Dir.mktmpdir do |dir|
           reporter = instance_double(ActiveMutator::Reporter::Terminal, on_result: nil, summary: nil)

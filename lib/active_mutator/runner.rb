@@ -13,14 +13,23 @@ module ActiveMutator
       ClosureReload.cap = @config.class_level_closure_cap
       preload!
       preload_spec_helper!
-      map = Baseline.new(root: @config.root, spec_paths: @config.spec_paths)
-              .coverage_map(force: @config.force_baseline)
-      @reporter.coverage_map = map if @reporter.respond_to?(:coverage_map=)
       subjects = discover_subjects
       analyses = subjects.map { |s| Engine.new.analyze(s) }
       mutations = analyses.flat_map(&:mutations)
       mutations = mutations.first(@config.max_mutants) if @config.max_mutants
       invalid_count = analyses.sum(&:invalid_count)
+      # Decide emptiness before the baseline: a scoped run that plans nothing
+      # has no use for a coverage map, and building one spawns the whole spec
+      # suite (#47).
+      if mutations.empty? && (@config.since || @config.subject_filter)
+        return debug_plan([], []) if @config.debug_plan
+
+        return empty_plan_exit
+      end
+
+      map = Baseline.new(root: @config.root, spec_paths: @config.spec_paths)
+              .coverage_map(force: @config.force_baseline)
+      @reporter.coverage_map = map if @reporter.respond_to?(:coverage_map=)
 
       fingerprints = Fingerprint.for_mutations(mutations, root: @config.root)
       ledger = AcceptedLedger.load(@config.root)
@@ -29,7 +38,6 @@ module ActiveMutator
 
       items, pre_results, phase1_ids = plan_work(mutations, map, ledger: ledger, fingerprints: fingerprints)
       return debug_plan(items, pre_results) if @config.debug_plan
-      return empty_plan_exit if mutations.empty? && (@config.since || @config.subject_filter)
 
       pre_results.each { |r| @reporter.on_result(r) }
       calibrators = if @config.adaptive_timeout
