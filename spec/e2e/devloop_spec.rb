@@ -24,7 +24,7 @@ RSpec.describe "dev-loop end-to-end", :e2e do
       out3, err3, status3 = run_mutator(root, "lib", "--format", "json")
       data = JSON.parse(out3)
       expect(data["counts"]["accepted"]).to eq(2)
-      expect(data["counts"]["survived"]).to be_nil
+      expect(data["counts"]["survived"]).to eq(0)
       expect(data["exit_reason"]).to eq("clean")
       expect(status3.exitstatus).to eq(0), err3
     end

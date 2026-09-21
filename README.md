@@ -131,10 +131,13 @@ discarded before scheduling and reported as a count only. Exit code is `1`
 if unaccepted survivors or errors exist (or, with `--fail-at`, if the score
 is below the threshold), `0` otherwise, including when there are only
 `uncovered` or `accepted` results. The JSON report's `exit_reason` field
-(`unaccepted_survivors`, `worker_errors`, `clean`) is independent of the
-`--fail-at` gate. A `--since`
-or `--subject` run that plans zero mutants prints no score; it warns with the
-cause and exits `1` unless `--allow-empty` is given.
+(`unaccepted_survivors`, `worker_errors`, `clean`, `empty_plan`) is
+independent of the `--fail-at` gate. A `--since` or `--subject` run that
+plans zero mutants skips the baseline, prints the usual count block with
+every status at `0` and no `Mutation score:` line (JSON: `score` is `null`,
+`exit_reason` is `empty_plan`), then warns with the cause and exits `1`
+unless `--allow-empty` is given. The count block is printed on every run,
+whatever the exit code, so log-scraping never has to handle a missing block.
 
 When survivors exist, the summary also prints a per-operator table showing
 how often each operator's mutants survive, to help spot likely-equivalent

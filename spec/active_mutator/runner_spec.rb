@@ -753,7 +753,7 @@ RSpec.describe ActiveMutator::Runner do
         [result, stderr, reporter]
       end
 
-      it "exits 1 without a summary when --since plans no mutants" do
+      it "exits 1 after an empty-plan summary when --since plans no mutants" do
         Dir.mktmpdir do |dir|
           result, stderr, reporter = run_empty(config.with(root: dir, since: "main", class_level: false))
           expect(result).to eq(1)
@@ -761,7 +761,20 @@ RSpec.describe ActiveMutator::Runner do
                                     "--no-class-level excludes class-body code)")
           expect(stderr).not_to include("--subject")
           expect(stderr).to include("--allow-empty")
-          expect(reporter).not_to have_received(:summary)
+          expect(reporter).to have_received(:summary).with([], invalid_count: 0, empty_plan: true)
+        end
+      end
+
+      it "passes the invalid count through to the empty-plan summary" do
+        Dir.mktmpdir do |dir|
+          reporter = instance_double(ActiveMutator::Reporter::Terminal, on_result: nil, summary: nil)
+          runner = described_class.new(config.with(root: dir, since: "main"), reporter: reporter)
+          stub_call_collaborators(runner, [])
+          analysis = ActiveMutator::Analysis.new(mutations: [], invalid_count: 3)
+          allow(ActiveMutator::Engine).to receive(:new)
+            .and_return(instance_double(ActiveMutator::Engine, analyze: analysis))
+          capture_stderr { runner.call }
+          expect(reporter).to have_received(:summary).with([], invalid_count: 3, empty_plan: true)
         end
       end
 
@@ -773,12 +786,12 @@ RSpec.describe ActiveMutator::Runner do
         end
       end
 
-      it "exits 0 with --allow-empty" do
+      it "exits 0 with --allow-empty and still prints the empty-plan summary" do
         Dir.mktmpdir do |dir|
           result, stderr, reporter = run_empty(config.with(root: dir, since: "main", allow_empty: true))
           expect(result).to eq(0)
           expect(stderr).to include("no mutants planned")
-          expect(reporter).not_to have_received(:summary)
+          expect(reporter).to have_received(:summary).with([], invalid_count: 0, empty_plan: true)
         end
       end
 
@@ -819,7 +832,7 @@ RSpec.describe ActiveMutator::Runner do
           allow(ActiveMutator::Scheduler).to receive(:new).and_return(scheduler)
           runner.call
           expect(ActiveMutator::Baseline).to have_received(:new).once
-          expect(reporter).to have_received(:summary)
+          expect(reporter).to have_received(:summary).with([], invalid_count: 0)
         end
       end
 

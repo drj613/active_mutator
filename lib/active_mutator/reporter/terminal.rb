@@ -12,14 +12,21 @@ module ActiveMutator
         @out.print(CHARS.fetch(result.status))
       end
 
-      def summary(results, invalid_count:)
-        counts = results.group_by(&:status).transform_values(&:size)
+      # Every status key is present (zero when absent) so the block has the same
+      # shape on every run, including an empty plan.
+      def self.counts(results)
+        tallies = results.group_by(&:status).transform_values(&:size)
+        CHARS.keys.to_h { |status| [status, tallies.fetch(status, 0)] }
+      end
+
+      # `empty_plan: true` means a --since/--subject scope planned nothing: the
+      # count block still prints, but there is no score to report (#45).
+      def summary(results, invalid_count:, empty_plan: false)
+        counts = self.class.counts(results)
         @out.puts "", ""
-        CHARS.each_key do |status|
-          @out.puts "#{status}: #{counts.fetch(status, 0)}"
-        end
+        counts.each { |status, count| @out.puts "#{status}: #{count}" }
         @out.puts "invalid (discarded): #{invalid_count}"
-        @out.puts format("Mutation score: %.1f%%", score(counts) * 100)
+        @out.puts format("Mutation score: %.1f%%", score(counts) * 100) unless empty_plan
         print_group("Surviving mutants:", results.select { |r| r.status == :survived })
         print_group("Errored mutants (not detected):", results.select { |r| r.status == :error })
         print_group("Timed-out mutants (counted as detected):", results.select { |r| r.status == :timeout })

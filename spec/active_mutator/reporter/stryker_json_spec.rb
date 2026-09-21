@@ -43,6 +43,21 @@ RSpec.describe ActiveMutator::Reporter::StrykerJson do
     expect(report["projectRoot"]).to eq(@root)
   end
 
+  it "creates the report directory when an empty plan skipped the baseline" do
+    FileUtils.rm_rf(File.join(@root, ".active_mutator"))
+    expect { reporter.summary([], invalid_count: 0, empty_plan: true) }.not_to raise_error
+    expect(File).to exist(report_path)
+  end
+
+  it "writes a valid zero-mutant report for an empty plan" do
+    expect { reporter.summary([], invalid_count: 0, empty_plan: true) }.not_to raise_error
+    report = JSON.parse(File.read(report_path))
+    expect(report["files"]).to eq({})
+    expect(report).not_to have_key("testFiles")
+    expect(report["config"]["active_mutator"]["invalid_discarded"]).to eq(0)
+    expect(out.string).to include("Stryker report written to")
+  end
+
   it "initializes without a coverage map" do
     # White-box: guards the explicit nil default (vs relying on undefined-ivar nil).
     expect(reporter.instance_variables).to include(:@coverage_map)

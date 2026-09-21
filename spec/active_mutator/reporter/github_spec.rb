@@ -53,6 +53,12 @@ RSpec.describe ActiveMutator::Reporter::Github do
     expect(warning).to include("carriage%0Dreturn")
   end
 
+  it "prints the zero-count block and no annotations for an empty plan" do
+    expect { reporter.summary([], invalid_count: 0, empty_plan: true) }.not_to raise_error
+    expect(out.string).to include("killed: 0", "skipped: 0", "invalid (discarded): 0")
+    expect(out.string).not_to include("Mutation score", "::warning")
+  end
+
   it "still prints progress chars and the count summary" do
     reporter.on_result(build_result(:killed))
     reporter.summary([build_result(:killed)], invalid_count: 0)

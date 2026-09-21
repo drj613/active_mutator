@@ -24,7 +24,7 @@ module ActiveMutator
       if mutations.empty? && (@config.since || @config.subject_filter)
         return debug_plan([], []) if @config.debug_plan
 
-        return empty_plan_exit
+        return empty_plan_exit(invalid_count)
       end
 
       map = Baseline.new(root: @config.root, spec_paths: @config.spec_paths)
@@ -153,7 +153,8 @@ module ActiveMutator
     # the usual cause is a --since range or --subject filter that matched no
     # mutable code, or class-body code dropped by --no-class-level (#23 covers
     # the zero-subject case for explicit paths).
-    def empty_plan_exit
+    def empty_plan_exit(invalid_count)
+      @reporter.summary([], invalid_count: invalid_count, empty_plan: true)
       causes = []
       causes << "--since #{@config.since} matched no mutable code" if @config.since
       causes << "--subject #{@config.subject_filter} matched no subjects" if @config.subject_filter
