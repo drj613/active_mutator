@@ -39,9 +39,14 @@ Scope details worth knowing:
   by other subjects (`def`s, nested classes/modules, `class << self`) are
   excluded from the class-body subject.
 
-`Runner#discover_subjects` globs `app/**/*.rb` and `lib/**/*.rb` (or
-whatever paths/`--subject`/`--since` narrow it to) and hands each file to
-`SubjectFinder.call`.
+`Runner#discover` globs `app/**/*.rb` and `lib/**/*.rb` (or whatever
+paths/`--subject`/`--since` narrow it to) and hands each file to
+`SubjectFinder.call`. It also records what it saw along the way (the scanned
+files, the `--since` diff's candidate files among them, and the since-covered
+subjects before `--no-class-level` drops class bodies) so an empty scoped
+plan can decide whether `--allow-empty` should forgive it (#46). Discovery
+runs before the baseline: a `--since`/`--subject` run that plans nothing
+exits right here and never spawns the spec suite (#47).
 
 ## 2. Source-span edits, not AST-to-source
 

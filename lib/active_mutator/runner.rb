@@ -2,6 +2,13 @@ require "json"
 
 module ActiveMutator
   class Runner
+    # What discovery saw, beyond the final subject list. `scanned_files` are
+    # root-relative source files after path expansion and excludes, minus
+    # spec_paths; `since_candidates` are the --since diff's files among them;
+    # `since_matched_all` are the since-covered subjects before --no-class-level
+    # drops class bodies. The last two feed the --allow-empty verdict (#46).
+    Discovery = Data.define(:subjects, :scanned_files, :since_candidates, :since_matched_all)
+
     def initialize(config, reporter: nil)
       @config = config
       @reporter = reporter || build_reporter
@@ -13,7 +20,8 @@ module ActiveMutator
       ClosureReload.cap = @config.class_level_closure_cap
       preload!
       preload_spec_helper!
-      subjects = discover_subjects
+      discovery = discover
+      subjects = discovery.subjects
       analyses = subjects.map { |s| Engine.new.analyze(s) }
       mutations = analyses.flat_map(&:mutations)
       mutations = mutations.first(@config.max_mutants) if @config.max_mutants
@@ -24,7 +32,7 @@ module ActiveMutator
       if mutations.empty? && (@config.since || @config.subject_filter)
         return debug_plan([], []) if @config.debug_plan
 
-        return empty_plan_exit(invalid_count)
+        return empty_plan_exit(invalid_count, discovery)
       end
 
       map = Baseline.new(root: @config.root, spec_paths: @config.spec_paths)
@@ -153,17 +161,49 @@ module ActiveMutator
     # the usual cause is a --since range or --subject filter that matched no
     # mutable code, or class-body code dropped by --no-class-level (#23 covers
     # the zero-subject case for explicit paths).
-    def empty_plan_exit(invalid_count)
+    def empty_plan_exit(invalid_count, discovery)
       @reporter.summary([], invalid_count: invalid_count, empty_plan: true)
       causes = []
       causes << "--since #{@config.since} matched no mutable code" if @config.since
       causes << "--subject #{@config.subject_filter} matched no subjects" if @config.subject_filter
       causes << "--no-class-level excludes class-body code" unless @config.class_level
       warn "active_mutator: no mutants planned (#{causes.join("; ")})"
-      return 0 if @config.allow_empty
+      unless @config.allow_empty
+        warn "active_mutator: exiting 1; pass --allow-empty if an empty plan is expected"
+        return 1
+      end
 
-      warn "active_mutator: exiting 1; pass --allow-empty if an empty plan is expected"
+      allow_empty_exit(discovery)
+    end
+
+    # --allow-empty forgives an empty plan only when the --since diff touched no
+    # candidate source file (docs-only, spec-only, excluded paths). A changed
+    # candidate that planned nothing is the case worth failing on, unless the
+    # only code it touched is class-body code that --no-class-level dropped.
+    # --subject alone has no diff to judge, so it stays an unconditional 0.
+    def allow_empty_exit(discovery)
+      return 0 unless @config.since
+
+      candidates = discovery.since_candidates
+      return 0 if candidates.empty?
+
+      if !@config.class_level && class_body_only?(discovery.since_matched_all, candidates)
+        warn "active_mutator: forgiving empty plan: changed lines are class-body code and --no-class-level is set"
+        return 0
+      end
+
+      warn "active_mutator: exiting 1; --allow-empty forgives an empty plan only when no candidate " \
+           "source file changed. Changed: #{candidates.join(", ")}"
       1
+    end
+
+    # Every matched subject is a class body AND every candidate file has one:
+    # a candidate that matched nothing (comment-only edit, deletion) must not
+    # hide behind a class-body change in a different file. Candidates are
+    # non-empty here, so no matches at all fails the second test on its own.
+    def class_body_only?(subjects, candidates)
+      matched_files = subjects.map { |s| relative(s.file) }
+      subjects.all?(&:class_body?) && candidates.all? { |file| matched_files.include?(file) }
     end
 
     # Single source of truth for lane/timeout/variable derivation, shared by
@@ -259,23 +299,38 @@ module ActiveMutator
       end
     end
 
-    def discover_subjects
+    def discover
       paths = @config.paths.empty? ? default_paths : @config.paths
-      subjects = paths
+      files = paths
         .flat_map { |p| expand_path_arg(p) }
         .uniq
         .reject { |file| excluded?(file) }
-        .sort.flat_map { |file| SubjectFinder.call(file) }
-      subjects = subjects.reject(&:class_body?) unless @config.class_level
+        .sort
+      scanned_files = files.map { |f| relative(f) }.reject { |rel| under_spec_paths?(rel) }
+      subjects = files.flat_map { |file| SubjectFinder.call(file) }
       if @config.subject_filter
         matcher = SubjectMatcher.new(@config.subject_filter)
         subjects = subjects.select { |s| matcher.match?(s.name) }
       end
+      since_candidates = []
       if @config.since
         filter = SinceFilter.new(ref: @config.since, root: @config.root)
         subjects = subjects.select { |s| filter.cover?(s) }
+        since_candidates = filter.changed_files & scanned_files
       end
-      subjects
+      # Class bodies drop out LAST so since_matched_all still knows about them.
+      since_matched_all = subjects
+      subjects = subjects.reject(&:class_body?) unless @config.class_level
+      Discovery.new(subjects: subjects, scanned_files: scanned_files,
+                    since_candidates: since_candidates, since_matched_all: since_matched_all)
+    end
+
+    def relative(file) = file.delete_prefix(@config.root.chomp("/") + "/")
+
+    # Scanned entries are files, so only the "inside this directory" test
+    # matters; the trailing slash keeps `spec` from swallowing `spec_tools/`.
+    def under_spec_paths?(rel)
+      @config.spec_paths.any? { |sp| rel.start_with?("#{sp.chomp("/")}/") }
     end
 
     # Positional args may be files or directories. Anything else is an error:
@@ -355,7 +410,7 @@ module ActiveMutator
     # MAINTENANCE: any future flag that narrows the mutant set below "every
     # subject in the scanned files" MUST be added to this nil-trigger list,
     # or scoped accept runs will clobber out-of-scope ledger entries (#24).
-    # --no-class-level drops every class_body subject (discover_subjects), so a
+    # --no-class-level drops every class_body subject (discover), so a
     # file's class-body fingerprint is absent even though the file is scanned;
     # without this guard its accepted ledger entry looks stale and gets pruned.
     def prune_scope(subjects)
