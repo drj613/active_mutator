@@ -131,10 +131,15 @@ discarded before scheduling and reported as a count only. Exit code is `1`
 if unaccepted survivors or errors exist (or, with `--fail-at`, if the score
 is below the threshold), `0` otherwise, including when there are only
 `uncovered` or `accepted` results. The JSON report's `exit_reason` field
-(`unaccepted_survivors`, `worker_errors`, `clean`) is independent of the
-`--fail-at` gate. A `--since`
-or `--subject` run that plans zero mutants prints no score; it warns with the
-cause and exits `1` unless `--allow-empty` is given.
+(`unaccepted_survivors`, `worker_errors`, `clean`, `empty_plan`) is
+independent of the `--fail-at` gate. A `--since` or `--subject` run that
+plans zero mutants skips the baseline, prints the usual count block with
+every status at `0` and no `Mutation score:` line (JSON: `score` is `null`,
+`exit_reason` is `empty_plan`), then warns with the cause and exits `1`
+unless `--allow-empty` is given. The count block is printed on every run,
+whatever the exit code, so log-scraping never has to handle a missing block.
+`--allow-empty` forgives the empty plan only when the `--since` diff touched
+no candidate source file; see [Empty plans in CI](#empty-plans-in-ci).
 
 When survivors exist, the summary also prints a per-operator table showing
 how often each operator's mutants survive, to help spot likely-equivalent
@@ -245,6 +250,29 @@ survivors show inline on the PR diff. Pairs with the CI recipe:
   residual blind spot — constant-reference detection handles the common
   newly-covering-example case since 0.2)
 
+### Empty plans in CI
+
+A `--since` PR run that plans zero mutants skips the baseline, prints the
+zero-count block, and exits `1`. Pass `--allow-empty` to let it decide for
+itself whether that emptiness is fine:
+
+- **Exit 0** when the diff contains no candidate file. A candidate is a
+  changed or untracked `.rb` file inside the scanned paths (positional args
+  or the default `app`/`lib`), not under a spec path, and not matching an
+  `--exclude` pattern. Docs-only, spec-only, and excluded-path PRs pass.
+- **Exit 0** with `--no-class-level` when every changed line in the
+  candidate files falls inside class-body code that flag dropped. The
+  warning names `--no-class-level` as the reason.
+- **Exit 1** otherwise. A candidate source file changed but produced no
+  mutants, and the warning lists the file(s). A comment-only edit in `lib/`
+  counts as a real change here.
+- With `--subject` and no `--since` there is no diff to judge, so
+  `--allow-empty` exits `0` unconditionally.
+
+`--changed` follows the same rule, and an untracked candidate `.rb` file
+counts as a candidate. This replaces the repo-side log-scraping script some
+projects used to tell a docs-only PR from a broken `--since` range.
+
 ## Flags
 
 | Flag | Default | Meaning |
@@ -256,7 +284,7 @@ survivors show inline on the PR diff. Pairs with the CI recipe:
 | `--exclude PAT` | none | skip files matching glob during subject discovery (repeatable, gitignore-like) |
 | `--max-mutants N` | none | deterministic sample of the first N mutants (quick smoke run on huge scopes; accepted/uncovered mutants count against N) |
 | `--debug-plan` | off | print planned mutants as JSON and exit without running |
-| `--allow-empty` | off | exit 0 when `--since`/`--subject` plan no mutants (default: warn and exit 1) |
+| `--allow-empty` | off | forgive an empty `--since`/`--subject` plan, but only when the `--since` diff touched no candidate source file (default: warn and exit 1) |
 | `--format terminal\|json\|stryker-json\|github` | terminal | report format |
 | `--accept-survivors` | off | record survivors to the acceptance ledger |
 | `--force-baseline` | off | ignore cached coverage map |

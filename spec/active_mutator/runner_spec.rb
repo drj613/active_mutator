@@ -20,6 +20,11 @@ RSpec.describe ActiveMutator::Runner do
                              constant_scope: "A", kind: :instance)
   end
 
+  def discovery(subjects, scanned_files: ["lib/a.rb"], since_candidates: [], since_matched_all: subjects)
+    ActiveMutator::Runner::Discovery.new(subjects: subjects, scanned_files: scanned_files,
+                                         since_candidates: since_candidates, since_matched_all: since_matched_all)
+  end
+
   def mutation(line: 2)
     ActiveMutator::Mutation.new(
       subject: subject_,
@@ -140,7 +145,7 @@ RSpec.describe ActiveMutator::Runner do
       runner = described_class.new(cfg, reporter: reporter)
       allow(runner).to receive(:preload!)
       allow(runner).to receive(:preload_spec_helper!)
-      allow(runner).to receive(:discover_subjects).and_return([])
+      allow(runner).to receive(:discover).and_return(discovery([]))
       allow(ActiveMutator::Baseline).to receive(:new).and_return(
         instance_double(ActiveMutator::Baseline, coverage_map: instance_double(ActiveMutator::CoverageMap))
       )
@@ -411,7 +416,7 @@ RSpec.describe ActiveMutator::Runner do
     end
   end
 
-  describe "#discover_subjects" do
+  describe "#discover" do
     it "drops files matching exclude globs during discovery" do
       Dir.mktmpdir do |dir|
         FileUtils.mkdir_p(File.join(dir, "lib", "generated"))
@@ -419,7 +424,7 @@ RSpec.describe ActiveMutator::Runner do
         File.write(File.join(dir, "lib", "generated", "skip.rb"), "class Skip; def a; 1; end; end")
 
         runner = described_class.new(config.with(root: dir, exclude: ["lib/generated/**"]))
-        subjects = runner.send(:discover_subjects)
+        subjects = runner.send(:discover).subjects
 
         expect(subjects.map(&:name)).to eq(["Keep#a"])
       end
@@ -432,7 +437,7 @@ RSpec.describe ActiveMutator::Runner do
         File.write(File.join(dir, "lib", "generated", "a", "deep.rb"), "class Deep; def a; 1; end; end")
 
         runner = described_class.new(config.with(root: dir, exclude: ["lib/generated/**"]))
-        expect(runner.send(:discover_subjects).map(&:name)).to eq(["Keep#a"])
+        expect(runner.send(:discover).subjects.map(&:name)).to eq(["Keep#a"])
       end
     end
 
@@ -444,7 +449,7 @@ RSpec.describe ActiveMutator::Runner do
         File.write(File.join(dir, "lib", "generated", "a", "deep.rb"), "class Deep; def a; 1; end; end")
 
         runner = described_class.new(config.with(root: dir, exclude: ["lib/generated"]))
-        expect(runner.send(:discover_subjects).map(&:name)).to eq(["Keep#a"])
+        expect(runner.send(:discover).subjects.map(&:name)).to eq(["Keep#a"])
       end
     end
 
@@ -455,7 +460,7 @@ RSpec.describe ActiveMutator::Runner do
         File.write(File.join(dir, "lib", "legacy", "old.rb"), "class Old; def a; 1; end; end")
 
         runner = described_class.new(config.with(root: dir, exclude: ["**/legacy/*"]))
-        expect(runner.send(:discover_subjects).map(&:name)).to eq(["Keep#a"])
+        expect(runner.send(:discover).subjects.map(&:name)).to eq(["Keep#a"])
       end
     end
 
@@ -466,7 +471,7 @@ RSpec.describe ActiveMutator::Runner do
         File.write(File.join(dir, "lib", "generated", "skip.rb"), "class Skip; def a; 1; end; end")
 
         runner = described_class.new(config.with(root: "#{dir}/", exclude: ["lib/generated"]))
-        expect(runner.send(:discover_subjects).map(&:name)).to eq(["Keep#a"])
+        expect(runner.send(:discover).subjects.map(&:name)).to eq(["Keep#a"])
       end
     end
 
@@ -476,7 +481,7 @@ RSpec.describe ActiveMutator::Runner do
         File.write(File.join(dir, "lib", "keep.rb"), "class Keep; def a; 1; end; end")
 
         runner = described_class.new(config.with(root: dir, exclude: ["lib/generated"]))
-        expect(runner.send(:discover_subjects).map(&:name)).to eq(["Keep#a"])
+        expect(runner.send(:discover).subjects.map(&:name)).to eq(["Keep#a"])
       end
     end
 
@@ -486,7 +491,7 @@ RSpec.describe ActiveMutator::Runner do
         File.write(File.join(dir, "lib", "keep.rb"), "class Keep; def a; 1; end; def b; 2; end; end")
 
         runner = described_class.new(config.with(root: dir, subject_filter: "Keep#a"))
-        expect(runner.send(:discover_subjects).map(&:name)).to eq(["Keep#a"])
+        expect(runner.send(:discover).subjects.map(&:name)).to eq(["Keep#a"])
       end
     end
 
@@ -496,7 +501,7 @@ RSpec.describe ActiveMutator::Runner do
         File.write(File.join(dir, "lib", "keep.rb"), "class Keep; def a; 1; end; def b; 2; end; end")
 
         runner = described_class.new(config.with(root: dir, subject_filter: nil))
-        expect(runner.send(:discover_subjects).map(&:name)).to contain_exactly("Keep#a", "Keep#b")
+        expect(runner.send(:discover).subjects.map(&:name)).to contain_exactly("Keep#a", "Keep#b")
       end
     end
 
@@ -507,7 +512,7 @@ RSpec.describe ActiveMutator::Runner do
                    "class Deep; def a; 1; end; end")
 
         runner = described_class.new(config.with(root: dir))
-        expect(runner.send(:discover_subjects).map(&:name)).to eq(["Deep#a"])
+        expect(runner.send(:discover).subjects.map(&:name)).to eq(["Deep#a"])
       end
     end
 
@@ -521,7 +526,7 @@ RSpec.describe ActiveMutator::Runner do
         File.write(File.join(dir, "app", "decoy.rb"), "class AppDecoy; def a; 1; end; end")
 
         runner = described_class.new(config.with(root: dir, paths: ["custom"]))
-        expect(runner.send(:discover_subjects).map(&:name)).to eq(["Wanted#a"])
+        expect(runner.send(:discover).subjects.map(&:name)).to eq(["Wanted#a"])
       end
     end
 
@@ -533,7 +538,7 @@ RSpec.describe ActiveMutator::Runner do
         File.write(File.join(dir, "app", "keep.rb"), "class AppKeep; def a; 1; end; end")
 
         runner = described_class.new(config.with(root: dir, paths: []))
-        expect(runner.send(:discover_subjects).map(&:name)).to contain_exactly("AppKeep#a", "LibKeep#a")
+        expect(runner.send(:discover).subjects.map(&:name)).to contain_exactly("AppKeep#a", "LibKeep#a")
       end
     end
 
@@ -544,7 +549,7 @@ RSpec.describe ActiveMutator::Runner do
         File.write(File.join(dir, "lib", "decoy.rb"), "class Decoy; def a; 1; end; end")
 
         runner = described_class.new(config.with(root: dir, paths: ["lib/wanted.rb"]))
-        expect(runner.send(:discover_subjects).map(&:name)).to eq(["Wanted#a"])
+        expect(runner.send(:discover).subjects.map(&:name)).to eq(["Wanted#a"])
       end
     end
 
@@ -555,14 +560,14 @@ RSpec.describe ActiveMutator::Runner do
         File.write(File.join(dir, "lib", "nested", "deep.rb"), "class Deep; def a; 1; end; end")
 
         runner = described_class.new(config.with(root: dir, paths: ["lib"]))
-        expect(runner.send(:discover_subjects).map(&:name)).to contain_exactly("Top#a", "Deep#a")
+        expect(runner.send(:discover).subjects.map(&:name)).to contain_exactly("Top#a", "Deep#a")
       end
     end
 
     it "raises for a nonexistent positional path instead of silently matching nothing" do
       Dir.mktmpdir do |dir|
         runner = described_class.new(config.with(root: dir, paths: ["app/models/typo.rb"]))
-        expect { runner.send(:discover_subjects) }
+        expect { runner.send(:discover).subjects }
           .to raise_error(ActiveMutator::Error, /app\/models\/typo\.rb/)
       end
     end
@@ -572,7 +577,7 @@ RSpec.describe ActiveMutator::Runner do
         File.write(File.join(dir, "README.md"), "# readme")
 
         runner = described_class.new(config.with(root: dir, paths: ["README.md"]))
-        expect { runner.send(:discover_subjects) }
+        expect { runner.send(:discover).subjects }
           .to raise_error(ActiveMutator::Error, /not a Ruby file/)
       end
     end
@@ -583,7 +588,7 @@ RSpec.describe ActiveMutator::Runner do
         File.write(File.join(dir, "lib", "foo.rb"), "class Foo; def a; 1; end; end")
 
         runner = described_class.new(config.with(root: dir, paths: ["lib", "lib/foo.rb"]))
-        expect(runner.send(:discover_subjects).map(&:name)).to eq(["Foo#a"])
+        expect(runner.send(:discover).subjects.map(&:name)).to eq(["Foo#a"])
       end
     end
 
@@ -594,7 +599,7 @@ RSpec.describe ActiveMutator::Runner do
 
         runner = described_class.new(config.with(root: dir, paths: ["lib/generated/skip.rb"],
                                                  exclude: ["lib/generated/**"]))
-        expect(runner.send(:discover_subjects)).to eq([])
+        expect(runner.send(:discover).subjects).to eq([])
       end
     end
 
@@ -603,13 +608,88 @@ RSpec.describe ActiveMutator::Runner do
         FileUtils.mkdir_p(File.join(dir, "lib"))
         File.write(File.join(dir, "lib", "keep.rb"), "class Keep; def a; 1; end; def b; 2; end; end")
 
-        filter = instance_double(ActiveMutator::SinceFilter)
+        filter = instance_double(ActiveMutator::SinceFilter, changed_files: [])
         expect(ActiveMutator::SinceFilter).to receive(:new)
           .with(ref: "main", root: dir).and_return(filter)
         allow(filter).to receive(:cover?) { |s| s.name == "Keep#a" }
 
         runner = described_class.new(config.with(root: dir, since: "main"))
-        expect(runner.send(:discover_subjects).map(&:name)).to eq(["Keep#a"])
+        expect(runner.send(:discover).subjects.map(&:name)).to eq(["Keep#a"])
+      end
+    end
+
+    describe "discovery facts for --allow-empty" do
+      def since_filter(changed_files:, cover: ->(_s) { false })
+        filter = instance_double(ActiveMutator::SinceFilter, changed_files: changed_files)
+        allow(filter).to receive(:cover?) { |s| cover.call(s) }
+        allow(ActiveMutator::SinceFilter).to receive(:new).and_return(filter)
+      end
+
+      def project(dir)
+        FileUtils.mkdir_p(File.join(dir, "lib", "generated"))
+        FileUtils.mkdir_p(File.join(dir, "spec"))
+        File.write(File.join(dir, "lib", "a.rb"), "class A\n  X = 1\n  def a = 2\nend\n")
+        File.write(File.join(dir, "lib", "generated", "g.rb"), "class G; def g; 1; end; end")
+        File.write(File.join(dir, "spec", "a_spec.rb"), "RSpec.describe(A) { it { } }")
+        FileUtils.mkdir_p(File.join(dir, "spec_tools"))
+        File.write(File.join(dir, "spec_tools", "t.rb"), "class T; def t; 1; end; end")
+      end
+
+      it "lists root-relative scanned files after excludes, minus spec_paths" do
+        Dir.mktmpdir do |dir|
+          project(dir)
+          runner = described_class.new(config.with(root: dir, paths: ["lib", "spec"], exclude: ["lib/generated"]))
+          expect(runner.send(:discover).scanned_files).to eq(["lib/a.rb"])
+        end
+      end
+
+      it "only drops files inside a spec path, not siblings sharing its prefix" do
+        Dir.mktmpdir do |dir|
+          project(dir)
+          runner = described_class.new(config.with(root: dir, paths: ["lib", "spec", "spec_tools"],
+                                                   exclude: ["lib/generated"], spec_paths: ["spec/"]))
+          expect(runner.send(:discover).scanned_files).to eq(["lib/a.rb", "spec_tools/t.rb"])
+        end
+      end
+
+      it "reports no since candidates without --since" do
+        Dir.mktmpdir do |dir|
+          project(dir)
+          expect(described_class.new(config.with(root: dir)).send(:discover).since_candidates).to eq([])
+        end
+      end
+
+      it "intersects the diff's files with the scanned files to get since candidates" do
+        Dir.mktmpdir do |dir|
+          project(dir)
+          since_filter(changed_files: ["lib/a.rb", "lib/generated/g.rb", "spec/a_spec.rb", "README.md", "lib/gone.rb"])
+          runner = described_class.new(config.with(root: dir, paths: ["lib", "spec"], since: "main",
+                                                   exclude: ["lib/generated"]))
+          expect(runner.send(:discover).since_candidates).to eq(["lib/a.rb"])
+        end
+      end
+
+      it "keeps class-body subjects in since_matched_all even under --no-class-level" do
+        Dir.mktmpdir do |dir|
+          project(dir)
+          since_filter(changed_files: ["lib/a.rb"], cover: ->(s) { s.file.end_with?("lib/a.rb") })
+          runner = described_class.new(config.with(root: dir, since: "main", class_level: false))
+          found = runner.send(:discover)
+          expect(found.subjects.map(&:name)).to eq(["A#a"])
+          expect(found.since_matched_all.map(&:kind)).to contain_exactly(:class_body, :instance)
+        end
+      end
+
+      it "leaves since_matched_all empty when the filter covers nothing" do
+        Dir.mktmpdir do |dir|
+          project(dir)
+          since_filter(changed_files: ["lib/a.rb"])
+          runner = described_class.new(config.with(root: dir, since: "main"))
+          found = runner.send(:discover)
+          expect(found.subjects).to eq([])
+          expect(found.since_matched_all).to eq([])
+          expect(found.since_candidates).to eq(["lib/a.rb"])
+        end
       end
     end
 
@@ -620,7 +700,7 @@ RSpec.describe ActiveMutator::Runner do
 
         expect(ActiveMutator::SinceFilter).not_to receive(:new)
         runner = described_class.new(config.with(root: dir, since: nil))
-        expect(runner.send(:discover_subjects).map(&:name)).to eq(["Keep#a"])
+        expect(runner.send(:discover).subjects.map(&:name)).to eq(["Keep#a"])
       end
     end
 
@@ -630,7 +710,7 @@ RSpec.describe ActiveMutator::Runner do
         File.write(File.join(dir, "lib", "keep.rb"), "class Keep\n  X = 1\n  def a = 2\nend\n")
 
         runner = described_class.new(config.with(root: dir, class_level: true))
-        subjects = runner.send(:discover_subjects)
+        subjects = runner.send(:discover).subjects
         expect(subjects.map(&:kind)).to contain_exactly(:class_body, :instance)
       end
     end
@@ -641,7 +721,7 @@ RSpec.describe ActiveMutator::Runner do
         File.write(File.join(dir, "lib", "keep.rb"), "class Keep\n  X = 1\n  def a = 2\nend\n")
 
         runner = described_class.new(config.with(root: dir, class_level: false))
-        subjects = runner.send(:discover_subjects)
+        subjects = runner.send(:discover).subjects
         expect(subjects.map(&:kind)).to eq([:instance])
         expect(subjects.map(&:name)).to eq(["Keep#a"])
       end
@@ -663,7 +743,7 @@ RSpec.describe ActiveMutator::Runner do
         RUBY
 
         runner = described_class.new(config.with(root: dir, class_level: false))
-        subjects = runner.send(:discover_subjects)
+        subjects = runner.send(:discover).subjects
         expect(subjects.map(&:name)).to eq(["Ticketable#label", "Ticketable::ClassMethods#build"])
         expect(subjects.map(&:kind)).to eq(%i[instance instance])
       end
@@ -676,14 +756,14 @@ RSpec.describe ActiveMutator::Runner do
         File.write(File.join(dir, "lib", "a_first.rb"), "class AFirst; def a; 1; end; end")
 
         runner = described_class.new(config.with(root: dir))
-        expect(runner.send(:discover_subjects).map(&:name)).to eq(["AFirst#a", "ZLast#a"])
+        expect(runner.send(:discover).subjects.map(&:name)).to eq(["AFirst#a", "ZLast#a"])
       end
     end
   end
 
   describe "#call" do
     def stub_call_collaborators(runner, mutations)
-      allow(runner).to receive(:discover_subjects).and_return([subject_])
+      allow(runner).to receive(:discover).and_return(discovery([subject_]))
       analysis = ActiveMutator::Analysis.new(mutations: mutations, invalid_count: 0)
       engine = instance_double(ActiveMutator::Engine, analyze: analysis)
       allow(ActiveMutator::Engine).to receive(:new).and_return(engine)
@@ -743,17 +823,18 @@ RSpec.describe ActiveMutator::Runner do
     end
 
     describe "empty plan" do
-      def run_empty(cfg)
+      def run_empty(cfg, found: nil)
         reporter = instance_double(ActiveMutator::Reporter::Terminal, on_result: nil, summary: nil)
         runner = described_class.new(cfg, reporter: reporter)
         stub_call_collaborators(runner, [])
+        allow(runner).to receive(:discover).and_return(found) if found
         expect(ActiveMutator::Scheduler).not_to receive(:new)
         result = nil
         stderr = capture_stderr { result = runner.call }
         [result, stderr, reporter]
       end
 
-      it "exits 1 without a summary when --since plans no mutants" do
+      it "exits 1 after an empty-plan summary when --since plans no mutants" do
         Dir.mktmpdir do |dir|
           result, stderr, reporter = run_empty(config.with(root: dir, since: "main", class_level: false))
           expect(result).to eq(1)
@@ -761,7 +842,20 @@ RSpec.describe ActiveMutator::Runner do
                                     "--no-class-level excludes class-body code)")
           expect(stderr).not_to include("--subject")
           expect(stderr).to include("--allow-empty")
-          expect(reporter).not_to have_received(:summary)
+          expect(reporter).to have_received(:summary).with([], invalid_count: 0, empty_plan: true)
+        end
+      end
+
+      it "passes the invalid count through to the empty-plan summary" do
+        Dir.mktmpdir do |dir|
+          reporter = instance_double(ActiveMutator::Reporter::Terminal, on_result: nil, summary: nil)
+          runner = described_class.new(config.with(root: dir, since: "main"), reporter: reporter)
+          stub_call_collaborators(runner, [])
+          analysis = ActiveMutator::Analysis.new(mutations: [], invalid_count: 3)
+          allow(ActiveMutator::Engine).to receive(:new)
+            .and_return(instance_double(ActiveMutator::Engine, analyze: analysis))
+          capture_stderr { runner.call }
+          expect(reporter).to have_received(:summary).with([], invalid_count: 3, empty_plan: true)
         end
       end
 
@@ -773,12 +867,147 @@ RSpec.describe ActiveMutator::Runner do
         end
       end
 
-      it "exits 0 with --allow-empty" do
+      it "exits 0 with --allow-empty and still prints the empty-plan summary" do
         Dir.mktmpdir do |dir|
           result, stderr, reporter = run_empty(config.with(root: dir, since: "main", allow_empty: true))
           expect(result).to eq(0)
           expect(stderr).to include("no mutants planned")
-          expect(reporter).not_to have_received(:summary)
+          expect(reporter).to have_received(:summary).with([], invalid_count: 0, empty_plan: true)
+        end
+      end
+
+      describe "--allow-empty judging the --since diff" do
+        let(:lenient) { config.with(allow_empty: true, since: "main") }
+
+        def class_body_in(dir)
+          ActiveMutator::Subject.new(name: "A", file: File.join(dir, "lib", "a.rb"), byte_range: 0...10,
+                                     line_range: 1..5, constant_scope: "A", kind: :class_body)
+        end
+
+        def def_in(dir) = subject_.with(file: File.join(dir, "lib", "a.rb"))
+
+        it "exits 0 when the diff has no candidate files" do
+          Dir.mktmpdir do |dir|
+            result, stderr, = run_empty(lenient.with(root: dir), found: discovery([], since_candidates: []))
+            expect(result).to eq(0)
+            expect(stderr).not_to include("Changed:")
+          end
+        end
+
+        it "exits 1 naming the candidate file that planned nothing" do
+          Dir.mktmpdir do |dir|
+            found = discovery([], since_candidates: ["lib/a.rb", "lib/b.rb"])
+            result, stderr, = run_empty(lenient.with(root: dir), found: found)
+            expect(result).to eq(1)
+            expect(stderr).to include("--allow-empty forgives an empty plan only when no candidate source file changed")
+            expect(stderr).to include("Changed: lib/a.rb, lib/b.rb")
+          end
+        end
+
+        it "exits 0 under --no-class-level when only class-body subjects matched the diff" do
+          Dir.mktmpdir do |dir|
+            found = discovery([], since_candidates: ["lib/a.rb"], since_matched_all: [class_body_in(dir)])
+            result, stderr, = run_empty(lenient.with(root: dir, class_level: false), found: found)
+            expect(result).to eq(0)
+            expect(stderr).to include("forgiving empty plan")
+            expect(stderr).to include("--no-class-level")
+          end
+        end
+
+        it "exits 1 under --no-class-level when a second candidate file matched no subject at all" do
+          Dir.mktmpdir do |dir|
+            found = discovery([], since_candidates: ["lib/a.rb", "lib/b.rb"], since_matched_all: [class_body_in(dir)])
+            result, stderr, = run_empty(lenient.with(root: dir, class_level: false), found: found)
+            expect(result).to eq(1)
+            expect(stderr).to include("Changed: lib/a.rb, lib/b.rb")
+            expect(stderr).not_to include("forgiving")
+          end
+        end
+
+        it "exits 1 under --no-class-level when a def-level subject matched but planned nothing" do
+          Dir.mktmpdir do |dir|
+            found = discovery([], since_candidates: ["lib/a.rb"], since_matched_all: [class_body_in(dir), def_in(dir)])
+            result, stderr, = run_empty(lenient.with(root: dir, class_level: false), found: found)
+            expect(result).to eq(1)
+            expect(stderr).to include("Changed: lib/a.rb")
+          end
+        end
+
+        it "exits 1 under --no-class-level when a candidate changed but no subject matched" do
+          Dir.mktmpdir do |dir|
+            found = discovery([], since_candidates: ["lib/a.rb"], since_matched_all: [])
+            result, stderr, = run_empty(lenient.with(root: dir, class_level: false), found: found)
+            expect(result).to eq(1)
+            expect(stderr).to include("Changed: lib/a.rb")
+          end
+        end
+
+        it "exits 1 with class level on even when only class-body subjects matched" do
+          Dir.mktmpdir do |dir|
+            found = discovery([], since_candidates: ["lib/a.rb"], since_matched_all: [class_body_in(dir)])
+            result, stderr, = run_empty(lenient.with(root: dir, class_level: true), found: found)
+            expect(result).to eq(1)
+            expect(stderr).to include("Changed: lib/a.rb")
+          end
+        end
+
+        it "exits 0 unconditionally with --subject and no --since" do
+          Dir.mktmpdir do |dir|
+            cfg = config.with(root: dir, allow_empty: true, subject_filter: "Foo#bar")
+            found = discovery([], since_candidates: ["lib/a.rb"])
+            result, stderr, = run_empty(cfg, found: found)
+            expect(result).to eq(0)
+            expect(stderr).not_to include("Changed:")
+          end
+        end
+
+        it "still exits 1 with the hint when --allow-empty is off, even with no candidates" do
+          Dir.mktmpdir do |dir|
+            result, stderr, = run_empty(config.with(root: dir, since: "main"), found: discovery([]))
+            expect(result).to eq(1)
+            expect(stderr).to include("pass --allow-empty")
+          end
+        end
+      end
+
+      it "does not build the baseline when --since plans no mutants" do
+        Dir.mktmpdir do |dir|
+          result, = run_empty(config.with(root: dir, since: "main", allow_empty: true))
+          expect(result).to eq(0)
+          expect(ActiveMutator::Baseline).not_to have_received(:new)
+        end
+      end
+
+      it "does not build the baseline when --subject plans no mutants" do
+        Dir.mktmpdir do |dir|
+          result, = run_empty(config.with(root: dir, subject_filter: "Foo#bar"))
+          expect(result).to eq(1)
+          expect(ActiveMutator::Baseline).not_to have_received(:new)
+        end
+      end
+
+      it "prints an empty --debug-plan without building the baseline" do
+        Dir.mktmpdir do |dir|
+          runner = described_class.new(config.with(root: dir, since: "main", debug_plan: true))
+          stub_call_collaborators(runner, [])
+          result = nil
+          output = capture_stdout { result = runner.call }
+          expect(result).to eq(0)
+          expect(JSON.parse(output)).to eq("planned" => [], "pre_resolved" => {})
+          expect(ActiveMutator::Baseline).not_to have_received(:new)
+        end
+      end
+
+      it "builds the baseline exactly once when a scoped plan has mutants" do
+        Dir.mktmpdir do |dir|
+          reporter = instance_double(ActiveMutator::Reporter::Terminal, on_result: nil, summary: nil)
+          runner = described_class.new(config.with(root: dir, since: "main"), reporter: reporter)
+          stub_call_collaborators(runner, [mutation(line: 1)])
+          scheduler = instance_double(ActiveMutator::Scheduler, run: [])
+          allow(ActiveMutator::Scheduler).to receive(:new).and_return(scheduler)
+          runner.call
+          expect(ActiveMutator::Baseline).to have_received(:new).once
+          expect(reporter).to have_received(:summary).with([], invalid_count: 0)
         end
       end
 
@@ -1002,7 +1231,7 @@ RSpec.describe ActiveMutator::Runner do
       end
 
       it "passes scanned_files: nil when --since is active" do
-        filter = instance_double(ActiveMutator::SinceFilter, cover?: true)
+        filter = instance_double(ActiveMutator::SinceFilter, cover?: true, changed_files: [])
         allow(ActiveMutator::SinceFilter).to receive(:new).and_return(filter)
         surviving_scheduler!
         call_runner(accept_survivors: true, since: "main")

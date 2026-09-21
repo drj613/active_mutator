@@ -37,6 +37,23 @@ RSpec.describe ActiveMutator::Reporter::Terminal do
     expect(text).to include("- <", "+ <=")
   end
 
+  it "prints every status at zero and no score line for an empty plan" do
+    reporter.summary([], invalid_count: 0, empty_plan: true)
+    text = out.string
+    expect(text).to include("killed: 0", "survived: 0", "timeout: 0", "error: 0",
+                            "uncovered: 0", "accepted: 0", "skipped: 0", "invalid (discarded): 0")
+    expect(text).not_to include("Mutation score")
+    expect(text.lines.map(&:chomp)).to eq(
+      ["", "", "killed: 0", "survived: 0", "timeout: 0", "error: 0", "uncovered: 0",
+       "accepted: 0", "skipped: 0", "invalid (discarded): 0"]
+    )
+  end
+
+  it "prints the score when empty_plan is false, including for zero results" do
+    reporter.summary([], invalid_count: 0, empty_plan: false)
+    expect(out.string).to include("Mutation score: 100.0%")
+  end
+
   it "prints the survivor header and entries with blank-line separators" do
     reporter.summary([result(:survived)], invalid_count: 0)
     text = out.string

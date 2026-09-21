@@ -110,7 +110,8 @@ RSpec.describe ActiveMutator::CLI do
         "Skip files matching glob, relative to root (repeatable)",
         "Deterministically sample the first N mutants",
         "Print the planned mutant list as JSON and exit",
-        "Exit 0 when --since/--subject plan no mutants (default: exit 1)"
+        "Exit 0 when --since/--subject plan no mutants and the --since diff touched no mutable " \
+        "source file (default: exit 1)"
       ].each { |desc| expect(help).to include(desc) }
     end
 

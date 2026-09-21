@@ -22,7 +22,9 @@ RSpec.describe ActiveMutator::Reporter::Json do
 
     data = JSON.parse(out.string)
     expect(data["score"]).to eq(0.0)
-    expect(data["counts"]).to eq("survived" => 1)
+    expect(data["counts"]).to eq(
+      "killed" => 0, "survived" => 1, "timeout" => 0, "error" => 0, "uncovered" => 0, "accepted" => 0, "skipped" => 0
+    )
     expect(data["invalid"]).to eq(1)
     expect(data["results"].first).to include(
       "subject" => "Calculator#discount",
@@ -54,6 +56,27 @@ RSpec.describe ActiveMutator::Reporter::Json do
   it "reports exit_reason clean when nothing survives" do
     reporter.summary([], invalid_count: 0)
     expect(JSON.parse(out.string)["exit_reason"]).to eq("clean")
+  end
+
+  it "emits the normal object with a null score and exit_reason empty_plan for an empty plan" do
+    reporter.summary([], invalid_count: 0, empty_plan: true)
+    data = JSON.parse(out.string)
+    expect(data).to eq(
+      "score" => nil,
+      "counts" => { "killed" => 0, "survived" => 0, "timeout" => 0, "error" => 0,
+                    "uncovered" => 0, "accepted" => 0, "skipped" => 0 },
+      "invalid" => 0,
+      "operators" => {},
+      "results" => [],
+      "exit_reason" => "empty_plan"
+    )
+  end
+
+  it "keeps a score and the count-derived exit_reason when empty_plan is false" do
+    reporter.summary([], invalid_count: 0, empty_plan: false)
+    data = JSON.parse(out.string)
+    expect(data["score"]).to eq(1.0)
+    expect(data["exit_reason"]).to eq("clean")
   end
 
   def result_with(status, details)

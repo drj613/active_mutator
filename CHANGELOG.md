@@ -6,6 +6,29 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+- A `--since`/`--subject` run that plans zero mutants now exits before the
+  baseline is built or refreshed, so no spec process is spawned. Subject
+  discovery and the scope filters run ahead of the baseline (#47).
+- Every empty `--since`/`--subject` plan prints the normal zero-count summary
+  block (all statuses at 0, `invalid (discarded): 0`) with no
+  `Mutation score:` line, whatever the exit code. The JSON reporter emits its
+  normal object with `score: null` and `exit_reason: "empty_plan"`; the
+  github and stryker-json reporters emit their normal empty output. JSON
+  `counts` now always carries all seven status keys (zero when absent)
+  instead of only the statuses seen, so the shape is stable across runs.
+  Custom reporters must accept an `empty_plan:` keyword on `summary` (#45).
+- `--allow-empty` now judges the `--since` diff instead of forgiving every
+  empty plan. It exits 0 only when the diff touched no candidate source file
+  (a changed or untracked `.rb` inside the scanned paths, outside spec paths,
+  not excluded), or when `--no-class-level` dropped the only class-body code
+  the diff touched. A candidate that changed but planned nothing exits 1 and
+  the warning names the file(s); a comment-only edit in a source file counts
+  as a change, and so does a deletion-only edit (the `--since` line map
+  still ignores pure deletions, but the file now counts as touched). The
+  `--no-class-level` forgiveness requires every candidate file to have
+  matched a class-body subject. `--subject` alone still exits 0
+  unconditionally. `--changed` follows the same rule (#46).
+
 ## [0.5.0] - 2026-09-02
 
 - Defs inside ActiveSupport::Concern blocks now get def-level subjects:
