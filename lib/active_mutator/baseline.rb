@@ -15,7 +15,11 @@ module ActiveMutator
       @events = events
     end
 
-    attr_reader :last_refresh
+    POLL_SECONDS = 0.05
+
+    # child_pid: the running baseline child, nil between runs. Read by the
+    # memory sampler from its own thread.
+    attr_reader :last_refresh, :child_pid
 
     def coverage_map(force: false)
       digests = current_digests
@@ -110,11 +114,29 @@ module ActiveMutator
             "re-run without interrupting the suite"
     end
 
-    # out: :err: the subprocess suite's progress output must not pollute
-    # our stdout (breaks `--format json` consumers).
+    # Spawned and polled, not `system`, so the parent knows the child's pid
+    # and keeps control while it runs. out: :err: the subprocess suite's
+    # progress output must not pollute our stdout (breaks `--format json`
+    # consumers).
     def run_rspec(out_path, targets = [])
       @events.phase(:baseline, refresh: targets.empty? ? :full : :partial) do
-        system(baseline_env(out_path), "bundle", "exec", "rspec", *targets, chdir: @root, out: :err)
+        @child_pid = Process.spawn(baseline_env(out_path), *rspec_command(targets), chdir: @root, out: :err)
+        wait_child(@child_pid).success?
+      rescue SystemCallError # `bundle` missing: `system` returned nil here
+        false
+      ensure
+        @child_pid = nil
+      end
+    end
+
+    def rspec_command(targets) = ["bundle", "exec", "rspec", *targets]
+
+    def wait_child(pid)
+      loop do
+        _, status = Process.waitpid2(pid, Process::WNOHANG)
+        return status if status
+
+        sleep POLL_SECONDS
       end
     end
 

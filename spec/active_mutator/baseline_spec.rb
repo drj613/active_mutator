@@ -195,16 +195,23 @@ RSpec.describe ActiveMutator::Baseline do
         described_class.new(root: @tmp, cache_dir: tmp_cache, events: bus)
       end
 
-      # Stubs the real child launch, so run_rspec's own phase is exercised.
-      def fake_system(records)
-        allow(baseline).to receive(:system) do |env, *_cmd, **_opts|
-          File.write(env["ACTIVE_MUTATOR_BASELINE_OUT"], JSON.generate("version" => 2, "records" => records))
-          true
-        end
+      # A real child, standing in for `bundle exec rspec`: writes the payload
+      # where the hooks would, plus its argv, so run_rspec's own launch and
+      # phase are exercised.
+      def fake_command(records, exit_code: 0)
+        script = <<~RUBY
+          require "json"
+          File.write(ENV.fetch("ACTIVE_MUTATOR_BASELINE_OUT"), JSON.generate("version" => 2, "records" => #{records.inspect}))
+          File.write("argv.json", JSON.generate(ARGV))
+          exit #{exit_code}
+        RUBY
+        allow(baseline).to receive(:rspec_command) { |targets| ["ruby", "-e", script, "--", *targets] }
       end
 
+      def child_argv = JSON.parse(File.read(File.join(@tmp, "argv.json")))
+
       it "marks the child's run apart from the parent reading the map back, sizing the file before the parse" do
-        fake_system("./spec/a_spec.rb[1:1]" => a_hit)
+        fake_command({ "./spec/a_spec.rb[1:1]" => a_hit })
 
         baseline.coverage_map
 
@@ -215,22 +222,55 @@ RSpec.describe ActiveMutator::Baseline do
                              [:phase_start, { phase: :coverage_load, bytes: size }],
                              [:phase_end, { phase: :coverage_load, examples: 1 }]
                            ])
-        expect(baseline).to have_received(:system)
-          .with(hash_including("ACTIVE_MUTATOR_BASELINE_OUT" => out_path), "bundle", "exec", "rspec",
-                chdir: @tmp, out: :err)
+        expect(child_argv).to eq([]) # a full run names no targets, and runs in the root
       end
 
       it "marks a partial child run as partial and hands it the targets" do
         write_cache(baseline.send(:current_digests))
         File.write(File.join(@tmp, "spec/b_spec.rb"), "RSpec.describe(A) { it { A.new.x } }\n")
-        fake_system({})
+        fake_command({})
 
         baseline.coverage_map
 
         expect(seen.map(&:last)).to include(phase: :baseline, refresh: :partial)
-        expect(baseline).to have_received(:system)
-          .with(hash_including("ACTIVE_MUTATOR_BASELINE_OUT" => File.join(tmp_cache, "partial.json")),
-                "bundle", "exec", "rspec", "spec/b_spec.rb", chdir: @tmp, out: :err)
+        expect(child_argv).to eq(["spec/b_spec.rb"])
+      end
+
+      it "exposes the child's pid while it runs, and clears it after" do
+        fake_command({})
+        during = nil
+        allow(baseline).to receive(:wait_child).and_wrap_original do |original, pid|
+          during = [baseline.child_pid, pid]
+          original.call(pid)
+        end
+
+        baseline.coverage_map
+
+        expect(during.first).to be_a(Integer).and(eq(during.last))
+        expect(baseline.child_pid).to be_nil
+      end
+
+      it "polls the child gently instead of spinning" do
+        pid = Process.spawn("ruby", "-e", "sleep 0.3")
+        polls = 0
+        allow(Process).to receive(:waitpid2).and_wrap_original do |original, *args|
+          polls += 1
+          original.call(*args)
+        end
+
+        expect(baseline.send(:wait_child, pid)).to be_success
+        expect(polls).to be < 50 # 0.3s at 0.05s a poll, with room for a slow boot
+      end
+
+      it "fails the baseline when the child exits non-zero" do
+        fake_command({}, exit_code: 1)
+        expect { baseline.coverage_map }.to raise_error(ActiveMutator::BaselineFailed, /baseline suite failed/)
+        expect(baseline.child_pid).to be_nil
+      end
+
+      it "fails the baseline when the command cannot start" do
+        allow(baseline).to receive(:rspec_command).and_return(["/nonexistent/bundle"])
+        expect { baseline.coverage_map }.to raise_error(ActiveMutator::BaselineFailed, /baseline suite failed/)
       end
     end
 
