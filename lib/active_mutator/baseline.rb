@@ -26,12 +26,12 @@ module ActiveMutator
         # source coverage instead of dropping them. Force a full rebuild
         # whenever the configured spec_paths differ from what the cache was
         # stamped with.
-        if stored_spec_paths(map) == @spec_paths && map.fresh?(digests)
+        if map.spec_paths == @spec_paths && map.fresh?(digests)
           @last_refresh = :cached
           return map
         end
-        if stored_spec_paths(map) == @spec_paths && map.version == 2
-          delta = BaselineDelta.compute(old_digests: stored_digests(map), new_digests: digests,
+        if map.spec_paths == @spec_paths && map.version == 2
+          delta = BaselineDelta.compute(old_digests: map.digests, new_digests: digests,
                                         coverage_map: map, root: @root, spec_paths: @spec_paths)
           unless delta.full?
             run_partial!(delta)
@@ -104,16 +104,6 @@ module ActiveMutator
         # raise LoadError. An absolute path bypasses $LOAD_PATH entirely.
         "RUBYOPT" => "-r#{File.expand_path("baseline_hooks", __dir__)}"
       }
-    end
-
-    def stored_digests(map)
-      JSON.parse(File.read(@out_path)).fetch("digests", {})
-    end
-
-    # A pre-0.4.0 cache predates spec_paths and has no key; treat that as the
-    # old implicit default so existing default-config caches stay valid.
-    def stored_spec_paths(map)
-      JSON.parse(File.read(@out_path)).fetch("spec_paths", ["spec"])
     end
 
     def run_partial!(delta)

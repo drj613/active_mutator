@@ -41,6 +41,19 @@ RSpec.describe ActiveMutator::CoverageMap do
     expect(v1.fresh?({})).to be(false)
   end
 
+  it "exposes the stamped digests and spec paths" do
+    stamped = described_class.new("version" => 2, "records" => {}, "digests" => { "lib/a.rb" => "abc" },
+                                  "spec_paths" => ["test"])
+    expect(stamped.digests).to eq("lib/a.rb" => "abc")
+    expect(stamped.spec_paths).to eq(["test"])
+  end
+
+  it "treats a cache without spec paths (pre-0.4.0) as the default spec/ and missing digests as none" do
+    bare = described_class.new("version" => 2, "records" => {})
+    expect(bare.spec_paths).to eq(["spec"])
+    expect(bare.digests).to eq({})
+  end
+
   it "finds examples covering a source file" do
     expect(map.examples_covering_file("/root/lib/b.rb")).to eq(["./spec/b_spec.rb[1:1]"])
   end
