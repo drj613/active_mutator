@@ -2,6 +2,11 @@ require "tmpdir"
 require "fileutils"
 
 RSpec.describe ActiveMutator::SinceFilter do
+  def git(root, *args)
+    system("git", "-C", root, "-c", "user.email=t@t", "-c", "user.name=t", *args, out: File::NULL, err: File::NULL) \
+      or raise "git #{args.first} failed"
+  end
+
   describe ".parse" do
     it "extracts added/changed line numbers per file from unified=0 diffs" do
       diff = <<~DIFF
@@ -89,11 +94,6 @@ RSpec.describe ActiveMutator::SinceFilter do
   end
 
   describe "#changed_files" do
-    def git(root, *args)
-      system("git", "-C", root, "-c", "user.email=t@t", "-c", "user.name=t", *args, out: File::NULL, err: File::NULL) \
-        or raise "git #{args.first} failed"
-    end
-
     it "lists tracked .rb files with hunks and untracked .rb files, root-relative" do
       Dir.mktmpdir do |root|
         FileUtils.mkdir_p(File.join(root, "lib"))
@@ -164,6 +164,101 @@ RSpec.describe ActiveMutator::SinceFilter do
         git(root, "add", "-A")
         git(root, "commit", "-qm", "base")
         expect(described_class.new(ref: "HEAD", root: root).changed_files).to eq([])
+      end
+    end
+  end
+
+  describe ".same_code?" do
+    let(:base) { "class A\n  def x\n    1\n  end\nend\n" }
+
+    it "is true when only comments and blank lines changed" do
+      edited = "# top\nclass A\n  # doc\n  def x\n\n    1 # trailing\n  end\n=begin\nblock\n=end\nend"
+      expect(described_class.same_code?(base, edited)).to be(true)
+    end
+
+    it "is true when comments were only deleted" do
+      expect(described_class.same_code?("# old note\n#{base}", base)).to be(true)
+    end
+
+    it "is false when code changed" do
+      expect(described_class.same_code?(base, base.sub("1", "2"))).to be(false)
+    end
+
+    it "is false when a comment-looking line inside a heredoc changed" do
+      a = "X = <<~T\n  # one\nT\n"
+      expect(described_class.same_code?(a, a.sub("one", "two"))).to be(false)
+    end
+
+    it "is false when a magic comment changed" do
+      expect(described_class.same_code?(base, "# frozen_string_literal: true\n#{base}")).to be(false)
+    end
+
+    it "is false when either side fails to parse" do
+      expect(described_class.same_code?(base, "#{base}end\n")).to be(false)
+    end
+
+    it "is false when both sides fail to parse, even if only a comment differs" do
+      broken = "def x(\n"
+      expect(described_class.same_code?(broken, "# note\n#{broken}")).to be(false)
+    end
+
+    it "is false when a line break moved" do
+      expect(described_class.same_code?("a\nb\n", "a b\n")).to be(false)
+    end
+
+    it "is true when an unchanged magic comment sits beside the edited comments" do
+      magic = "# frozen_string_literal: true\n"
+      expect(described_class.same_code?("#{magic}#{base}", "#{magic}# note\n#{base}")).to be(true)
+    end
+  end
+
+  describe "#comment_only?" do
+    def repo_with(root, source)
+      FileUtils.mkdir_p(File.join(root, "lib"))
+      File.write(File.join(root, "lib", "a.rb"), source)
+      git(root, "init", "-q")
+      git(root, "add", "-A")
+      git(root, "commit", "-qm", "base")
+    end
+
+    it "is true when the file gained only a comment since the ref" do
+      Dir.mktmpdir do |root|
+        repo_with(root, "class A\n  def a = 1\nend\n")
+        File.write(File.join(root, "lib", "a.rb"), "class A\n  # note\n  def a = 1\nend\n")
+        expect(described_class.new(ref: "HEAD", root: root).comment_only?("lib/a.rb")).to be(true)
+      end
+    end
+
+    it "is false when code changed since the ref" do
+      Dir.mktmpdir do |root|
+        repo_with(root, "class A\n  def a = 1\nend\n")
+        File.write(File.join(root, "lib", "a.rb"), "class A\n  def a = 2\nend\n")
+        expect(described_class.new(ref: "HEAD", root: root).comment_only?("lib/a.rb")).to be(false)
+      end
+    end
+
+    it "compares against the ref, not the staged copy" do
+      Dir.mktmpdir do |root|
+        repo_with(root, "class A\n  def a = 1\nend\n")
+        File.write(File.join(root, "lib", "a.rb"), "class A\n  def a = 2\nend\n")
+        git(root, "add", "-A")
+        expect(described_class.new(ref: "HEAD", root: root).comment_only?("lib/a.rb")).to be(false)
+      end
+    end
+
+    it "is true for an untracked file holding only comments" do
+      Dir.mktmpdir do |root|
+        repo_with(root, "class A; end\n")
+        File.write(File.join(root, "lib", "notes.rb"), "# TODO: fill in\n")
+        expect(described_class.new(ref: "HEAD", root: root).comment_only?("lib/notes.rb")).to be(true)
+      end
+    end
+
+    it "is false for an untracked file with code" do
+      Dir.mktmpdir do |root|
+        repo_with(root, "class A; end\n")
+        File.write(File.join(root, "lib", "new.rb"), "# new\nclass New; end\n")
+        expect(described_class.new(ref: "HEAD", root: root).comment_only?("lib/new.rb")).to be(false)
       end
     end
   end

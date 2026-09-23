@@ -9,11 +9,16 @@ module ActiveMutator
     RECORDS = {}
     TIMES = {}
 
-    def self.diff_coverage(before, after, root, spec_paths: ["spec"])
+    def self.diff_coverage(before, after, root, spec_paths: ["spec"], gem_dirs: [])
       prefixes = spec_paths.map { |sp| "/#{sp}/" }
+      gem_prefixes = gem_dirs.map { |dir| File.join(dir, "") }
       hits = []
       after.each do |path, data|
         next unless path.start_with?(root)
+        # Gems installed under the root (e.g. `bundle config path
+        # vendor/bundle` on CI) would otherwise be recorded per example and
+        # blow up the map's memory.
+        next if gem_prefixes.any? { |p| path.start_with?(p) }
 
         # Relative to root, not a global substring check: `root` itself may
         # contain "/spec/" (e.g. a fixture nested under this gem's own
@@ -31,6 +36,20 @@ module ActiveMutator
         end
       end
       hits
+    end
+
+    # Computed per example, not at load: this file loads via RUBYOPT before
+    # Bundler sets up its install path.
+    def self.gem_dirs
+      dirs = Gem.path.dup
+      if defined?(Bundler)
+        begin
+          dirs << Bundler.bundle_path.to_s
+        rescue Bundler::BundlerError
+          # No Gemfile, so Gem.path covers it.
+        end
+      end
+      dirs.uniq
     end
 
     def self.build_payload(records, times, expected_examples: nil)
@@ -56,7 +75,10 @@ if ENV["ACTIVE_MUTATOR_BASELINE_OUT"]
       root = ENV.fetch("ACTIVE_MUTATOR_ROOT")
       spec_paths = ENV.fetch("ACTIVE_MUTATOR_SPEC_PATHS", "spec").split(":")
       ActiveMutator::BaselineHooks::RECORDS[example.id] =
-        ActiveMutator::BaselineHooks.diff_coverage(before, after, root, spec_paths: spec_paths)
+        ActiveMutator::BaselineHooks.diff_coverage(
+          before, after, root,
+          spec_paths: spec_paths, gem_dirs: ActiveMutator::BaselineHooks.gem_dirs
+        )
       # NOT example.execution_result.run_time: that is nil until after
       # around hooks complete.
       ActiveMutator::BaselineHooks::TIMES[example.id] = elapsed

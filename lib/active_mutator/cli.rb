@@ -67,8 +67,8 @@ module ActiveMutator
         o.on("--max-mutants N", Integer, "Deterministically sample the first N mutants") { |v| options[:max_mutants] = v }
         o.on("--debug-plan", "Print the planned mutant list as JSON and exit") { options[:debug_plan] = true }
         o.on("--allow-empty",
-             "Exit 0 when --since/--subject plan no mutants and the --since diff touched no mutable " \
-             "source file (default: exit 1)") { options[:allow_empty] = true }
+             "Exit 0 when --since/--subject plan no mutants and the --since diff changed no code " \
+             "in a mutable source file (default: exit 1)") { options[:allow_empty] = true }
         o.on("--fail-at SCORE", Float, "Exit 0 if mutation score >= SCORE even with survivors (default: any survivor fails)") do |v|
           raise OptionParser::InvalidArgument, "--fail-at must be within 0..100" unless (0..100).cover?(v)
           options[:fail_at] = v

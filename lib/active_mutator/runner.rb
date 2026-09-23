@@ -6,8 +6,9 @@ module ActiveMutator
     # root-relative source files after path expansion and excludes, minus
     # spec_paths; `since_candidates` are the --since diff's files among them;
     # `since_matched_all` are the since-covered subjects before --no-class-level
-    # drops class bodies. The last two feed the --allow-empty verdict (#46).
-    Discovery = Data.define(:subjects, :scanned_files, :since_candidates, :since_matched_all)
+    # drops class bodies; `since_filter` is the --since SinceFilter (nil
+    # without --since). The last three feed the --allow-empty verdict (#46).
+    Discovery = Data.define(:subjects, :scanned_files, :since_candidates, :since_matched_all, :since_filter)
 
     def initialize(config, reporter: nil)
       @config = config
@@ -177,15 +178,22 @@ module ActiveMutator
     end
 
     # --allow-empty forgives an empty plan only when the --since diff touched no
-    # candidate source file (docs-only, spec-only, excluded paths). A changed
-    # candidate that planned nothing is the case worth failing on, unless the
-    # only code it touched is class-body code that --no-class-level dropped.
-    # --subject alone has no diff to judge, so it stays an unconditional 0.
+    # candidate source file (docs-only, spec-only, excluded paths) or changed
+    # only comments in them. A candidate whose code changed but planned
+    # nothing is the case worth failing on, unless the only code it touched
+    # is class-body code that --no-class-level dropped. --subject alone has no
+    # diff to judge, so it stays an unconditional 0.
     def allow_empty_exit(discovery)
       return 0 unless @config.since
+      return 0 if discovery.since_candidates.empty?
 
-      candidates = discovery.since_candidates
-      return 0 if candidates.empty?
+      # Checked only here, on the empty-plan path: it runs `git show` per file.
+      candidates = discovery.since_candidates.reject { |file| discovery.since_filter.comment_only?(file) }
+      if candidates.empty?
+        warn "active_mutator: forgiving empty plan: only comments changed in " \
+             "#{discovery.since_candidates.join(", ")}"
+        return 0
+      end
 
       if !@config.class_level && class_body_only?(discovery.since_matched_all, candidates)
         warn "active_mutator: forgiving empty plan: changed lines are class-body code and --no-class-level is set"
@@ -322,7 +330,8 @@ module ActiveMutator
       since_matched_all = subjects
       subjects = subjects.reject(&:class_body?) unless @config.class_level
       Discovery.new(subjects: subjects, scanned_files: scanned_files,
-                    since_candidates: since_candidates, since_matched_all: since_matched_all)
+                    since_candidates: since_candidates, since_matched_all: since_matched_all,
+                    since_filter: filter)
     end
 
     def relative(file) = file.delete_prefix(@config.root.chomp("/") + "/")

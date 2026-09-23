@@ -6,6 +6,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+- The baseline coverage map now skips gem files even when gems are installed
+  under the project root (e.g. `bundle config set --local path vendor/bundle`
+  on CI). It checks every `Gem.path` entry and `Bundler.bundle_path`. Before,
+  every loaded gem file was recorded per example, which on a large suite
+  pushed the baseline past the runner's memory and got the job killed.
+- `--allow-empty` now forgives an empty `--since` plan when the only changes
+  in the candidate files are comments or blank lines, added or deleted. It
+  compares the Ruby tokens at the ref against the working copy with comments
+  dropped, so a `#` line inside a heredoc still counts as code. Magic
+  comments (`# frozen_string_literal: true`) and files that fail to parse
+  also count as code. A deletion-only code edit still exits 1.
+
 ## [0.6.0] - 2026-09-21
 
 - A `--since`/`--subject` run that plans zero mutants now exits before the
