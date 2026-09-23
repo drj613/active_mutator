@@ -334,5 +334,12 @@
     "description": "delete `private`",
     "original_snippet": "private",
     "ordinal": 0
+  },
+  {
+    "file": "lib/active_mutator/diagnostics/text.rb",
+    "subject": "ActiveMutator::Diagnostics::Text (class body)",
+    "description": "delete `private`",
+    "original_snippet": "private",
+    "ordinal": 0
   }
 ]

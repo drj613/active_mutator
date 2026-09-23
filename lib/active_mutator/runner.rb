@@ -10,10 +10,10 @@ module ActiveMutator
     # without --since). The last three feed the --allow-empty verdict (#46).
     Discovery = Data.define(:subjects, :scanned_files, :since_candidates, :since_matched_all, :since_filter)
 
-    def initialize(config, reporter: nil, events: Events.new)
+    def initialize(config, reporter: nil, events: nil)
       @config = config
       @reporter = reporter || build_reporter
-      @events = events
+      @events = events || build_events
     end
 
     def call
@@ -297,6 +297,12 @@ module ActiveMutator
       rel = file.delete_prefix(@config.root.chomp("/") + "/").delete_suffix(".rb")
       rest = rel.sub(%r{\A[^/]+/}, "")
       @config.spec_paths.map { |sp| "#{sp}/#{rest}_spec.rb" }
+    end
+
+    def build_events
+      events = Events.new
+      events.subscribe(Diagnostics::Text.new(root: @config.root)) if @config.diagnostics
+      events
     end
 
     def build_reporter

@@ -301,6 +301,7 @@ projects used to tell a docs-only PR from a broken `--since` range.
 | `--require FILE` | none | preload files (repeatable) |
 | `--operator FILE` | none | load a custom operator file before analysis (repeatable) |
 | `--[no-]class-level` | on | mutate class-level code (macros, constants, DSL/scope lambdas) via class-body subjects |
+| `--diagnostics` | off | print timestamped phase, mutant, and memory lines to stderr, for finding out where a CI run died |
 | `--fail-at SCORE` | none (strict) | exit 0 if score >= SCORE even with survivors (opt-in relaxation for gradual adoption; 0 = report-only) |
 
 `--spec-path` tells active_mutator where spec files live (coverage
@@ -338,7 +339,8 @@ replaces the default `spec`),
 `adaptive_timeout` (`true`/`false`),
 `class_level` (`true`/`false`, default `true` — mutate class-level code),
 `class_level_closure_cap` (integer, default `10` — max constants a
-class-body mutant may reload before it is `skipped`).
+class-body mutant may reload before it is `skipped`),
+`diagnostics` (`true`/`false`, default `false`).
 Unknown keys and wrong types are errors, not silent no-ops.
 
 ```yaml

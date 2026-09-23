@@ -32,7 +32,8 @@ module ActiveMutator
         spec_paths: ["spec"],
         browser_boot_seconds: 15.0, accept_survivors: false, exclude: [],
         max_mutants: nil, debug_plan: false, fail_at: nil, adaptive_timeout: true,
-        operators: [], class_level: true, class_level_closure_cap: 10, allow_empty: false
+        operators: [], class_level: true, class_level_closure_cap: 10, allow_empty: false,
+        diagnostics: false
       }
       options.merge!(ConfigFile.load(Dir.pwd))
       paths = OptionParser.new do |o|
@@ -69,6 +70,7 @@ module ActiveMutator
         o.on("--allow-empty",
              "Exit 0 when --since/--subject plan no mutants and the --since diff changed no code " \
              "in a mutable source file (default: exit 1)") { options[:allow_empty] = true }
+        o.on("--diagnostics", "Print phase, mutant, and memory lines to stderr") { options[:diagnostics] = true }
         o.on("--fail-at SCORE", Float, "Exit 0 if mutation score >= SCORE even with survivors (default: any survivor fails)") do |v|
           raise OptionParser::InvalidArgument, "--fail-at must be within 0..100" unless (0..100).cover?(v)
           options[:fail_at] = v

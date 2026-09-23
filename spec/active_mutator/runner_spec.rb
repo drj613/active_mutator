@@ -210,6 +210,15 @@ RSpec.describe ActiveMutator::Runner do
       expect(ActiveMutator::Scheduler).to have_received(:new).with(hash_including(events: bus))
     end
 
+    it "prints diagnostic lines to stderr with --diagnostics, and none without" do
+      [true, false].each do |on|
+        runner = stub_runner(config.with(diagnostics: on))
+        allow(ActiveMutator::Scheduler).to receive(:new).and_return(instance_double(ActiveMutator::Scheduler, run: []))
+        expectation = output(on ? /\] phase boot start\n/ : /phase/).to_stderr_from_any_process
+        on ? expect { runner.call }.to(expectation) : expect { runner.call }.not_to(expectation)
+      end
+    end
+
     it "sets ClosureReload.cap from config before scheduling (forks inherit it)" do
       original_cap = ActiveMutator::ClosureReload.cap
       runner = stub_runner(config.with(class_level_closure_cap: 42))

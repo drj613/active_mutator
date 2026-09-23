@@ -26,7 +26,8 @@ module ActiveMutator
       "adaptive_timeout" => :boolean,
       "class_level" => :boolean,
       "class_level_closure_cap" => :positive_integer,
-      "allow_empty" => :boolean
+      "allow_empty" => :boolean,
+      "diagnostics" => :boolean
     }.freeze
 
     def self.load(root)
