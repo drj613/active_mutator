@@ -295,6 +295,16 @@ RSpec.describe ActiveMutator::Baseline do
           expect { baseline.coverage_map }.to raise_error(ActiveMutator::Aborted, /sigterm/)
         end
 
+        it "stops before reading coverage when the sample at the phase's end trips the flag" do
+          allow(baseline).to receive(:rspec_command).and_return(["ruby", "-e", "exit 0"])
+          bus.subscribe do |e|
+            flag.trip!(:memory_ceiling) if e.type == :phase_end && e.fields[:phase] == :baseline
+          end
+
+          expect { baseline.coverage_map }.to raise_error(ActiveMutator::Aborted, /memory_ceiling/)
+          expect(seen.map { |(type, fields)| [type, fields[:phase]] }).to eq([%i[phase_start baseline], %i[phase_end baseline]])
+        end
+
         it "starts no child once the flag has tripped" do
           flag.deferred { flag.trip!(:sigint) }
           allow(Process).to receive(:spawn).and_call_original

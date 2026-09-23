@@ -129,9 +129,14 @@ module ActiveMutator
       @abort.deferred do
         @child_pid = Process.spawn(baseline_env(out_path), *rspec_command(targets), chdir: @root, out: :err,
                                                                                     pgroup: true)
-        @events.phase(:baseline, refresh: targets.empty? ? :full : :partial, pid: @child_pid) do
+        passed = @events.phase(:baseline, refresh: targets.empty? ? :full : :partial, pid: @child_pid) do
           wait_child(@child_pid).success?
         end
+        # The memory sample taken as the phase ends can trip the ceiling.
+        # Stop here, before the coverage parse: that's the spike it guards.
+        raise Aborted, @abort.reason if @abort.tripped?
+
+        passed
       end
     rescue SystemCallError # `bundle` missing: `system` returned nil here
       false
