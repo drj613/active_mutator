@@ -112,6 +112,7 @@ RSpec.describe ActiveMutator::CLI do
         "Print the planned mutant list as JSON and exit",
         "Print phase, mutant, and memory lines to stderr",
         "Write run events to FILE as NDJSON, one object per line",
+        "Seconds between memory samples with --diagnostics/--events (default: 5)",
         "Exit 0 when --since/--subject plan no mutants and the --since diff changed no code " \
         "in a mutable source file (default: exit 1)"
       ].each { |desc| expect(help).to include(desc) }
@@ -237,6 +238,13 @@ RSpec.describe ActiveMutator::CLI do
 
     it "turns class-level mutation off with --no-class-level" do
       expect(described_class.parse(["--no-class-level"]).class_level).to be(false)
+    end
+
+    it "samples every 5 seconds unless --sample-interval says otherwise, and rejects zero" do
+      expect(described_class.parse([]).sample_interval).to eq(5.0)
+      expect(described_class.parse(%w[--sample-interval 0.5]).sample_interval).to eq(0.5)
+      expect { described_class.parse(%w[--sample-interval 0]) }
+        .to raise_error(OptionParser::InvalidArgument, /--sample-interval must be > 0/)
     end
 
     it "takes an --events file, none by default" do

@@ -200,7 +200,7 @@ RSpec.describe ActiveMutator::Runner do
 
       runner.call
 
-      expect(seen).to eq([
+      expect(seen.reject { |(type, _)| type == :memory }).to eq([
                            [:phase_start, { phase: :boot }], [:phase_end, { phase: :boot }],
                            [:phase_start, { phase: :planning }], [:phase_end, { phase: :planning }],
                            [:phase_start, { phase: :mutating, mutants: 0 }], [:phase_end, { phase: :mutating }],
@@ -229,7 +229,8 @@ RSpec.describe ActiveMutator::Runner do
         runner.call
 
         lines = File.readlines(File.join(dir, "run.ndjson")).map { |l| JSON.parse(l) }
-        expect(lines.map { |l| [l["event"], l["phase"]] }.first(2)).to eq([%w[phase_start boot], %w[phase_end boot]])
+        expect(lines.map { |l| [l["event"], l["phase"]] }.first(3))
+          .to eq([%w[phase_start boot], ["memory", nil], %w[phase_end boot]]) # a sample at each boundary
         expect(lines.map { |l| l["v"] }.uniq).to eq([1])
         expect(opened).to be_closed
       end
@@ -238,6 +239,20 @@ RSpec.describe ActiveMutator::Runner do
     it "reports an unwritable --events file as a usage error" do
       runner = stub_runner(config.with(events_file: "/nonexistent/dir/run.ndjson"))
       expect { runner.call }.to raise_error(ActiveMutator::Error, /\Acannot write --events file: No such file or directory/)
+    end
+
+    it "samples memory only when something reads the samples, and stops the sampler after" do
+      sampler = instance_double(ActiveMutator::Sampler, call: nil, stop: nil)
+      allow(sampler).to receive(:start).and_return(sampler)
+      allow(ActiveMutator::Sampler).to receive(:new).and_return(sampler)
+      allow(ActiveMutator::Scheduler).to receive(:new).and_return(instance_double(ActiveMutator::Scheduler, run: []))
+
+      stub_runner(config).call
+      expect(ActiveMutator::Sampler).not_to have_received(:new)
+
+      expect { stub_runner(config.with(diagnostics: true, sample_interval: 0.5)).call }.to output.to_stderr_from_any_process
+      expect(ActiveMutator::Sampler).to have_received(:new).with(events: kind_of(ActiveMutator::Events), interval: 0.5)
+      expect(sampler).to have_received(:stop)
     end
 
     it "sets ClosureReload.cap from config before scheduling (forks inherit it)" do

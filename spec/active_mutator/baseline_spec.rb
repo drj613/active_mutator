@@ -216,8 +216,10 @@ RSpec.describe ActiveMutator::Baseline do
         baseline.coverage_map
 
         size = JSON.generate("version" => 2, "records" => { "./spec/a_spec.rb[1:1]" => a_hit }).bytesize
+        pid = seen.first.last[:pid]
+        expect(pid).to be_a(Integer)
         expect(seen).to eq([
-                             [:phase_start, { phase: :baseline, refresh: :full }],
+                             [:phase_start, { phase: :baseline, refresh: :full, pid: pid }],
                              [:phase_end, { phase: :baseline }],
                              [:phase_start, { phase: :coverage_load, bytes: size }],
                              [:phase_end, { phase: :coverage_load, examples: 1 }]
@@ -232,7 +234,7 @@ RSpec.describe ActiveMutator::Baseline do
 
         baseline.coverage_map
 
-        expect(seen.map(&:last)).to include(phase: :baseline, refresh: :partial)
+        expect(seen.map(&:last)).to include(hash_including(phase: :baseline, refresh: :partial))
         expect(child_argv).to eq(["spec/b_spec.rb"])
       end
 

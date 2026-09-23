@@ -8,10 +8,10 @@ module ActiveMutator
                        :accept_survivors, :exclude, :max_mutants, :debug_plan,
                        :fail_at, :adaptive_timeout, :operators,
                        :class_level, :class_level_closure_cap, :allow_empty,
-                       :diagnostics, :events_file) do
+                       :diagnostics, :events_file, :sample_interval) do
     # Defaults for the 0.7.0 diagnostics fields, so a Config built by hand
     # (specs, embedding hosts) doesn't have to name them.
-    def initialize(diagnostics: false, events_file: nil, **fields)
+    def initialize(diagnostics: false, events_file: nil, sample_interval: 5.0, **fields)
       super
     end
   end

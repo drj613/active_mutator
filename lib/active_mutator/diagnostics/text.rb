@@ -3,6 +3,7 @@ module ActiveMutator
     # Human sizes for diagnostic lines: 812M, 1.6G. nil (no reading) is "?".
     def self.size_kb(kb)
       return "?" unless kb
+      return "0" if kb.zero?
       return format("%.1fG", kb / 1_048_576.0) if kb >= 1_048_576
       return "#{(kb / 1024.0).round}M" if kb >= 1024
 
@@ -29,6 +30,7 @@ module ActiveMutator
         when :phase_start, :phase_end then phase(type, fields)
         when :mutant_start then mutant_start(fields)
         when :mutant_end then mutant_end(fields)
+        when :memory then memory(fields)
         else [type, *pairs(fields)].join(" ")
         end
       end
@@ -46,6 +48,28 @@ module ActiveMutator
       def mutant_end(f)
         "mutant end ##{f[:seq]} #{f[:status]} #{format("%.1f", f[:seconds])}s peak=#{Diagnostics.size_kb(f[:peak_rss_kb])}"
       end
+
+      # mem parent=1.6G workers=4:3.2G baseline=2.1G total=6.9G avail=3.0G swap=0 psi=0.3 load=1.52
+      def memory(f)
+        parts = ["mem", "parent=#{size(f[:parent])}"]
+        parts << "workers=#{f[:workers].size}:#{Diagnostics.size_kb(f[:workers].sum { |w| kb(w) })}" if f[:workers].any?
+        parts << "baseline=#{size(f[:baseline])}" if f[:baseline]
+        parts << "total=#{Diagnostics.size_kb(f[:total_pss_kb])}"
+        parts.concat(system(f[:system])) if f[:system]
+        parts.join(" ")
+      end
+
+      def system(s)
+        parts = ["avail=#{Diagnostics.size_kb(s[:mem_available_kb])}"]
+        parts << "swap=#{Diagnostics.size_kb(s[:swap_total_kb] - s[:swap_free_kb])}" if s[:swap_total_kb] && s[:swap_free_kb]
+        parts << "psi=#{s[:psi_some_avg10]}" if s[:psi_some_avg10]
+        parts << "load=#{s[:load1]}" if s[:load1]
+        parts
+      end
+
+      def size(reading) = Diagnostics.size_kb(reading && kb(reading))
+
+      def kb(reading) = reading[:pss_kb] || reading[:rss_kb]
 
       def pairs(fields)
         fields.map do |key, value|

@@ -28,7 +28,8 @@ module ActiveMutator
       "class_level_closure_cap" => :positive_integer,
       "allow_empty" => :boolean,
       "diagnostics" => :boolean,
-      "events_file" => :string
+      "events_file" => :string,
+      "sample_interval" => :positive_number
     }.freeze
 
     def self.load(root)
@@ -64,6 +65,10 @@ module ActiveMutator
         value
       when :number
         raise Error, "#{FILENAME}: #{key} must be a number" unless value.is_a?(Numeric)
+        value.to_f
+      when :positive_number
+        raise Error, "#{FILENAME}: #{key} must be a number" unless value.is_a?(Numeric)
+        raise Error, "#{FILENAME}: #{key} must be > 0" unless value.positive?
         value.to_f
       when :score
         raise Error, "#{FILENAME}: #{key} must be a number" unless value.is_a?(Numeric)

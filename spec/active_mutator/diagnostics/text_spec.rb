@@ -34,6 +34,41 @@ RSpec.describe ActiveMutator::Diagnostics::Text do
     expect(text).to end_with("] mutant end #12 killed 1.8s peak=812M\n")
   end
 
+  describe "memory lines" do
+    let(:system) do
+      { mem_available_kb: 3_145_728, swap_total_kb: 4_194_300, swap_free_kb: 4_194_300, psi_some_avg10: 0.3, load1: 1.52 }
+    end
+
+    it "prints the parent, workers, baseline child, total, and system fields" do
+      text = line(:memory, parent: { rss_kb: 1_677_722, pss_kb: nil },
+                           workers: [{ pid: 1, seq: 3, rss_kb: 900_000, pss_kb: 524_288 },
+                                     { pid: 2, seq: 4, rss_kb: 600_000, pss_kb: 524_288 }],
+                           baseline: { pid: 9, rss_kb: 2_202_010, pss_kb: nil }, total_pss_kb: 4_928_308, system: system)
+      expect(text).to end_with("] mem parent=1.6G workers=2:1.0G baseline=2.1G total=4.7G avail=3.0G swap=0 psi=0.3 load=1.52\n")
+    end
+
+    it "leaves out what isn't there" do
+      text = line(:memory, parent: nil, workers: [], baseline: nil, total_pss_kb: nil,
+                           system: { mem_available_kb: nil, swap_total_kb: nil, swap_free_kb: 1, psi_some_avg10: nil, load1: nil })
+      expect(text).to end_with("] mem parent=? total=? avail=?\n")
+      out.truncate(0)
+      out.rewind
+      expect(line(:memory, parent: nil, workers: [], baseline: nil, total_pss_kb: nil,
+                           system: { mem_available_kb: 1, swap_total_kb: 1, swap_free_kb: nil }))
+        .to end_with("] mem parent=? total=? avail=1K\n")
+    end
+
+    it "prints swap in use and omits the system fields off Linux" do
+      expect(line(:memory, parent: { rss_kb: 2048, pss_kb: 1024 }, workers: [], baseline: nil, total_pss_kb: 1024,
+                           system: system.merge(swap_free_kb: 3_145_724)))
+        .to include("parent=1M total=1M avail=3.0G swap=1.0G psi")
+      out.truncate(0)
+      out.rewind
+      expect(line(:memory, parent: { rss_kb: 2048, pss_kb: nil }, workers: [], baseline: nil, total_pss_kb: 2048, system: nil))
+        .to end_with("] mem parent=2M total=2M\n")
+    end
+  end
+
   it "prints other events as key=value pairs" do
     expect(line(:abort, reason: :sigterm)).to end_with("] abort reason=sigterm\n")
   end
@@ -41,7 +76,7 @@ RSpec.describe ActiveMutator::Diagnostics::Text do
   describe ".size_kb" do
     it "scales to K, M, and G, and shows ? for a missing reading" do
       sizes = [nil, 0, 1023, 1024, 831_488, 1_048_575, 1_048_576, 1_677_722].map { |kb| ActiveMutator::Diagnostics.size_kb(kb) }
-      expect(sizes).to eq(["?", "0K", "1023K", "1M", "812M", "1024M", "1.0G", "1.6G"])
+      expect(sizes).to eq(["?", "0", "1023K", "1M", "812M", "1024M", "1.0G", "1.6G"])
     end
   end
 end

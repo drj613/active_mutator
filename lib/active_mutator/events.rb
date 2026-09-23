@@ -1,3 +1,5 @@
+require "monitor"
+
 module ActiveMutator
   # Internal event bus for run diagnostics. Producers call
   # `emit(type, **fields)`; listeners get a frozen Event. With no listeners
@@ -12,8 +14,10 @@ module ActiveMutator
       @wall = wall
       @started = clock.call
       @listeners = []
-      # The memory sampler emits from its own thread.
-      @lock = Mutex.new
+      # The memory sampler emits from its own thread. A Monitor, not a Mutex:
+      # the sampler also emits from inside its own listener call (a sample
+      # at each phase boundary), which re-enters on the same thread.
+      @lock = Monitor.new
     end
 
     # A listener is anything with #call(event), or a block.

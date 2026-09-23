@@ -18,8 +18,10 @@ module ActiveMutator
 
     def call
       events_file = open_events_file
+      sampler = start_sampler
       run
     ensure
+      sampler&.stop
       events_file&.close
     end
 
@@ -304,6 +306,16 @@ module ActiveMutator
       rel = file.delete_prefix(@config.root.chomp("/") + "/").delete_suffix(".rb")
       rest = rel.sub(%r{\A[^/]+/}, "")
       @config.spec_paths.map { |sp| "#{sp}/#{rest}_spec.rb" }
+    end
+
+    # Only when something reads the samples. Subscribed last, so each phase
+    # line prints before the sample taken at it.
+    def start_sampler
+      return unless @events.listening?
+
+      sampler = Sampler.new(events: @events, interval: @config.sample_interval)
+      @events.subscribe(sampler)
+      sampler.start
     end
 
     # Opened per call, not per Runner, so the file is closed on every exit.

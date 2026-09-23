@@ -118,15 +118,18 @@ module ActiveMutator
     # and keeps control while it runs. out: :err: the subprocess suite's
     # progress output must not pollute our stdout (breaks `--format json`
     # consumers).
+    #
+    # The phase starts once the child exists, so it carries the pid the
+    # memory sampler follows.
     def run_rspec(out_path, targets = [])
-      @events.phase(:baseline, refresh: targets.empty? ? :full : :partial) do
-        @child_pid = Process.spawn(baseline_env(out_path), *rspec_command(targets), chdir: @root, out: :err)
+      @child_pid = Process.spawn(baseline_env(out_path), *rspec_command(targets), chdir: @root, out: :err)
+      @events.phase(:baseline, refresh: targets.empty? ? :full : :partial, pid: @child_pid) do
         wait_child(@child_pid).success?
-      rescue SystemCallError # `bundle` missing: `system` returned nil here
-        false
-      ensure
-        @child_pid = nil
       end
+    rescue SystemCallError # `bundle` missing: `system` returned nil here
+      false
+    ensure
+      @child_pid = nil
     end
 
     def rspec_command(targets) = ["bundle", "exec", "rspec", *targets]

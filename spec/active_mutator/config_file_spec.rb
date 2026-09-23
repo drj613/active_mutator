@@ -213,6 +213,15 @@ RSpec.describe ActiveMutator::ConfigFile do
     expect { described_class.load(root) }.to raise_error(ActiveMutator::Error, /requires must be a list of strings/)
   end
 
+  it "accepts a positive sample_interval and rejects zero or a non-number" do
+    write_config("sample_interval: 2\n")
+    expect(described_class.load(root)).to eq(sample_interval: 2.0)
+    write_config("sample_interval: 0\n")
+    expect { described_class.load(root) }.to raise_error(ActiveMutator::Error, ".active_mutator.yml: sample_interval must be > 0")
+    write_config("sample_interval: soon\n")
+    expect { described_class.load(root) }.to raise_error(ActiveMutator::Error, ".active_mutator.yml: sample_interval must be a number")
+  end
+
   it "accepts a string events_file and rejects anything else" do
     write_config("events_file: tmp/run.ndjson\n")
     expect(described_class.load(root)).to eq(events_file: "tmp/run.ndjson")

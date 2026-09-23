@@ -8,6 +8,7 @@ answer that. Both are off by default and cost nothing when off.
 |---|---|---|
 | `--diagnostics` | `diagnostics: true` | one human-readable line per event on stderr |
 | `--events FILE` | `events_file: FILE` | the same events as NDJSON, one JSON object per line |
+| `--sample-interval S` | `sample_interval: S` | seconds between memory samples (default 5) |
 
 Both write to stderr or a file, never stdout, so `--format json` output
 stays parseable. The `--events` file is written line by line as the run
@@ -17,7 +18,8 @@ A relative `FILE` is relative to the project root.
 ## Reading `--diagnostics` output
 
 ```
-[active_mutator 14:02:11 +3.4s] phase baseline start refresh=full
+[active_mutator 14:02:11 +3.4s] phase baseline start refresh=full pid=4807
+[active_mutator 14:03:40 +92.1s] mem parent=226M baseline=2.1G total=2.3G avail=3.0G swap=0 psi=0.3 load=1.52
 [active_mutator 14:08:59 +411.2s] phase baseline end
 [active_mutator 14:08:59 +411.3s] phase coverage_load start size=2.1G
 [active_mutator 14:09:30 +442.0s] mutant start #12 pid=4242 parallel Foo#bar app/models/foo.rb:10 replace > with >=
@@ -28,13 +30,40 @@ Each line starts with the wall-clock time and the seconds since the run
 started. If the log stops after a `phase ... start` with no matching
 `end`, that phase is where the run died.
 
+## Memory samples
+
+With either flag on, a sampler thread records the gem's own memory every
+`--sample-interval` seconds and at every phase boundary. It covers three
+kinds of process: the parent, each live worker, and the baseline child.
+Watching only one of them tells half the story. In the run that led to
+this feature, the baseline child grew to 3.7 GB and exited, then the
+parent grew to 6.6 GB reading its coverage file back.
+
+| Platform | Per process | System fields |
+|---|---|---|
+| Linux | RSS and peak from `/proc/<pid>/status`, Pss from `/proc/<pid>/smaps_rollup` | `MemAvailable` and swap from `/proc/meminfo`, `some avg10` from `/proc/pressure/memory`, load from `/proc/loadavg` |
+| macOS | RSS from one `ps` call per sample | none |
+| other | none | none |
+
+Workers are forks, so they share copy-on-write pages with the parent.
+Adding up RSS counts those pages more than once. The total uses **Pss**
+on Linux, which splits shared pages fairly between the processes that
+share them. On macOS the total is an RSS sum, which runs high.
+
+A worker can finish between two samples, so each worker also reports its
+own peak (`VmHWM`) in its `mutant_end` event.
+
+In the text line, `workers=4:3.2G` means four live workers using 3.2 GB
+together, and `swap` is swap in use. A field the platform can't read
+shows as `?` or is left out.
+
 ## Phases
 
 | Phase | What runs |
 |---|---|
 | `boot` | loading operators, the app, and the spec helper in the parent |
 | `planning` | finding subjects and generating mutants |
-| `baseline` | the child `rspec` process recording coverage (`refresh` is `full` or `partial`) |
+| `baseline` | the child `rspec` process recording coverage (`refresh` is `full` or `partial`; `pid` is the child's) |
 | `coverage_load` | the parent reading the coverage file back (`bytes` before the read, `examples` after) |
 | `mutating` | the fork pool running mutants (`mutants` is the planned count) |
 | `escalating` | phase-2 reruns of class-body survivors against more spec files |
@@ -61,7 +90,7 @@ New fields may be added under `v: 1`. Renaming or removing a field bumps
 ### `phase_start`, `phase_end`
 
 `phase` names the phase (see the table above). Some phases add fields:
-`refresh` on `baseline` start, `bytes` on `coverage_load` start,
+`refresh` and `pid` on `baseline` start, `bytes` on `coverage_load` start,
 `examples` on `coverage_load` end, and `mutants` on `mutating` and
 `escalating` start.
 
@@ -84,3 +113,15 @@ New fields may be added under `v: 1`. Renaming or removing a field bumps
 | `status` | `killed`, `survived`, `timeout`, `error`, or `skipped` |
 | `seconds` | worker wall time |
 | `peak_rss_kb` | the worker's own peak memory (`VmHWM`); `null` off Linux and for timeouts |
+
+### `memory`
+
+| Field | Meaning |
+|---|---|
+| `parent` | `{rss_kb, pss_kb}` for the parent, or `null` if unreadable |
+| `workers` | `[{pid, seq, rss_kb, pss_kb}]`, one per live worker |
+| `baseline` | `{pid, rss_kb, pss_kb}` for the baseline child, or `null` when none runs |
+| `total_pss_kb` | the sum over all of the above: Pss where known, else RSS; `null` if nothing could be read |
+| `system` | Linux only, else `null`: `{mem_available_kb, swap_total_kb, swap_free_kb, psi_some_avg10, load1}`, each `null` when its file is missing |
+
+`pss_kb` is `null` off Linux, and on kernels without `smaps_rollup`.
