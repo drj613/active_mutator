@@ -1,4 +1,5 @@
 require "fileutils"
+require "timeout"
 require "tmpdir"
 
 RSpec.describe ActiveMutator::Baseline do
@@ -262,6 +263,48 @@ RSpec.describe ActiveMutator::Baseline do
 
         expect(baseline.send(:wait_child, pid)).to be_success
         expect(polls).to be < 50 # 0.3s at 0.05s a poll, with room for a slow boot
+      end
+
+      context "when the run is aborted" do
+        let(:flag) { ActiveMutator::AbortFlag.new }
+        let(:baseline) { described_class.new(root: @tmp, cache_dir: tmp_cache, events: bus, abort: flag) }
+        let(:bus) { ActiveMutator::Events.new.subscribe { |e| seen << [e.type, e.fields] } }
+
+        it "kills the child's whole process group and raises, leaving the phase open" do
+          grandchild_file = File.join(@tmp, "grandchild")
+          script = "pid = spawn('sleep', '30'); File.write(#{grandchild_file.inspect}, pid.to_s); sleep 30"
+          allow(baseline).to receive(:rspec_command).and_return(["ruby", "-e", script])
+          Thread.new do
+            sleep 0.02 until File.exist?(grandchild_file) && !File.read(grandchild_file).empty?
+            flag.trip!(:sigterm)
+          end
+
+          expect { Timeout.timeout(5) { baseline.coverage_map } }.to raise_error(ActiveMutator::Aborted, /sigterm/)
+          expect(seen.map(&:first)).to eq([:phase_start])
+          expect(baseline.child_pid).to be_nil
+          grandchild = File.read(grandchild_file).to_i
+          expect_gone(grandchild)
+        end
+
+        it "starts no child once the flag has tripped" do
+          flag.deferred { flag.trip!(:sigint) }
+          allow(Process).to receive(:spawn).and_call_original
+
+          expect { baseline.coverage_map }.to raise_error(ActiveMutator::Aborted, /sigint/)
+          expect(Process).not_to have_received(:spawn)
+        end
+
+        # The grandchild isn't ours to reap, so poll until the kernel drops it.
+        def expect_gone(pid)
+          Timeout.timeout(3) do
+            loop do
+              Process.kill(0, pid)
+              sleep 0.02
+            rescue Errno::ESRCH
+              break
+            end
+          end
+        end
       end
 
       it "fails the baseline when the child exits non-zero" do

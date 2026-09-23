@@ -7,7 +7,9 @@ module ActiveMutator
   # caches the CoverageMap. Invalidation is coarse: any digest change in
   # {app,lib}/**/*.rb or the configured spec paths triggers a full re-run.
   class Baseline
-    def initialize(root:, spec_paths: ["spec"], cache_dir: File.join(root, ".active_mutator"), events: Events.new)
+    def initialize(root:, spec_paths: ["spec"], cache_dir: File.join(root, ".active_mutator"), events: Events.new,
+                   abort: AbortFlag.new)
+      @abort = abort
       @root = root
       @spec_paths = spec_paths
       @cache_dir = cache_dir
@@ -120,11 +122,16 @@ module ActiveMutator
     # consumers).
     #
     # The phase starts once the child exists, so it carries the pid the
-    # memory sampler follows.
+    # memory sampler follows. The child gets its own process group so an
+    # abort can kill the whole suite (browsers, app servers) in one signal;
+    # a Ctrl-C reaches it through the Runner's trap instead of the terminal.
     def run_rspec(out_path, targets = [])
-      @child_pid = Process.spawn(baseline_env(out_path), *rspec_command(targets), chdir: @root, out: :err)
-      @events.phase(:baseline, refresh: targets.empty? ? :full : :partial, pid: @child_pid) do
-        wait_child(@child_pid).success?
+      @abort.deferred do
+        @child_pid = Process.spawn(baseline_env(out_path), *rspec_command(targets), chdir: @root, out: :err,
+                                                                                    pgroup: true)
+        @events.phase(:baseline, refresh: targets.empty? ? :full : :partial, pid: @child_pid) do
+          wait_child(@child_pid).success?
+        end
       end
     rescue SystemCallError # `bundle` missing: `system` returned nil here
       false
@@ -139,8 +146,18 @@ module ActiveMutator
         _, status = Process.waitpid2(pid, Process::WNOHANG)
         return status if status
 
+        abort_child!(pid) if @abort.tripped?
         sleep POLL_SECONDS
       end
+    end
+
+    def abort_child!(pid)
+      begin
+        Process.kill("KILL", -pid)
+      rescue Errno::ESRCH, Errno::EPERM
+        nil # already gone
+      end
+      raise Aborted, @abort.reason
     end
 
     def baseline_env(out_path)
