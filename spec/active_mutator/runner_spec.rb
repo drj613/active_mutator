@@ -395,6 +395,38 @@ RSpec.describe ActiveMutator::Runner do
         end
       end
 
+      it "lets the report finish when a signal lands during it, printing it once" do
+        runner = aborting_runner { [] }
+        allow(reporter).to receive(:summary).and_wrap_original do |orig, *args, **kw|
+          Process.kill("TERM", Process.pid)
+          sleep 0.2 # the trap runs here; it must not interrupt the report
+          orig.call(*args, **kw)
+        end
+
+        expect(runner.call).to eq(0)
+        expect(summaries).to eq([[[], { invalid_count: 0 }]])
+      end
+
+      it "prints no second summary when the abort lands after the report" do
+        runner = aborting_runner { [] }
+        allow(runner).to receive(:exit_code) { runner.instance_variable_get(:@abort).trip!(:sigterm) }
+
+        expect(runner.call).to eq(143)
+        expect(summaries).to eq([[[], { invalid_count: 0 }]])
+        expect(abort_event).to include(reason: :sigterm)
+      end
+
+      it "prints the partial summary when the flag tripped just before the report" do
+        runner = aborting_runner do
+          flag = runner.instance_variable_get(:@abort)
+          flag.deferred { flag.trip!(:sigint) }
+          []
+        end
+
+        expect(runner.call).to eq(130)
+        expect(summaries).to eq([[[], { invalid_count: 0, aborted: { reason: :sigint, in_flight: [], planned: 0 } }]])
+      end
+
       it "reports an abort before planning with no plan size and no invalid count" do
         runner = aborting_runner { [] }
         allow(runner).to receive(:preload!) do

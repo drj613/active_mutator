@@ -174,7 +174,7 @@ module ActiveMutator
       # Phase 2 runs on its own scheduler (built lazily inside), so pass nil.
       results = escalate_class_body_survivors(results, nil, map, phase1_ids: phase1_ids)
 
-      @events.phase(:reporting) do
+      reporting do
         accept_survivors!(ledger, results, fingerprints, scanned_files) if @config.accept_survivors
         @reporter.summary(results, invalid_count: @invalid_count)
       end
@@ -205,12 +205,25 @@ module ActiveMutator
     end
 
     # No --accept-survivors here: a partial run must not rewrite the ledger.
+    # Once the report starts, a signal only records its reason: the report
+    # finishes, and `--format json` stays one document.
+    def reporting(&)
+      @abort.deferred do
+        @reported = true
+        @events.phase(:reporting, &)
+      end
+    end
+
+    # No summary if the full one already went out: a signal landing after
+    # the report would otherwise print a second one.
     def aborted_exit(error)
       counts = Reporter::Terminal.counts(error.results)
       @events.emit(:abort, reason: error.reason, in_flight: error.in_flight, planned: @planned,
                            counts: counts, score: error.results.empty? ? nil : Reporter::Terminal.score(counts))
-      @reporter.summary(error.results, invalid_count: @invalid_count || 0,
-                                       aborted: { reason: error.reason, in_flight: error.in_flight, planned: @planned })
+      unless @reported
+        @reporter.summary(error.results, invalid_count: @invalid_count || 0,
+                                         aborted: { reason: error.reason, in_flight: error.in_flight, planned: @planned })
+      end
       EXIT_CODES.fetch(error.reason)
     end
 
@@ -219,7 +232,7 @@ module ActiveMutator
     # mutable code, or class-body code dropped by --no-class-level (#23 covers
     # the zero-subject case for explicit paths).
     def empty_plan_exit(invalid_count, discovery)
-      @events.phase(:reporting) { @reporter.summary([], invalid_count: invalid_count, empty_plan: true) }
+      reporting { @reporter.summary([], invalid_count: invalid_count, empty_plan: true) }
       causes = []
       causes << "--since #{@config.since} matched no mutable code" if @config.since
       causes << "--subject #{@config.subject_filter} matched no subjects" if @config.subject_filter
