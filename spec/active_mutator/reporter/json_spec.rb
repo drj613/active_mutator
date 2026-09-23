@@ -62,14 +62,54 @@ RSpec.describe ActiveMutator::Reporter::Json do
     reporter.summary([], invalid_count: 0, empty_plan: true)
     data = JSON.parse(out.string)
     expect(data).to eq(
+      "complete" => true,
       "score" => nil,
       "counts" => { "killed" => 0, "survived" => 0, "timeout" => 0, "error" => 0,
                     "uncovered" => 0, "accepted" => 0, "skipped" => 0 },
       "invalid" => 0,
       "operators" => {},
       "results" => [],
+      "in_flight" => [],
+      "planned" => 0,
       "exit_reason" => "empty_plan"
     )
+  end
+
+  describe "an aborted run" do
+    let(:in_flight) do
+      [{ seq: 3, pid: 42, subject: "Foo#bar", file: "/app/foo.rb", line: 10, description: "replace > with >=" }]
+    end
+
+    it "is marked incomplete, with the in-flight mutants, the plan size, and a partial score" do
+      results = [result_with(:killed, nil), result_with(:survived, nil)]
+      reporter.summary(results, invalid_count: 0, aborted: { reason: :sigterm, in_flight: in_flight, planned: 9 })
+      data = JSON.parse(out.string)
+
+      expect(data).to include("complete" => false, "score" => 0.5, "planned" => 9, "exit_reason" => "interrupted")
+      expect(data["in_flight"]).to eq([{ "seq" => 3, "pid" => 42, "subject" => "Foo#bar", "file" => "/app/foo.rb",
+                                         "line" => 10, "description" => "replace > with >=" }])
+      expect(data["results"].size).to eq(2)
+    end
+
+    it "reports interrupted for SIGINT and memory_ceiling for the ceiling, with no score when nothing finished" do
+      reporter.summary([], invalid_count: 0, aborted: { reason: :sigint, in_flight: [], planned: nil })
+      expect(JSON.parse(out.string)).to include("exit_reason" => "interrupted", "score" => nil, "planned" => nil)
+      out.truncate(0)
+      out.rewind
+      reporter.summary([result_with(:survived, nil)], invalid_count: 0,
+                       aborted: { reason: :memory_ceiling, in_flight: [], planned: 1 })
+      expect(JSON.parse(out.string)).to include("exit_reason" => "memory_ceiling", "score" => 0.0)
+    end
+  end
+
+  it "reports each mutant's worker seconds and peak memory, and the plan size on a finished run" do
+    timed = result_with(:killed, nil).with(seconds: 1.25, peak_rss_kb: 812_000)
+    reporter.summary([timed, result_with(:uncovered, nil)], invalid_count: 0)
+    data = JSON.parse(out.string)
+
+    expect(data["results"].map { |r| r.slice("seconds", "peak_rss_kb") })
+      .to eq([{ "seconds" => 1.25, "peak_rss_kb" => 812_000 }, { "seconds" => nil, "peak_rss_kb" => nil }])
+    expect(data).to include("complete" => true, "planned" => 2, "in_flight" => [])
   end
 
   it "keeps a score and the count-derived exit_reason when empty_plan is false" do
