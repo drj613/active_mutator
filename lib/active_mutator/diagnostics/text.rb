@@ -90,9 +90,15 @@ module ActiveMutator
         parts
       end
 
-      def size(reading) = Diagnostics.size_kb(reading && kb(reading))
+      # Not endless defs: a one-line method's line runs at
+      # load, so coverage can't tie it to the specs that call it.
+      def size(reading)
+        Diagnostics.size_kb(reading && kb(reading))
+      end
 
-      def kb(reading) = reading[:pss_kb] || reading[:rss_kb]
+      def kb(reading)
+        reading[:pss_kb] || reading[:rss_kb]
+      end
 
       def pairs(fields)
         fields.map do |key, value|

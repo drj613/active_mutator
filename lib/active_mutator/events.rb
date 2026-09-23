@@ -26,7 +26,11 @@ module ActiveMutator
       self
     end
 
-    def listening? = !@listeners.empty?
+    # Not an endless def: its one line runs at load, so coverage can't tie
+    # it to the specs that call it.
+    def listening?
+      !@listeners.empty?
+    end
 
     # Emits phase_start, runs the block, emits phase_end, and returns the
     # block's value. A phase that raises gets no phase_end, so the last
