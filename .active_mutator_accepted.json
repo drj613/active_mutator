@@ -341,5 +341,12 @@
     "description": "delete `private`",
     "original_snippet": "private",
     "ordinal": 0
+  },
+  {
+    "file": "lib/active_mutator/memory_probe.rb",
+    "subject": "ActiveMutator::MemoryProbe (class body)",
+    "description": "delete `private`",
+    "original_snippet": "private",
+    "ordinal": 0
   }
 ]
