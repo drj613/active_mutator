@@ -75,11 +75,53 @@ RSpec.describe ActiveMutator::SinceFilter do
     end
   end
 
+  describe ".deletion_gaps" do
+    it "records the new-side line each pure deletion follows" do
+      diff = <<~DIFF
+        +++ b/lib/a.rb
+        @@ -5,2 +4,0 @@
+        -gone
+        -gone
+        @@ -9 +8 @@
+        -old
+        +new
+        +++ b/lib/b.rb
+        @@ -1 +0,0 @@
+        -first
+      DIFF
+      expect(described_class.deletion_gaps(diff)).to eq("lib/a.rb" => [4], "lib/b.rb" => [0])
+    end
+  end
+
   describe "#cover?" do
+    def filter_with_gap(gap)
+      filter = described_class.allocate
+      filter.instance_variable_set(:@root, "/root")
+      filter.instance_variable_set(:@changed, {})
+      filter.instance_variable_set(:@gaps, "lib/a.rb" => [gap])
+      filter
+    end
+
+    let(:method_2_to_5) do
+      ActiveMutator::Subject.new(name: "A#x", file: "/root/lib/a.rb", byte_range: 0...1,
+                                 line_range: 2..5, constant_scope: "A", kind: :instance)
+    end
+
+    it "matches a subject that spans both sides of a deletion" do
+      expect(filter_with_gap(2).cover?(method_2_to_5)).to be(true)
+      expect(filter_with_gap(4).cover?(method_2_to_5)).to be(true)
+    end
+
+    it "does not match a subject that ends or starts right at a deletion" do
+      expect(filter_with_gap(5).cover?(method_2_to_5)).to be(false)
+      expect(filter_with_gap(1).cover?(method_2_to_5)).to be(false)
+    end
+
     it "matches subjects whose line_range intersects changed lines" do
       filter = described_class.allocate
       filter.instance_variable_set(:@root, "/root")
       filter.instance_variable_set(:@changed, "lib/a.rb" => [11, 12])
+      filter.instance_variable_set(:@gaps, {})
 
       hit = ActiveMutator::Subject.new(name: "A#x", file: "/root/lib/a.rb",
                                      byte_range: 0...1, line_range: 10..14,
@@ -125,6 +167,41 @@ RSpec.describe ActiveMutator::SinceFilter do
 
         filter = described_class.new(ref: "HEAD", root: root)
         expect(filter.changed_files).to eq(["lib/a.rb"])
+      end
+    end
+
+    it "covers the method a deletion was made inside, but not its neighbors" do
+      Dir.mktmpdir do |root|
+        FileUtils.mkdir_p(File.join(root, "lib"))
+        source = "class A\n  def a\n    return 0 if @x\n    1\n  end\n\n  def b = 2\nend\n"
+        File.write(File.join(root, "lib", "a.rb"), source)
+        git(root, "init", "-q")
+        git(root, "add", "-A")
+        git(root, "commit", "-qm", "base")
+        File.write(File.join(root, "lib", "a.rb"), source.sub("    return 0 if @x\n", ""))
+
+        filter = described_class.new(ref: "HEAD", root: root)
+        a = ActiveMutator::Subject.new(name: "A#a", file: File.join(root, "lib", "a.rb"), byte_range: 0...1,
+                                       line_range: 2..4, constant_scope: "A", kind: :instance)
+        expect(filter.cover?(a)).to be(true)
+        expect(filter.cover?(a.with(name: "A#b", line_range: 6..6))).to be(false)
+        expect(filter.deletion_only?("lib/a.rb")).to be(true)
+      end
+    end
+
+    it "is not deletion-only when lines were added" do
+      Dir.mktmpdir do |root|
+        FileUtils.mkdir_p(File.join(root, "lib"))
+        File.write(File.join(root, "lib", "a.rb"), "class A\n  def a = 1\nend\n")
+        git(root, "init", "-q")
+        git(root, "add", "-A")
+        git(root, "commit", "-qm", "base")
+        File.write(File.join(root, "lib", "a.rb"), "class A\n  def a = 2\nend\n")
+        File.write(File.join(root, "lib", "new.rb"), "class New; end\n")
+
+        filter = described_class.new(ref: "HEAD", root: root)
+        expect(filter.deletion_only?("lib/a.rb")).to be(false)
+        expect(filter.deletion_only?("lib/new.rb")).to be(false)
       end
     end
 

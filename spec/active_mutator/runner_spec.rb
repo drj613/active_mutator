@@ -21,9 +21,10 @@ RSpec.describe ActiveMutator::Runner do
   end
 
   def discovery(subjects, scanned_files: ["lib/a.rb"], since_candidates: [], since_matched_all: subjects,
-                comment_only: [])
+                comment_only: [], deletion_only: [])
     filter = instance_double(ActiveMutator::SinceFilter)
     allow(filter).to receive(:comment_only?) { |file| comment_only.include?(file) }
+    allow(filter).to receive(:deletion_only?) { |file| deletion_only.include?(file) }
     ActiveMutator::Runner::Discovery.new(subjects: subjects, scanned_files: scanned_files,
                                          since_candidates: since_candidates, since_matched_all: since_matched_all,
                                          since_filter: filter)
@@ -914,7 +915,7 @@ RSpec.describe ActiveMutator::Runner do
             result, stderr, = run_empty(lenient.with(root: dir), found: found)
             expect(result).to eq(0)
             expect(stderr).to include("forgiving empty plan: only comments changed in lib/a.rb, lib/b.rb")
-            expect(stderr).not_to include("Changed:")
+            expect(stderr).not_to include("Changed:", "deletions in")
           end
         end
 
@@ -935,6 +936,38 @@ RSpec.describe ActiveMutator::Runner do
             result, stderr, = run_empty(lenient.with(root: dir, class_level: false), found: found)
             expect(result).to eq(0)
             expect(stderr).to include("--no-class-level")
+          end
+        end
+
+        it "exits 0 when a deletion left no subject around it" do
+          Dir.mktmpdir do |dir|
+            found = discovery([], since_candidates: ["lib/a.rb", "lib/b.rb"], since_matched_all: [],
+                                  deletion_only: ["lib/a.rb", "lib/b.rb"])
+            result, stderr, = run_empty(lenient.with(root: dir), found: found)
+            expect(result).to eq(0)
+            expect(stderr).to include("forgiving empty plan: deletions in lib/a.rb, lib/b.rb left no method to mutate")
+            expect(stderr).not_to include("Changed:", "only comments")
+          end
+        end
+
+        it "exits 1 when a deletion sits inside a method that planned nothing" do
+          Dir.mktmpdir do |dir|
+            found = discovery([], since_candidates: ["lib/a.rb"], since_matched_all: [def_in(dir)],
+                                  deletion_only: ["lib/a.rb"])
+            result, stderr, = run_empty(lenient.with(root: dir), found: found)
+            expect(result).to eq(1)
+            expect(stderr).to include("Changed: lib/a.rb")
+          end
+        end
+
+        it "forgives deletion-only and comment-only files together, naming each" do
+          Dir.mktmpdir do |dir|
+            found = discovery([], since_candidates: ["lib/a.rb", "lib/b.rb"], since_matched_all: [],
+                                  deletion_only: ["lib/a.rb"], comment_only: ["lib/b.rb"])
+            result, stderr, = run_empty(lenient.with(root: dir), found: found)
+            expect(result).to eq(0)
+            expect(stderr).to include("deletions in lib/a.rb left no method to mutate")
+            expect(stderr).to include("only comments changed in lib/b.rb")
           end
         end
 

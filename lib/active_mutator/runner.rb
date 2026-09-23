@@ -178,20 +178,26 @@ module ActiveMutator
     end
 
     # --allow-empty forgives an empty plan only when the --since diff touched no
-    # candidate source file (docs-only, spec-only, excluded paths) or changed
-    # only comments in them. A candidate whose code changed but planned
+    # candidate source file (docs-only, spec-only, excluded paths), changed
+    # only comments in them, or deleted code no subject spans (a removed
+    # method). A candidate whose code changed but planned
     # nothing is the case worth failing on, unless the only code it touched
     # is class-body code that --no-class-level dropped. --subject alone has no
     # diff to judge, so it stays an unconditional 0.
     def allow_empty_exit(discovery)
       return 0 unless @config.since
-      return 0 if discovery.since_candidates.empty?
 
+      filter = discovery.since_filter
+      matched_files = discovery.since_matched_all.map { |s| relative(s.file) }
+      # A deletion no subject spans leaves nothing to mutate. One inside a
+      # subject that still planned nothing falls through to the checks below.
+      deleted = discovery.since_candidates.select { |f| filter.deletion_only?(f) && !matched_files.include?(f) }
       # Checked only here, on the empty-plan path: it runs `git show` per file.
-      candidates = discovery.since_candidates.reject { |file| discovery.since_filter.comment_only?(file) }
+      commented = (discovery.since_candidates - deleted).select { |f| filter.comment_only?(f) }
+      candidates = discovery.since_candidates - deleted - commented
       if candidates.empty?
-        warn "active_mutator: forgiving empty plan: only comments changed in " \
-             "#{discovery.since_candidates.join(", ")}"
+        warn "active_mutator: forgiving empty plan: deletions in #{deleted.join(", ")} left no method to mutate" if deleted.any?
+        warn "active_mutator: forgiving empty plan: only comments changed in #{commented.join(", ")}" if commented.any?
         return 0
       end
 
