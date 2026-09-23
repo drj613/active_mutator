@@ -192,6 +192,16 @@ RSpec.describe ActiveMutator::Reporter::StrykerJson do
     expect(mutant["statusReason"]).to eq("constant not loaded")
   end
 
+  it "writes only the finished mutants on an aborted run, and says the report is partial" do
+    reporter.summary([build_result(:killed, file: @file)], invalid_count: 0,
+                     aborted: { reason: :memory_ceiling, in_flight: [{ seq: 2 }], planned: 5 })
+
+    mutants = JSON.parse(File.read(report_path))["files"].values.flat_map { |f| f["mutants"] }
+    expect(mutants.map { |m| m["status"] }).to eq(["Killed"])
+    expect(out.string).to eq("\n\nStryker report written to .active_mutator/mutation-report.json\n" \
+                             "Run aborted (memory ceiling): the report covers only the 1 mutants that finished\n")
+  end
+
   it "prints the report path and progress chars" do
     reporter.on_result(build_result(:killed, file: @file))
     reporter.summary([build_result(:killed, file: @file)], invalid_count: 0)

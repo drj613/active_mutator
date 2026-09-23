@@ -34,13 +34,19 @@ module ActiveMutator
 
       # A zero-mutant report is valid schema output, so an empty plan writes the
       # same file with no files/mutants; the flag is accepted for contract parity.
-      def summary(results, invalid_count:, empty_plan: false)
+      # An aborted run reports the finished mutants only: the schema has no
+      # "didn't finish" status that wouldn't skew the score.
+      def summary(results, invalid_count:, empty_plan: false, aborted: nil)
         report = build_report(results, invalid_count)
         path = File.join(@root, REPORT_PATH)
         # An empty plan skips the baseline, which used to create this dir.
         FileUtils.mkdir_p(File.dirname(path))
         AtomicFile.write(path, JSON.pretty_generate(report))
         @out.puts "", "", "Stryker report written to #{REPORT_PATH}"
+        return unless aborted
+
+        @out.puts "Run aborted (#{Terminal::ABORT_LABELS.fetch(aborted[:reason])}): " \
+                  "the report covers only the #{results.size} mutants that finished"
       end
 
       private
