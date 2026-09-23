@@ -7,11 +7,12 @@ module ActiveMutator
   # caches the CoverageMap. Invalidation is coarse: any digest change in
   # {app,lib}/**/*.rb or the configured spec paths triggers a full re-run.
   class Baseline
-    def initialize(root:, spec_paths: ["spec"], cache_dir: File.join(root, ".active_mutator"))
+    def initialize(root:, spec_paths: ["spec"], cache_dir: File.join(root, ".active_mutator"), events: Events.new)
       @root = root
       @spec_paths = spec_paths
       @cache_dir = cache_dir
       @out_path = File.join(cache_dir, "coverage.json")
+      @events = events
     end
 
     attr_reader :last_refresh
@@ -36,7 +37,7 @@ module ActiveMutator
     def reuse_cache(digests)
       return unless File.exist?(@out_path)
 
-      data = JSON.parse(File.read(@out_path))
+      data = load_payload
       map = CoverageMap.new(data)
       # A spec_paths change silently degrades the delta classifier: files
       # under a removed spec path just vanish from the digest scan, so
@@ -78,8 +79,18 @@ module ActiveMutator
       raise BaselineFailed, "baseline suite failed, fix the suite before mutating" unless ok
       raise BaselineFailed, "baseline produced no coverage output" unless File.exist?(@out_path)
 
-      data = JSON.parse(File.read(@out_path))
+      data = load_payload
       verify_complete!(data)
+      data
+    end
+
+    # Its own phase, apart from the child's run: 0.6.0 died here, in the
+    # parent reading a huge file back. The size goes out BEFORE the parse, so
+    # the log names the cause even if nothing runs after it.
+    def load_payload
+      @events.emit(:phase_start, phase: :coverage_load, bytes: File.size(@out_path))
+      data = JSON.parse(File.read(@out_path))
+      @events.emit(:phase_end, phase: :coverage_load, examples: data.fetch("records", {}).size)
       data
     end
 
@@ -102,7 +113,9 @@ module ActiveMutator
     # out: :err: the subprocess suite's progress output must not pollute
     # our stdout (breaks `--format json` consumers).
     def run_rspec(out_path, targets = [])
-      system(baseline_env(out_path), "bundle", "exec", "rspec", *targets, chdir: @root, out: :err)
+      @events.phase(:baseline, refresh: targets.empty? ? :full : :partial) do
+        system(baseline_env(out_path), "bundle", "exec", "rspec", *targets, chdir: @root, out: :err)
+      end
     end
 
     def baseline_env(out_path)

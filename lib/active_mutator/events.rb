@@ -24,6 +24,16 @@ module ActiveMutator
 
     def listening? = !@listeners.empty?
 
+    # Emits phase_start, runs the block, emits phase_end, and returns the
+    # block's value. A phase that raises gets no phase_end, so the last
+    # unmatched phase_start marks where a run died.
+    def phase(name, **fields)
+      emit(:phase_start, phase: name, **fields)
+      result = yield
+      emit(:phase_end, phase: name)
+      result
+    end
+
     def emit(type, **fields)
       return if @listeners.empty?
 

@@ -10,20 +10,19 @@ module ActiveMutator
     # without --since). The last three feed the --allow-empty verdict (#46).
     Discovery = Data.define(:subjects, :scanned_files, :since_candidates, :since_matched_all, :since_filter)
 
-    def initialize(config, reporter: nil)
+    def initialize(config, reporter: nil, events: Events.new)
       @config = config
       @reporter = reporter || build_reporter
+      @events = events
     end
 
     def call
-      ENV["ACTIVE_MUTATOR"] = "1"
-      load_operators
-      ClosureReload.cap = @config.class_level_closure_cap
-      preload!
-      preload_spec_helper!
-      discovery = discover
+      @events.phase(:boot) { boot! }
+      discovery, analyses = @events.phase(:planning) do
+        found = discover
+        [found, found.subjects.map { |s| Engine.new.analyze(s) }]
+      end
       subjects = discovery.subjects
-      analyses = subjects.map { |s| Engine.new.analyze(s) }
       mutations = analyses.flat_map(&:mutations)
       mutations = mutations.first(@config.max_mutants) if @config.max_mutants
       invalid_count = analyses.sum(&:invalid_count)
@@ -36,7 +35,7 @@ module ActiveMutator
         return empty_plan_exit(invalid_count, discovery)
       end
 
-      map = Baseline.new(root: @config.root, spec_paths: @config.spec_paths)
+      map = Baseline.new(root: @config.root, spec_paths: @config.spec_paths, events: @events)
               .coverage_map(force: @config.force_baseline)
       @reporter.coverage_map = map if @reporter.respond_to?(:coverage_map=)
 
@@ -48,19 +47,22 @@ module ActiveMutator
       items, pre_results, phase1_ids = plan_work(mutations, map, ledger: ledger, fingerprints: fingerprints)
       return debug_plan(items, pre_results) if @config.debug_plan
 
-      pre_results.each { |r| @reporter.on_result(r) }
-      calibrators = if @config.adaptive_timeout
-                      { parallel: TimeoutCalibrator.new, serial: TimeoutCalibrator.new }
-                    end
-      scheduler = Scheduler.new(jobs: @config.jobs, on_result: @reporter.method(:on_result),
-                                calibrators: calibrators)
-      results = scheduler.run(items) + pre_results
+      results = @events.phase(:mutating, mutants: items.size) do
+        pre_results.each { |r| @reporter.on_result(r) }
+        calibrators = if @config.adaptive_timeout
+                        { parallel: TimeoutCalibrator.new, serial: TimeoutCalibrator.new }
+                      end
+        scheduler = Scheduler.new(jobs: @config.jobs, on_result: @reporter.method(:on_result),
+                                  calibrators: calibrators, events: @events)
+        scheduler.run(items) + pre_results
+      end
       # Phase 2 runs on its own scheduler (built lazily inside), so pass nil.
       results = escalate_class_body_survivors(results, nil, map, phase1_ids: phase1_ids)
 
-      accept_survivors!(ledger, results, fingerprints, scanned_files) if @config.accept_survivors
-
-      @reporter.summary(results, invalid_count: invalid_count)
+      @events.phase(:reporting) do
+        accept_survivors!(ledger, results, fingerprints, scanned_files) if @config.accept_survivors
+        @reporter.summary(results, invalid_count: invalid_count)
+      end
       exit_code(results)
     end
 
@@ -122,8 +124,11 @@ module ActiveMutator
       end
       return results if items.empty?
 
-      scheduler ||= Scheduler.new(jobs: @config.jobs)
-      escalated = scheduler.run(items.values).to_h { |res| [res.mutation, res] }
+      # Numbered after phase 1's mutants, so seq stays unique across the run.
+      scheduler ||= Scheduler.new(jobs: @config.jobs, events: @events, first_seq: phase1_ids.size + 1)
+      escalated = @events.phase(:escalating, mutants: items.size) do
+        scheduler.run(items.values).to_h { |res| [res.mutation, res] }
+      end
       results.map do |r|
         # A replacement only ever exists for a survived candidate (items is
         # built solely from those), so no redundant status re-check is needed.
@@ -163,7 +168,7 @@ module ActiveMutator
     # mutable code, or class-body code dropped by --no-class-level (#23 covers
     # the zero-subject case for explicit paths).
     def empty_plan_exit(invalid_count, discovery)
-      @reporter.summary([], invalid_count: invalid_count, empty_plan: true)
+      @events.phase(:reporting) { @reporter.summary([], invalid_count: invalid_count, empty_plan: true) }
       causes = []
       causes << "--since #{@config.since} matched no mutable code" if @config.since
       causes << "--subject #{@config.subject_filter} matched no subjects" if @config.subject_filter
@@ -245,6 +250,14 @@ module ActiveMutator
 
         map.examples_for_spec_file(rel)
       end.flatten.uniq.sort
+    end
+
+    def boot!
+      ENV["ACTIVE_MUTATOR"] = "1"
+      load_operators
+      ClosureReload.cap = @config.class_level_closure_cap
+      preload!
+      preload_spec_helper!
     end
 
     # Custom operators must exist in the PARENT before Engine analysis:

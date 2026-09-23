@@ -63,6 +63,26 @@ RSpec.describe ActiveMutator::Runner do
     expect(results.first.details).to be_nil
   end
 
+  it "runs escalation in its own phase, numbering its mutants after phase 1's" do
+    mutation = mutation_for(user_file)
+    map = instance_double(ActiveMutator::CoverageMap)
+    allow(map).to receive(:examples_for_spec_file).and_return(["./spec/requests/signup_spec.rb[1:1]"])
+    allow(map).to receive(:time_for).and_return(0.1)
+    seen = []
+    bus = ActiveMutator::Events.new.subscribe { |e| seen << [e.type, e.fields] }
+    scheduler = instance_double(ActiveMutator::Scheduler, run: [result(mutation, :killed)])
+    allow(ActiveMutator::Scheduler).to receive(:new).and_return(scheduler)
+    other = mutation_for(user_file, name: "Other")
+
+    described_class.new(config, reporter: reporter, events: bus).escalate_class_body_survivors(
+      [result(mutation, :survived)], nil, map,
+      phase1_ids: { mutation => ["./spec/models/user_spec.rb[1:1]"], other => [] }
+    )
+
+    expect(ActiveMutator::Scheduler).to have_received(:new).with(jobs: config.jobs, events: bus, first_seq: 3)
+    expect(seen).to eq([[:phase_start, { phase: :escalating, mutants: 1 }], [:phase_end, { phase: :escalating }]])
+  end
+
   it "keeps the survived verdict when escalation is inconclusive (timeout, not a kill)" do
     mutation = mutation_for(user_file)
     map = instance_double(ActiveMutator::CoverageMap)

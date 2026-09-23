@@ -34,4 +34,26 @@ RSpec.describe ActiveMutator::Events do
   it "reports whether anyone listens" do
     expect { bus.subscribe { nil } }.to change(bus, :listening?).from(false).to(true)
   end
+
+  describe "#phase" do
+    let(:ticks) { [0.0, 1.0, 2.0] }
+
+    it "brackets the block with phase_start and phase_end and returns its value" do
+      seen = []
+      bus.subscribe { |e| seen << [e.type, e.fields] }
+
+      value = bus.phase(:baseline, refresh: :full) { :done }
+
+      expect(value).to eq(:done)
+      expect(seen).to eq([[:phase_start, { phase: :baseline, refresh: :full }], [:phase_end, { phase: :baseline }]])
+    end
+
+    it "leaves the phase open when the block raises, marking where the run died" do
+      seen = []
+      bus.subscribe { |e| seen << e.type }
+
+      expect { bus.phase(:baseline) { raise "boom" } }.to raise_error("boom")
+      expect(seen).to eq([:phase_start])
+    end
+  end
 end

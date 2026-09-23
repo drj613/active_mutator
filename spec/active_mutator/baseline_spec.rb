@@ -188,6 +188,52 @@ RSpec.describe ActiveMutator::Baseline do
       end
     end
 
+    describe "phase events" do
+      let(:seen) { [] }
+      let(:baseline) do
+        bus = ActiveMutator::Events.new.subscribe { |e| seen << [e.type, e.fields] }
+        described_class.new(root: @tmp, cache_dir: tmp_cache, events: bus)
+      end
+
+      # Stubs the real child launch, so run_rspec's own phase is exercised.
+      def fake_system(records)
+        allow(baseline).to receive(:system) do |env, *_cmd, **_opts|
+          File.write(env["ACTIVE_MUTATOR_BASELINE_OUT"], JSON.generate("version" => 2, "records" => records))
+          true
+        end
+      end
+
+      it "marks the child's run apart from the parent reading the map back, sizing the file before the parse" do
+        fake_system("./spec/a_spec.rb[1:1]" => a_hit)
+
+        baseline.coverage_map
+
+        size = JSON.generate("version" => 2, "records" => { "./spec/a_spec.rb[1:1]" => a_hit }).bytesize
+        expect(seen).to eq([
+                             [:phase_start, { phase: :baseline, refresh: :full }],
+                             [:phase_end, { phase: :baseline }],
+                             [:phase_start, { phase: :coverage_load, bytes: size }],
+                             [:phase_end, { phase: :coverage_load, examples: 1 }]
+                           ])
+        expect(baseline).to have_received(:system)
+          .with(hash_including("ACTIVE_MUTATOR_BASELINE_OUT" => out_path), "bundle", "exec", "rspec",
+                chdir: @tmp, out: :err)
+      end
+
+      it "marks a partial child run as partial and hands it the targets" do
+        write_cache(baseline.send(:current_digests))
+        File.write(File.join(@tmp, "spec/b_spec.rb"), "RSpec.describe(A) { it { A.new.x } }\n")
+        fake_system({})
+
+        baseline.coverage_map
+
+        expect(seen.map(&:last)).to include(phase: :baseline, refresh: :partial)
+        expect(baseline).to have_received(:system)
+          .with(hash_including("ACTIVE_MUTATOR_BASELINE_OUT" => File.join(tmp_cache, "partial.json")),
+                "bundle", "exec", "rspec", "spec/b_spec.rb", chdir: @tmp, out: :err)
+      end
+    end
+
     it "rebuilds a fresh cache when forced" do
       write_cache(baseline.send(:current_digests))
       fake_child

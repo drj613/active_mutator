@@ -186,6 +186,30 @@ RSpec.describe ActiveMutator::Runner do
       runner.call
     end
 
+    it "brackets each step of the run in a phase" do
+      seen = []
+      bus = ActiveMutator::Events.new.subscribe { |e| seen << [e.type, e.fields] }
+      runner = described_class.new(config, reporter: reporter, events: bus)
+      allow(runner).to receive(:preload!)
+      allow(runner).to receive(:preload_spec_helper!)
+      allow(runner).to receive(:discover).and_return(discovery([]))
+      allow(ActiveMutator::Baseline).to receive(:new).and_return(
+        instance_double(ActiveMutator::Baseline, coverage_map: instance_double(ActiveMutator::CoverageMap))
+      )
+      allow(ActiveMutator::Scheduler).to receive(:new).and_return(instance_double(ActiveMutator::Scheduler, run: []))
+
+      runner.call
+
+      expect(seen).to eq([
+                           [:phase_start, { phase: :boot }], [:phase_end, { phase: :boot }],
+                           [:phase_start, { phase: :planning }], [:phase_end, { phase: :planning }],
+                           [:phase_start, { phase: :mutating, mutants: 0 }], [:phase_end, { phase: :mutating }],
+                           [:phase_start, { phase: :reporting }], [:phase_end, { phase: :reporting }]
+                         ])
+      expect(ActiveMutator::Baseline).to have_received(:new).with(hash_including(events: bus))
+      expect(ActiveMutator::Scheduler).to have_received(:new).with(hash_including(events: bus))
+    end
+
     it "sets ClosureReload.cap from config before scheduling (forks inherit it)" do
       original_cap = ActiveMutator::ClosureReload.cap
       runner = stub_runner(config.with(class_level_closure_cap: 42))
