@@ -36,7 +36,8 @@ module ActiveMutator
     def reuse_cache(digests)
       return unless File.exist?(@out_path)
 
-      map = CoverageMap.load(@out_path)
+      data = JSON.parse(File.read(@out_path))
+      map = CoverageMap.new(data)
       # A spec_paths change silently degrades the delta classifier: files
       # under a removed spec path just vanish from the digest scan, so
       # BaselineDelta treats their stale example records as untouched
@@ -55,10 +56,11 @@ module ActiveMutator
                                     coverage_map: map, root: @root, spec_paths: @spec_paths)
       return if delta.full?
 
-      run_partial!(delta)
-      stamp_digests(digests)
+      # The map shares data["records"], and the merge edits it in place: the
+      # old map must not be read past this point.
+      run_partial!(delta, data)
       @last_refresh = :partial
-      CoverageMap.load(@out_path)
+      stamp(data, digests)
     end
 
     # The cache is disposable and must never be committed. Host projects
@@ -119,26 +121,26 @@ module ActiveMutator
       }
     end
 
-    def run_partial!(delta)
+    def run_partial!(delta, cache)
       targets = delta.rerun_spec_files + delta.rerun_example_ids
       partial_out = File.join(@cache_dir, "partial.json")
+      part = { "records" => {}, "times" => {} }
       if targets.any?
         env = baseline_env(partial_out)
         ok = system(env, "bundle", "exec", "rspec", *targets, chdir: @root, out: :err)
         raise BaselineFailed, "partial baseline run failed, fix the suite before mutating" unless ok
         raise BaselineFailed, "partial baseline produced no output" unless File.exist?(partial_out)
 
-        verify_complete!(JSON.parse(File.read(partial_out)))
+        part = JSON.parse(File.read(partial_out))
+        verify_complete!(part)
       end
-      merge_partial!(partial_out, delta)
+      merge_partial!(cache, part, delta)
     ensure
       FileUtils.rm_f(partial_out) if partial_out
     end
 
-    def merge_partial!(partial_out, delta)
-      cache = JSON.parse(File.read(@out_path))
-      part = File.exist?(partial_out) ? JSON.parse(File.read(partial_out)) : { "records" => {}, "times" => {} }
-
+    # Edits `cache` in place; the caller stamps and writes it.
+    def merge_partial!(cache, part, delta)
       rerun_prefixes = delta.rerun_spec_files.map { |rel| "#{rel}[" }
       obsolete = lambda do |example_id|
         bare = example_id.sub(%r{\A\./}, "")
@@ -154,11 +156,6 @@ module ActiveMutator
       end
       cache["records"].merge!(part.fetch("records", {}))
       cache["times"].merge!(part.fetch("times", {}))
-      AtomicFile.write(@out_path, JSON.generate(cache))
-    end
-
-    def stamp_digests(digests)
-      stamp(JSON.parse(File.read(@out_path)), digests)
     end
 
     # Writes the stamped payload once and builds the map from the hash in
