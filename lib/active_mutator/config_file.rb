@@ -29,7 +29,8 @@ module ActiveMutator
       "allow_empty" => :boolean,
       "diagnostics" => :boolean,
       "events_file" => :string,
-      "sample_interval" => :positive_number
+      "sample_interval" => :positive_number,
+      "max_rss" => :size
     }.freeze
 
     def self.load(root)
@@ -98,6 +99,11 @@ module ActiveMutator
           raise Error, "#{FILENAME}: #{key} must be true or false"
         end
         value
+      when :size
+        kb = MemoryCeiling.parse_kb(value)
+        raise Error, "#{FILENAME}: #{key} must be a size like 6G, 6144M, or 6144 (MB)" unless kb
+
+        kb
       when :preload_helper
         return :none if value == false
         raise Error, "#{FILENAME}: preload_helper must be a path or false" unless value.is_a?(String)

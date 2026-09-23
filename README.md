@@ -303,7 +303,8 @@ projects used to tell a docs-only PR from a broken `--since` range.
 | `--[no-]class-level` | on | mutate class-level code (macros, constants, DSL/scope lambdas) via class-body subjects |
 | `--diagnostics` | off | print timestamped phase, mutant, and memory lines to stderr, for finding out where a CI run died (see [Run diagnostics](docs/guides/diagnostics.md)) |
 | `--events FILE` | none | write the same events as NDJSON, one object per line, flushed as they happen |
-| `--sample-interval S` | 5 | seconds between memory samples with `--diagnostics` or `--events` |
+| `--sample-interval S` | 5 | seconds between memory samples with `--diagnostics`, `--events`, or `--max-rss` |
+| `--max-rss SIZE` | none | stop the run and exit 3 when the gem's total memory reaches SIZE (`6G`, `6144M`, or plain MB); warns once at 90% |
 | `--fail-at SCORE` | none (strict) | exit 0 if score >= SCORE even with survivors (opt-in relaxation for gradual adoption; 0 = report-only) |
 
 `--spec-path` tells active_mutator where spec files live (coverage

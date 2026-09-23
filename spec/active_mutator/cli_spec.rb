@@ -112,7 +112,8 @@ RSpec.describe ActiveMutator::CLI do
         "Print the planned mutant list as JSON and exit",
         "Print phase, mutant, and memory lines to stderr",
         "Write run events to FILE as NDJSON, one object per line",
-        "Seconds between memory samples with --diagnostics/--events (default: 5)",
+        "Seconds between memory samples with --diagnostics, --events, or --max-rss (default: 5)",
+        "Stop the run (exit 3) when the gem's total memory reaches SIZE: 6G, 6144M, or MB; warns at 90%",
         "Exit 0 when --since/--subject plan no mutants and the --since diff changed no code " \
         "in a mutable source file (default: exit 1)"
       ].each { |desc| expect(help).to include(desc) }
@@ -245,6 +246,17 @@ RSpec.describe ActiveMutator::CLI do
       expect(described_class.parse(%w[--sample-interval 0.5]).sample_interval).to eq(0.5)
       expect { described_class.parse(%w[--sample-interval 0]) }
         .to raise_error(OptionParser::InvalidArgument, /--sample-interval must be > 0/)
+    end
+
+    it "reads --max-rss as kB from G, M, or plain MB, none by default, and rejects anything else" do
+      expect(described_class.parse([]).max_rss).to be_nil
+      expect(described_class.parse(%w[--max-rss 6G]).max_rss).to eq(6 * 1024 * 1024)
+      expect(described_class.parse(%w[--max-rss 6144M]).max_rss).to eq(6144 * 1024)
+      expect(described_class.parse(%w[--max-rss 512]).max_rss).to eq(512 * 1024)
+      %w[6GB lots 0 -1G].each do |bad|
+        expect { described_class.parse(["--max-rss", bad]) }
+          .to raise_error(OptionParser::InvalidArgument, /--max-rss takes a size like 6G, 6144M, or 6144 \(MB\)/)
+      end
     end
 
     it "takes an --events file, none by default" do
