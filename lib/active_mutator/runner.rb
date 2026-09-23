@@ -186,7 +186,6 @@ module ActiveMutator
     # diff to judge, so it stays an unconditional 0.
     def allow_empty_exit(discovery)
       return 0 unless @config.since
-      return 0 if discovery.since_candidates.empty?
 
       filter = discovery.since_filter
       matched_files = discovery.since_matched_all.map { |s| relative(s.file) }
