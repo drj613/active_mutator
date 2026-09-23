@@ -9,6 +9,7 @@ answer that. Both are off by default and cost nothing when off.
 | `--diagnostics` | `diagnostics: true` | one human-readable line per event on stderr |
 | `--events FILE` | `events_file: FILE` | the same events as NDJSON, one JSON object per line |
 | `--sample-interval S` | `sample_interval: S` | seconds between memory samples (default 5) |
+| `--max-rss SIZE` | `max_rss: SIZE` | stop the run when the gem's total memory reaches SIZE (`6G`, `6144M`, or plain MB) |
 
 Both write to stderr or a file, never stdout, so `--format json` output
 stays parseable. The `--events` file is written line by line as the run
@@ -58,9 +59,25 @@ In the text line, `workers=4:3.2G` means four live workers using 3.2 GB
 together, and `swap` is swap in use. A field the platform can't read
 shows as `?` or is left out.
 
+## A memory ceiling
+
+`--max-rss 6G` watches the same memory samples and acts on their total
+(Pss on Linux, RSS elsewhere). At 90% it prints one warning. At 100% it
+stops the run the same way a signal does (below) and exits 3, so CI can
+tell "ran out of memory" apart from "tests too weak". Both lines go to
+stderr even without `--diagnostics`:
+
+```
+[active_mutator 14:09:10 +423.0s] warn memory at 91% of --max-rss 6.0G (5.5G)
+[active_mutator 14:09:15 +428.1s] memory at 101% of --max-rss 6.0G (6.1G); stopping the run
+```
+
+On macOS the total is an RSS sum, which counts shared pages more than
+once, so the ceiling trips early there. That's the safe direction.
+
 ## Aborted runs
 
-On SIGINT or SIGTERM, in any phase, the run kills its baseline child or
+On SIGINT, SIGTERM, or a `--max-rss` breach, in any phase, the run kills its baseline child or
 every running worker (each with its whole process group) without waiting
 for them, emits an `abort` event naming the mutants still running, and
 exits. CI runners give only a few seconds between SIGTERM and SIGKILL, so
@@ -72,6 +89,7 @@ line in the terminal, and `"complete": false` in `--format json`.
 |---|---|
 | SIGINT | 130 |
 | SIGTERM | 143 |
+| `--max-rss` reached | 3 |
 
 An aborted run never passes, whatever `--fail-at` says. SIGKILL (an OOM
 kill, a VM teardown) can't be caught. For those, the lines already written
@@ -150,10 +168,21 @@ New fields may be added under `v: 1`. Renaming or removing a field bumps
 
 | Field | Meaning |
 |---|---|
-| `reason` | `sigint` or `sigterm` |
+| `reason` | `sigint`, `sigterm`, or `memory_ceiling` |
 | `in_flight` | `[{seq, pid, subject, file, line, description}]`, the mutants killed mid-run; empty outside the `mutating` and `escalating` phases |
 | `planned` | how many mutants the run planned, or `null` if it stopped before planning finished |
 | `counts` | finished mutants by status, the same keys as the reporter's counts |
 | `score` | the score over finished mutants only (0 to 1), or `null` if none finished |
 
 The phase that was running gets no `phase_end`.
+
+### `memory_warning`, `memory_ceiling`
+
+`--max-rss` only. `memory_warning` comes once, when a sample's total first
+reaches 90% of the ceiling. `memory_ceiling` comes when it reaches 100%,
+right before the `abort`.
+
+| Field | Meaning |
+|---|---|
+| `total_pss_kb` | the total that crossed the line |
+| `max_rss_kb` | the ceiling |

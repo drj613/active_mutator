@@ -79,6 +79,24 @@ RSpec.describe ActiveMutator::Diagnostics::Text do
     expect(line(:abort, reason: :sigint, in_flight: [])).to end_with("] abort sigint; in flight: none\n")
   end
 
+  it "prints the --max-rss warning and breach with the percent, the ceiling, and the total" do
+    expect(line(:memory_warning, total_pss_kb: 5_767_168, max_rss_kb: 6_291_456))
+      .to end_with("] warn memory at 92% of --max-rss 6.0G (5.5G)\n")
+    out.truncate(0)
+    out.rewind
+    expect(line(:memory_ceiling, total_pss_kb: 6_396_314, max_rss_kb: 6_291_456))
+      .to end_with("] memory at 102% of --max-rss 6.0G (6.1G); stopping the run\n")
+  end
+
+  it "prints only the listed event types when given `only`" do
+    only = described_class.new(root: "/proj/", out: out, only: [:memory_warning])
+    only.call(ActiveMutator::Events::Event.new(type: :phase_start, at: at, elapsed: 1.0, fields: { phase: :boot }))
+    expect(out.string).to eq("")
+    only.call(ActiveMutator::Events::Event.new(type: :memory_warning, at: at, elapsed: 1.0,
+                                               fields: { total_pss_kb: 900, max_rss_kb: 1000 }))
+    expect(out.string).to end_with("] warn memory at 90% of --max-rss 1000K (900K)\n")
+  end
+
   it "prints other events as key=value pairs" do
     expect(line(:tick, reason: :sigterm, n: 2)).to end_with("] tick reason=sigterm n=2\n")
   end

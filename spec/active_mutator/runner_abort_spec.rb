@@ -2,10 +2,10 @@ require "fileutils"
 require "timeout"
 require "tmpdir"
 
-# The whole abort path in a real process: a real signal, the Runner's trap,
-# the phase owner's poll loop, the kill, and the exit code. The Runner runs
-# in a fork, so the signal and the kills stay out of this process.
-RSpec.describe ActiveMutator::Runner, "aborting on a signal" do
+# The whole abort path in a real process: a real signal (or a memory
+# breach), the phase owner's poll loop, the kill, and the exit code. For
+# signals the Runner runs in a fork, so the signal stays out of this process.
+RSpec.describe ActiveMutator::Runner, "aborting" do
   let(:dir) { Dir.mktmpdir }
   let(:ready) { File.join(dir, "ready") }
   let(:config) do
@@ -94,6 +94,33 @@ RSpec.describe ActiveMutator::Runner, "aborting on a signal" do
 
     expect(signal_run("INT").exitstatus).to eq(130)
     expect_gone(*File.read(ready).split.map(&:to_i))
+  end
+
+  context "with --max-rss" do
+    let(:config) { super().with(max_rss: 1024, sample_interval: 0.05) }
+
+    it "exits 3 when the sampler thread sees a breach during the baseline, killing the child's whole group" do
+      allow_any_instance_of(ActiveMutator::Baseline).to receive(:rspec_command)
+        .and_return(["ruby", "-e", self.class.announce_script(ready)])
+      # Over the ceiling only once the child is up, so the breach comes from
+      # the sampler thread mid-baseline, not from a phase boundary.
+      probe = instance_double(ActiveMutator::MemoryProbe, system: nil)
+      allow(probe).to receive(:processes) do |pids|
+        pids.to_h { |pid| [pid, { rss_kb: File.exist?(ready) ? 2048 : 1, hwm_kb: 1, pss_kb: nil }] }
+      end
+      allow(ActiveMutator::Sampler).to receive(:new).and_wrap_original { |orig, **kw| orig.call(**kw, probe: probe) }
+
+      code = nil
+      code = nil
+      expect { code = Timeout.timeout(10) { runner.call } }
+        .to output(/\] memory at \d+% of --max-rss 1M \(\d+M\); stopping the run\n/).to_stderr_from_any_process
+      expect(code).to eq(3)
+      child, grandchild = File.read(ready).split.map(&:to_i)
+      # Our own child here, and the abort path doesn't wait: reaping it proves it died.
+      _, status = Timeout.timeout(2) { Process.waitpid2(child) }
+      expect(status.termsig).to eq(9)
+      expect_gone(grandchild)
+    end
   end
 
   it "exits 143 on SIGTERM while mutating, killing every worker's whole group" do

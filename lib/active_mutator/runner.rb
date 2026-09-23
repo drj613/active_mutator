@@ -353,11 +353,19 @@ module ActiveMutator
     # Only when something reads the samples. Subscribed last, so each phase
     # line prints before the sample taken at it.
     def start_sampler
+      watch_memory if @config.max_rss
       return unless @events.listening?
 
       sampler = Sampler.new(events: @events, interval: @config.sample_interval)
       @events.subscribe(sampler)
       sampler.start
+    end
+
+    # Without --diagnostics, the 90% warning and the breach still reach stderr.
+    def watch_memory
+      notices = %i[memory_warning memory_ceiling]
+      @events.subscribe(Diagnostics::Text.new(root: @config.root, only: notices)) unless @config.diagnostics
+      @events.subscribe(MemoryCeiling.new(max_rss_kb: @config.max_rss, events: @events, abort: @abort))
     end
 
     # Opened per call, not per Runner, so the file is closed on every exit.

@@ -11,14 +11,18 @@ module ActiveMutator
     end
 
     # --diagnostics: one human-readable line per event, on stderr. stdout
-    # belongs to the reporter (`--format json` must stay parseable).
+    # belongs to the reporter (`--format json` must stay parseable). `only`
+    # limits it to some event types.
     class Text
-      def initialize(root:, out: $stderr)
+      def initialize(root:, out: $stderr, only: nil)
         @prefix = "#{root.chomp("/")}/"
         @out = out
+        @only = only
       end
 
       def call(event)
+        return if @only && !@only.include?(event.type)
+
         stamp = "[active_mutator #{event.at.strftime("%H:%M:%S")} +#{format("%.1f", event.elapsed)}s]"
         @out.puts "#{stamp} #{body(event.type, event.fields)}"
       end
@@ -32,6 +36,8 @@ module ActiveMutator
         when :mutant_end then mutant_end(fields)
         when :memory then memory(fields)
         when :abort then abort(fields)
+        when :memory_warning then "warn #{ceiling(fields)}"
+        when :memory_ceiling then "#{ceiling(fields)}; stopping the run"
         else [type, *pairs(fields)].join(" ")
         end
       end
@@ -53,6 +59,13 @@ module ActiveMutator
       def abort(f)
         running = f[:in_flight].map { |m| "##{m[:seq]} #{m[:subject]} #{m[:file].delete_prefix(@prefix)}:#{m[:line]}" }
         "abort #{f[:reason]}; in flight: #{running.empty? ? "none" : running.join(", ")}"
+      end
+
+      # memory at 91% of --max-rss 6.0G (5.5G)
+      def ceiling(f)
+        percent = (f[:total_pss_kb] * 100.0 / f[:max_rss_kb]).round
+        "memory at #{percent}% of --max-rss #{Diagnostics.size_kb(f[:max_rss_kb])} " \
+          "(#{Diagnostics.size_kb(f[:total_pss_kb])})"
       end
 
       # mem parent=1.6G workers=4:3.2G baseline=2.1G total=6.9G avail=3.0G swap=0 psi=0.3 load=1.52

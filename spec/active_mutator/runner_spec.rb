@@ -346,6 +346,55 @@ RSpec.describe ActiveMutator::Runner do
                                                                  planned: 0 } }]])
       end
 
+      describe "with --max-rss" do
+        def probe(total_kb)
+          instance_double(ActiveMutator::MemoryProbe, system: nil,
+                                                      processes: { Process.pid => { rss_kb: total_kb, hwm_kb: total_kb,
+                                                                                    pss_kb: total_kb } })
+        end
+
+        def watched_runner(total_kb, **cfg)
+          allow(ActiveMutator::Sampler).to receive(:new).and_wrap_original { |orig, **kw| orig.call(**kw, probe: probe(total_kb)) }
+          runner = aborting_runner { [] }
+          runner.instance_variable_set(:@config, config.with(max_rss: 1000, **cfg))
+          runner
+        end
+
+        it "stops the run with exit 3 at the ceiling, saying so on stderr without --diagnostics" do
+          runner = watched_runner(1000)
+          code = nil
+          expect { code = runner.call }
+            .to output(/\] memory at 100% of --max-rss 1000K \(1000K\); stopping the run\n/).to_stderr_from_any_process
+          expect(code).to eq(3)
+          expect(summaries.last.last[:aborted]).to include(reason: :memory_ceiling)
+        end
+
+        it "warns once at 90% and lets the run finish" do
+          runner = watched_runner(950)
+          code = nil
+          expect { code = runner.call }.to output(/\A[^\n]*\] warn memory at 95% of --max-rss 1000K \(950K\)\n\z/)
+            .to_stderr_from_any_process
+          expect(code).to eq(0)
+        end
+
+        it "prints the warning once with --diagnostics too" do
+          allow(ActiveMutator::Baseline).to receive(:new).and_return(
+            instance_double(ActiveMutator::Baseline, coverage_map: instance_double(ActiveMutator::CoverageMap))
+          )
+          allow(ActiveMutator::Scheduler).to receive(:new).and_return(instance_double(ActiveMutator::Scheduler, run: []))
+          allow(ActiveMutator::Sampler).to receive(:new).and_wrap_original { |orig, **kw| orig.call(**kw, probe: probe(950)) }
+
+          # Built inside the block: the --diagnostics sink holds the $stderr it was built with.
+          expect do
+            runner = described_class.new(config.with(max_rss: 1000, diagnostics: true), reporter: reporter)
+            allow(runner).to receive(:preload!)
+            allow(runner).to receive(:preload_spec_helper!)
+            allow(runner).to receive(:discover).and_return(discovery([]))
+            runner.call
+          end.to output(satisfy { |text| text.scan("warn memory at").size == 1 }).to_stderr
+        end
+      end
+
       it "reports an abort before planning with no plan size and no invalid count" do
         runner = aborting_runner { [] }
         allow(runner).to receive(:preload!) do
