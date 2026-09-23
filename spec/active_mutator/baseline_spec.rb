@@ -55,34 +55,26 @@ RSpec.describe ActiveMutator::Baseline, :integration do
   end
 
   describe "aborted-run detection" do
-    def write_payload(dir, records:, expected: :omit)
-      out = File.join(dir, "coverage.json")
+    def payload(records:, expected: :omit)
       data = { "version" => 2, "records" => records, "times" => {} }
       data["expected_examples"] = expected unless expected == :omit
-      File.write(out, JSON.generate(data))
-      out
+      data
     end
 
     it "raises when the subprocess recorded fewer examples than it expected to run" do
-      Dir.mktmpdir do |dir|
-        out = write_payload(dir, records: { "./spec/a_spec.rb[1:1]" => [] }, expected: 3)
-        expect { described_class.new(root: dir).send(:verify_complete!, out) }
-          .to raise_error(ActiveMutator::BaselineFailed, /1 of 3/)
-      end
+      data = payload(records: { "./spec/a_spec.rb[1:1]" => [] }, expected: 3)
+      expect { described_class.new(root: "/proj").send(:verify_complete!, data) }
+        .to raise_error(ActiveMutator::BaselineFailed, /1 of 3/)
     end
 
     it "accepts a complete run" do
-      Dir.mktmpdir do |dir|
-        out = write_payload(dir, records: { "./spec/a_spec.rb[1:1]" => [] }, expected: 1)
-        expect { described_class.new(root: dir).send(:verify_complete!, out) }.not_to raise_error
-      end
+      data = payload(records: { "./spec/a_spec.rb[1:1]" => [] }, expected: 1)
+      expect { described_class.new(root: "/proj").send(:verify_complete!, data) }.not_to raise_error
     end
 
     it "accepts a payload without an expected count (pre-0.4.0 hooks)" do
-      Dir.mktmpdir do |dir|
-        out = write_payload(dir, records: {})
-        expect { described_class.new(root: dir).send(:verify_complete!, out) }.not_to raise_error
-      end
+      data = payload(records: {})
+      expect { described_class.new(root: "/proj").send(:verify_complete!, data) }.not_to raise_error
     end
   end
 
@@ -118,7 +110,7 @@ RSpec.describe ActiveMutator::Baseline, :integration do
           baseline = described_class.new(root: root, spec_paths: ["test"], cache_dir: cache_dir)
           digests = baseline.send(:current_digests)
           write_cache(out_path, digests, spec_paths: ["spec"])
-          allow(baseline).to receive(:run_baseline!)
+          allow(baseline).to receive(:run_baseline!).and_return("version" => 2, "records" => {}, "times" => {})
 
           map = baseline.coverage_map
 
@@ -136,7 +128,7 @@ RSpec.describe ActiveMutator::Baseline, :integration do
           baseline = described_class.new(root: root, cache_dir: cache_dir)
           digests = baseline.send(:current_digests)
           write_cache(out_path, digests) # no spec_paths key at all
-          allow(baseline).to receive(:run_baseline!)
+          allow(baseline).to receive(:run_baseline!).and_return("version" => 2, "records" => {}, "times" => {})
 
           baseline.coverage_map
 
@@ -152,7 +144,7 @@ RSpec.describe ActiveMutator::Baseline, :integration do
           out_path = File.join(cache_dir, "coverage.json")
           baseline = described_class.new(root: root, spec_paths: ["test"], cache_dir: cache_dir)
           write_cache(out_path, {})
-          allow(baseline).to receive(:run_baseline!)
+          allow(baseline).to receive(:run_baseline!).and_return("version" => 2, "records" => {}, "times" => {})
 
           baseline.coverage_map
 

@@ -18,36 +18,48 @@ module ActiveMutator
 
     def coverage_map(force: false)
       digests = current_digests
-      if !force && File.exist?(@out_path)
-        map = CoverageMap.load(@out_path)
-        # A spec_paths change silently degrades the delta classifier: files
-        # under a removed spec path just vanish from the digest scan, so
-        # BaselineDelta treats their stale example records as untouched
-        # source coverage instead of dropping them. Force a full rebuild
-        # whenever the configured spec_paths differ from what the cache was
-        # stamped with.
-        if map.spec_paths == @spec_paths && map.fresh?(digests)
-          @last_refresh = :cached
-          return map
-        end
-        if map.spec_paths == @spec_paths && map.version == 2
-          delta = BaselineDelta.compute(old_digests: map.digests, new_digests: digests,
-                                        coverage_map: map, root: @root, spec_paths: @spec_paths)
-          unless delta.full?
-            run_partial!(delta)
-            stamp_digests(digests)
-            @last_refresh = :partial
-            return CoverageMap.load(@out_path)
-          end
-        end
+      unless force
+        map = reuse_cache(digests)
+        return map if map
       end
-      run_baseline!
-      stamp_digests(digests)
+      data = run_baseline!
       @last_refresh = :full
-      CoverageMap.load(@out_path)
+      stamp(data, digests)
     end
 
     private
+
+    # The cached map, refreshed in place when a delta allows it; nil when only
+    # a full rebuild will do. The old map (records plus its inverted index)
+    # lives only in this method, so it is garbage before the full rebuild's
+    # child starts.
+    def reuse_cache(digests)
+      return unless File.exist?(@out_path)
+
+      map = CoverageMap.load(@out_path)
+      # A spec_paths change silently degrades the delta classifier: files
+      # under a removed spec path just vanish from the digest scan, so
+      # BaselineDelta treats their stale example records as untouched
+      # source coverage instead of dropping them. Force a full rebuild
+      # whenever the configured spec_paths differ from what the cache was
+      # stamped with.
+      return unless map.spec_paths == @spec_paths
+
+      if map.fresh?(digests)
+        @last_refresh = :cached
+        return map
+      end
+      return unless map.version == 2
+
+      delta = BaselineDelta.compute(old_digests: map.digests, new_digests: digests,
+                                    coverage_map: map, root: @root, spec_paths: @spec_paths)
+      return if delta.full?
+
+      run_partial!(delta)
+      stamp_digests(digests)
+      @last_refresh = :partial
+      CoverageMap.load(@out_path)
+    end
 
     # The cache is disposable and must never be committed. Host projects
     # rarely gitignore it themselves, so the directory ignores its own
@@ -67,15 +79,16 @@ module ActiveMutator
       raise BaselineFailed, "baseline suite failed, fix the suite before mutating" unless ok
       raise BaselineFailed, "baseline produced no coverage output" unless File.exist?(@out_path)
 
-      verify_complete!(@out_path)
+      data = JSON.parse(File.read(@out_path))
+      verify_complete!(data)
+      data
     end
 
     # An aborted subprocess can still exit 0 with a partial map (RSpec
     # rescues Errno::EPIPE and runs after(:suite)); stamping that as fresh
     # silently reports every mutant uncovered. Payloads without the count
     # predate this check and are accepted as-is.
-    def verify_complete!(out_path)
-      payload = JSON.parse(File.read(out_path))
+    def verify_complete!(payload)
       expected = payload["expected_examples"]
       return unless expected
 
@@ -115,7 +128,7 @@ module ActiveMutator
         raise BaselineFailed, "partial baseline run failed, fix the suite before mutating" unless ok
         raise BaselineFailed, "partial baseline produced no output" unless File.exist?(partial_out)
 
-        verify_complete!(partial_out)
+        verify_complete!(JSON.parse(File.read(partial_out)))
       end
       merge_partial!(partial_out, delta)
     ensure
@@ -145,10 +158,16 @@ module ActiveMutator
     end
 
     def stamp_digests(digests)
-      data = JSON.parse(File.read(@out_path))
+      stamp(JSON.parse(File.read(@out_path)), digests)
+    end
+
+    # Writes the stamped payload once and builds the map from the hash in
+    # hand, so the file is never parsed back.
+    def stamp(data, digests)
       data["digests"] = digests
       data["spec_paths"] = @spec_paths
       AtomicFile.write(@out_path, JSON.generate(data))
+      CoverageMap.new(data)
     end
 
     def current_digests
