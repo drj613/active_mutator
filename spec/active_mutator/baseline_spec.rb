@@ -286,6 +286,15 @@ RSpec.describe ActiveMutator::Baseline do
           expect_gone(grandchild)
         end
 
+        it "still aborts when the trip lands as the child exits" do
+          allow(baseline).to receive(:rspec_command).and_return(["ruby", "-e", "exit 0"])
+          allow(Process).to receive(:waitpid2).and_wrap_original do |orig, *args|
+            orig.call(*args).tap { |_, status| flag.trip!(:sigterm) if status }
+          end
+
+          expect { baseline.coverage_map }.to raise_error(ActiveMutator::Aborted, /sigterm/)
+        end
+
         it "starts no child once the flag has tripped" do
           flag.deferred { flag.trip!(:sigint) }
           allow(Process).to receive(:spawn).and_call_original

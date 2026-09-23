@@ -141,12 +141,14 @@ module ActiveMutator
 
     def rspec_command(targets) = ["bundle", "exec", "rspec", *targets]
 
+    # The flag is checked after the wait, so a trip that lands as the child
+    # exits still stops the run here, not after the coverage parse.
     def wait_child(pid)
       loop do
         _, status = Process.waitpid2(pid, Process::WNOHANG)
+        abort_child!(pid) if @abort.tripped?
         return status if status
 
-        abort_child!(pid) if @abort.tripped?
         sleep POLL_SECONDS
       end
     end
