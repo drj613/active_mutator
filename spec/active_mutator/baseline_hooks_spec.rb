@@ -43,6 +43,40 @@ RSpec.describe ActiveMutator::BaselineHooks do
       after = { "/proj/spec/a_spec.rb" => { lines: [1] } }
       expect(described_class.diff_coverage({}, after, "/proj")).to be_empty
     end
+
+    it "excludes files under gem dirs even when they sit inside the root" do
+      after = {
+        "/proj/vendor/bundle/ruby/3.3.0/gems/x/lib/x.rb" => { lines: [1] },
+        "/proj/lib/a.rb" => { lines: [1] }
+      }
+      hits = described_class.diff_coverage({}, after, "/proj",
+                                           gem_dirs: ["/proj/vendor/bundle/ruby/3.3.0"])
+      expect(hits.map(&:first)).to eq(["/proj/lib/a.rb"])
+    end
+
+    it "matches gem dirs on whole path segments" do
+      after = { "/proj/vendor/bundle_notes/a.rb" => { lines: [1] } }
+      hits = described_class.diff_coverage({}, after, "/proj", gem_dirs: ["/proj/vendor/bundle"])
+      expect(hits.map(&:first)).to eq(["/proj/vendor/bundle_notes/a.rb"])
+    end
+  end
+
+  describe ".gem_dirs" do
+    it "includes every Gem.path entry" do
+      allow(Gem).to receive(:path).and_return(["/home/u/.gem", "/proj/vendor/bundle/ruby/3.3.0"])
+      expect(described_class.gem_dirs).to include("/home/u/.gem", "/proj/vendor/bundle/ruby/3.3.0")
+    end
+
+    it "includes the Bundler install path" do
+      allow(Bundler).to receive(:bundle_path).and_return(Pathname.new("/proj/vendor/bundle/ruby/3.3.0"))
+      expect(described_class.gem_dirs).to include("/proj/vendor/bundle/ruby/3.3.0")
+    end
+
+    it "falls back to Gem.path when Bundler has no Gemfile" do
+      allow(Bundler).to receive(:bundle_path).and_raise(Bundler::GemfileNotFound)
+      allow(Gem).to receive(:path).and_return(["/home/u/.gem"])
+      expect(described_class.gem_dirs).to eq(["/home/u/.gem"])
+    end
   end
 
   describe ".build_payload" do
