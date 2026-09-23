@@ -59,6 +59,38 @@ RSpec.describe ActiveMutator::MemoryCeiling do
       expect(flag.reason).to eq(:sigterm)
     end
 
+    describe "before coverage.json is parsed" do
+      def coverage_load(bytes) = events.emit(:phase_start, phase: :coverage_load, bytes: bytes)
+
+      it "stops the run when the last sample plus 5x the file's size would reach the ceiling" do
+        sample(400)
+        # On the main thread, outside any deferred block, so the trip raises
+        # right there: the parse never starts.
+        expect { coverage_load(122_880) }.to raise_error(ActiveMutator::Aborted) # 120K, costing 600K to parse
+        expect(seen.last).to eq([:memory_ceiling, { total_pss_kb: 1000, max_rss_kb: 1000, coverage_bytes: 122_880 }])
+        expect(flag.reason).to eq(:memory_ceiling)
+      end
+
+      it "warns when the estimate reaches 90%, and counts from zero with no sample yet" do
+        coverage_load(184_320) # 180K, costing 900K
+        expect(seen.last).to eq([:memory_warning, { total_pss_kb: 900, max_rss_kb: 1000, coverage_bytes: 184_320 }])
+        expect(flag).not_to be_tripped
+      end
+
+      it "keeps the last total a sample could read" do
+        sample(400)
+        sample(nil)
+        coverage_load(102_400) # 100K, costing 500K
+        expect(seen.last).to eq([:memory_warning, { total_pss_kb: 900, max_rss_kb: 1000, coverage_bytes: 102_400 }])
+      end
+
+      it "leaves other phases alone, and the end of the load" do
+        events.emit(:phase_start, phase: :baseline, bytes: 10_000_000)
+        events.emit(:phase_end, phase: :coverage_load, examples: 3)
+        expect(flag).not_to be_tripped
+      end
+    end
+
     it "ignores other events" do
       events.emit(:phase_start, total_pss_kb: 5000)
       expect(flag).not_to be_tripped

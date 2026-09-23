@@ -61,11 +61,15 @@ module ActiveMutator
         "abort #{f[:reason]}; in flight: #{running.empty? ? "none" : running.join(", ")}"
       end
 
-      # memory at 91% of --max-rss 6.0G (5.5G)
+      # memory at 91% of --max-rss 6.0G (5.5G), or before a coverage parse:
+      # memory at 150% of --max-rss 6.0G (9.0G estimated to read a 1.7G coverage.json)
       def ceiling(f)
         percent = (f[:total_pss_kb] * 100.0 / f[:max_rss_kb]).round
-        "memory at #{percent}% of --max-rss #{Diagnostics.size_kb(f[:max_rss_kb])} " \
-          "(#{Diagnostics.size_kb(f[:total_pss_kb])})"
+        total = Diagnostics.size_kb(f[:total_pss_kb])
+        if f[:coverage_bytes]
+          total += " estimated to read a #{Diagnostics.size_kb(f[:coverage_bytes] / 1024)} coverage.json"
+        end
+        "memory at #{percent}% of --max-rss #{Diagnostics.size_kb(f[:max_rss_kb])} (#{total})"
       end
 
       # mem parent=1.6G workers=4:3.2G baseline=2.1G total=6.9G avail=3.0G swap=0 psi=0.3 load=1.52

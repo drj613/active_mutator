@@ -7,6 +7,11 @@ module ActiveMutator
   class MemoryCeiling
     SIZE = /\A(\d+(?:\.\d+)?)([gm]?)\z/i
     WARN_AT = 0.9
+    # Parsing coverage.json peaked at about 5x the file's size (7x with the
+    # CoverageMap built from it). JSON.parse holds Ruby's global lock, so
+    # no sample or signal gets through until it returns: the size is checked
+    # before the parse instead.
+    PARSE_COST = 5
 
     # "6G", "6144M", or plain MB ("6144") to kB; nil for anything else.
     def self.parse_kb(text)
@@ -26,16 +31,22 @@ module ActiveMutator
 
     # Events listener. Runs on whichever thread emitted the sample.
     def call(event)
-      check(event.fields[:total_pss_kb]) if event.type == :memory
+      fields = event.fields
+      if event.type == :memory
+        @last_total_kb = fields[:total_pss_kb] || @last_total_kb
+        check(fields[:total_pss_kb])
+      elsif event.type == :phase_start && fields[:phase] == :coverage_load
+        check(@last_total_kb.to_i + (fields[:bytes] / 1024 * PARSE_COST), coverage_bytes: fields[:bytes])
+      end
     end
 
     private
 
     # Quiet once the run is stopping: samples keep coming until it exits.
-    def check(total_kb)
+    def check(total_kb, **extra)
       return if total_kb.nil? || @abort.tripped?
 
-      fields = { total_pss_kb: total_kb, max_rss_kb: @max_rss_kb }
+      fields = { total_pss_kb: total_kb, max_rss_kb: @max_rss_kb, **extra }
       if total_kb >= @max_rss_kb
         @events.emit(:memory_ceiling, **fields)
         @abort.trip!(:memory_ceiling)

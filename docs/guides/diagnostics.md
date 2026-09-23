@@ -75,6 +75,16 @@ stderr even without `--diagnostics`:
 On macOS the total is an RSS sum, which counts shared pages more than
 once, so the ceiling trips early there. That's the safe direction.
 
+Reading coverage.json back gets a check of its own, before the read.
+Ruby's JSON parser holds the interpreter's global lock, so while it runs,
+no memory sample is taken and no signal is handled. The ceiling instead
+estimates the cost up front: the last sample plus about 5 times the
+file's size, which is what parsing it took in testing. The line says so:
+
+```
+[active_mutator 14:09:15 +428.1s] memory at 150% of --max-rss 6.0G (9.0G estimated to read a 1.7G coverage.json); stopping the run
+```
+
 ## Aborted runs
 
 On SIGINT, SIGTERM, or a `--max-rss` breach, in any phase, the run kills its baseline child or
@@ -186,3 +196,4 @@ right before the `abort`.
 |---|---|
 | `total_pss_kb` | the total that crossed the line |
 | `max_rss_kb` | the ceiling |
+| `coverage_bytes` | only on the check before coverage.json is read: the file's size, and `total_pss_kb` is then an estimate |

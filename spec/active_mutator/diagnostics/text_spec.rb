@@ -88,6 +88,16 @@ RSpec.describe ActiveMutator::Diagnostics::Text do
       .to end_with("] memory at 102% of --max-rss 6.0G (6.1G); stopping the run\n")
   end
 
+  it "says when the total is an estimate for reading coverage.json" do
+    expect(line(:memory_ceiling, total_pss_kb: 9_437_184, max_rss_kb: 6_291_456, coverage_bytes: 1_825_361_101))
+      .to end_with("] memory at 150% of --max-rss 6.0G (9.0G estimated to read a 1.7G coverage.json); " \
+                   "stopping the run\n")
+    out.truncate(0)
+    out.rewind
+    expect(line(:memory_warning, total_pss_kb: 900, max_rss_kb: 1000, coverage_bytes: 1_024_000))
+      .to end_with("(900K estimated to read a 1000K coverage.json)\n")
+  end
+
   it "prints only the listed event types when given `only`" do
     only = described_class.new(root: "/proj/", out: out, only: [:memory_warning])
     only.call(ActiveMutator::Events::Event.new(type: :phase_start, at: at, elapsed: 1.0, fields: { phase: :boot }))
