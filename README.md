@@ -127,12 +127,26 @@ Each character on the progress line is one mutant, printed as it finishes:
 | `A` | `accepted` | matches a known-equivalent entry in the acceptance ledger. Excluded from the score |
 
 `invalid` mutants (edits that don't even re-parse as valid Ruby) are
-discarded before scheduling and reported as a count only. Exit code is `1`
-if unaccepted survivors or errors exist (or, with `--fail-at`, if the score
-is below the threshold), `0` otherwise, including when there are only
-`uncovered` or `accepted` results. The JSON report's `exit_reason` field
-(`unaccepted_survivors`, `worker_errors`, `clean`, `empty_plan`) is
-independent of the `--fail-at` gate. A `--since` or `--subject` run that
+discarded before scheduling and reported as a count only.
+
+| Exit | When |
+|---|---|
+| `0` | no unaccepted survivors or errors (only `uncovered` or `accepted` results count as clean), or the score meets `--fail-at` |
+| `1` | unaccepted survivors or errors (with `--fail-at`, only when the score is below it), or an empty plan (below) |
+| `2` | a usage or setup problem: a bad flag or config file, or a red baseline suite |
+| `3` | the run reached `--max-rss` and stopped |
+| `130` | the run was stopped by SIGINT (Ctrl-C) |
+| `143` | the run was stopped by SIGTERM (130 before 0.7.0) |
+
+A stopped run (`3`, `130`, `143`) kills its child processes, prints the
+summary for the mutants that finished with a `Partial mutation score:`
+line in place of `Mutation score:`, and never passes, whatever `--fail-at`
+says. See [Run diagnostics](docs/guides/diagnostics.md#aborted-runs).
+
+The JSON report's `exit_reason` field (`unaccepted_survivors`,
+`worker_errors`, `clean`, `empty_plan`, and for a stopped run `interrupted`
+or `memory_ceiling`) is independent of the `--fail-at` gate. `complete` is
+`false` only for a stopped run. A `--since` or `--subject` run that
 plans zero mutants skips the baseline, prints the usual count block with
 every status at `0` and no `Mutation score:` line (JSON: `score` is `null`,
 `exit_reason` is `empty_plan`), then warns with the cause and exits `1`
@@ -431,9 +445,10 @@ remaining limits are:
 - [Operator reference](docs/guides/operators.md): every mutation
   active_mutator can generate, with before/after examples and what a
   survivor of each one means.
-- [Run diagnostics](docs/guides/diagnostics.md): `--diagnostics` and
-  `--events`. Find the phase and mutants a dying CI run was in, and the
-  `--events` NDJSON schema.
+- [Run diagnostics](docs/guides/diagnostics.md): `--diagnostics`,
+  `--events`, and `--max-rss`. Find the phase and mutants a dying CI run
+  was in, stop a run before it runs out of memory, and the `--events`
+  NDJSON schema.
 - [Custom operators](docs/guides/custom-operators.md): write and load your
   own mutation operators with `--operator` / the `operators:` config key.
 - [Mutation-check skill](docs/skills/mutation-check.md): the agent-facing

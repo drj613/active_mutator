@@ -112,8 +112,10 @@ Before any mutant runs, active_mutator needs to know which RSpec examples
 cover which source lines, and it needs proof the suite is green *before*
 mutating it (`Baseline`, `lib/active_mutator/baseline.rb`).
 
-**The baseline run** shells out to `bundle exec rspec` in a subprocess,
-with `Coverage.start(lines: true)` active before RSpec itself boots
+**The baseline run** starts `bundle exec rspec` as a child process
+(`Process.spawn`, in its own process group) and polls until it exits, so
+the parent knows the child's pid: the memory sampler watches it, and a
+stopped run kills its whole group (see [6a](#6a-stopping-early-signals-and---max-rss)). It runs with `Coverage.start(lines: true)` active before RSpec itself boots
 (`baseline_hooks.rb`, loaded via `RUBYOPT=-r<absolute-path>`). It uses
 `RUBYOPT`, not `--require`, because `.rspec`'s own requires load app code
 before RSpec gets to a command-line `-r`, and `Coverage` misses everything
@@ -155,6 +157,14 @@ into the cached JSON. Both the full and partial write paths go through
 `File.rename`. This means a human and an agent running active_mutator at
 the same time in the same repo can't corrupt the cache (or the acceptance
 ledger, which uses the same helper).
+
+**Each path reads the cache once.** On a big suite the file runs to
+gigabytes, and parsing JSON takes about 5 times the file's size in memory.
+A fresh cache is parsed once. A full rebuild checks and stamps the data it
+just parsed from the child's output instead of reading the file again. A
+partial refresh merges into the cache it already parsed and writes the
+result without reading it back. Only a full rebuild over a stale cache
+reads twice: the old file to decide, the new output to use.
 
 **The newly-covering-example blind spot (mostly closed since 0.2):** "re-run
 the examples currently covering the changed file" cannot, on its own, find
@@ -420,6 +430,33 @@ a lane's applied scale changes, the scheduler emits
 that line is how you see effective budgets, since `--debug-plan`
 intentionally keeps printing the static ones. Pass `--no-adaptive-timeout`
 to restore the purely static budget.
+
+## 6a. Stopping early: signals and `--max-rss`
+
+The parent traps SIGINT and SIGTERM for the whole run. The trap only
+records the reason in an `AbortFlag` (`lib/active_mutator/abort_flag.rb`):
+I/O or a lock inside a trap handler isn't safe. What happens next depends
+on what the main thread is doing:
+
+- **Boot, planning, reading coverage.** No child processes exist, so the
+  flag raises `Aborted` on the main thread at once.
+- **The baseline and the fork pool.** These own child processes, so they
+  hold the raise back. Their poll loops (every 50 ms and 20 ms) see the
+  flag, SIGKILL each child's whole process group without waiting for it,
+  and raise `Aborted` carrying the finished results and the mutants that
+  were in flight.
+
+`Runner` catches `Aborted`, emits an `abort` event, prints the reporter's
+summary marked partial, and exits 130 (SIGINT), 143 (SIGTERM), or 3
+(memory ceiling). `--accept-survivors` is skipped: a partial run must not
+rewrite the ledger. CI gives only a few seconds between SIGTERM and
+SIGKILL, so nothing on this path waits.
+
+`--max-rss` takes the same road. The sampler thread's memory samples feed
+a `MemoryCeiling`, which trips the same flag at 100%. One gap needed its
+own fix: Ruby's JSON parser holds the global lock, so while coverage.json
+is parsed, no sample is taken and no trap runs. The ceiling checks the
+file's size before the parse instead, at about 5 times the size.
 
 ## 7. Statuses
 
