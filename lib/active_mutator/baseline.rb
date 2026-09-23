@@ -74,10 +74,7 @@ module ActiveMutator
 
     def run_baseline!
       prepare_cache_dir
-      env = baseline_env(@out_path)
-      # out: :err: the subprocess suite's progress output must not pollute
-      # our stdout (breaks `--format json` consumers).
-      ok = system(env, "bundle", "exec", "rspec", chdir: @root, out: :err)
+      ok = run_rspec(@out_path)
       raise BaselineFailed, "baseline suite failed, fix the suite before mutating" unless ok
       raise BaselineFailed, "baseline produced no coverage output" unless File.exist?(@out_path)
 
@@ -102,6 +99,12 @@ module ActiveMutator
             "re-run without interrupting the suite"
     end
 
+    # out: :err: the subprocess suite's progress output must not pollute
+    # our stdout (breaks `--format json` consumers).
+    def run_rspec(out_path, targets = [])
+      system(baseline_env(out_path), "bundle", "exec", "rspec", *targets, chdir: @root, out: :err)
+    end
+
     def baseline_env(out_path)
       {
         "ACTIVE_MUTATOR" => "1",
@@ -122,12 +125,11 @@ module ActiveMutator
     end
 
     def run_partial!(delta, cache)
-      targets = delta.rerun_spec_files + delta.rerun_example_ids
       partial_out = File.join(@cache_dir, "partial.json")
-      part = { "records" => {}, "times" => {} }
+      targets = delta.rerun_spec_files + delta.rerun_example_ids
+      part = {}
       if targets.any?
-        env = baseline_env(partial_out)
-        ok = system(env, "bundle", "exec", "rspec", *targets, chdir: @root, out: :err)
+        ok = run_rspec(partial_out, targets)
         raise BaselineFailed, "partial baseline run failed, fix the suite before mutating" unless ok
         raise BaselineFailed, "partial baseline produced no output" unless File.exist?(partial_out)
 
@@ -136,7 +138,7 @@ module ActiveMutator
       end
       merge_partial!(cache, part, delta)
     ensure
-      FileUtils.rm_f(partial_out) if partial_out
+      FileUtils.rm_f(partial_out)
     end
 
     # Edits `cache` in place; the caller stamps and writes it.
