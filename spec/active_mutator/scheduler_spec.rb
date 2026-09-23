@@ -192,8 +192,9 @@ RSpec.describe ActiveMutator::Scheduler do
         rescue StandardError
           nil
         end
-        if File.exist?(worker_pid_file)
-          [-File.read(worker_pid_file).to_i, File.read(worker_pid_file).to_i].each do |target|
+        leaked = File.exist?(worker_pid_file) ? File.read(worker_pid_file).to_i : 0
+        if leaked.positive? # kill(0) would signal our own process group
+          [-leaked, leaked].each do |target|
             Process.kill("KILL", target)
           rescue StandardError
             nil
@@ -354,8 +355,11 @@ RSpec.describe ActiveMutator::Scheduler do
     expect(Dir.children("/dev/fd").size).to eq(baseline)
   ensure
     GC.enable
+    leaked = File.read(pid_file).to_i
     begin
-      Process.kill("KILL", File.read(pid_file).to_i) # cleanup if the mutant leaked it
+      # Cleanup if the mutant leaked it. An empty pid file reads as 0, and
+      # kill(0) would signal our own process group.
+      Process.kill("KILL", leaked) if leaked.positive?
     rescue StandardError
       nil
     end
