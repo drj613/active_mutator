@@ -20,9 +20,13 @@ RSpec.describe ActiveMutator::Runner do
                              constant_scope: "A", kind: :instance)
   end
 
-  def discovery(subjects, scanned_files: ["lib/a.rb"], since_candidates: [], since_matched_all: subjects)
+  def discovery(subjects, scanned_files: ["lib/a.rb"], since_candidates: [], since_matched_all: subjects,
+                comment_only: [])
+    filter = instance_double(ActiveMutator::SinceFilter)
+    allow(filter).to receive(:comment_only?) { |file| comment_only.include?(file) }
     ActiveMutator::Runner::Discovery.new(subjects: subjects, scanned_files: scanned_files,
-                                         since_candidates: since_candidates, since_matched_all: since_matched_all)
+                                         since_candidates: since_candidates, since_matched_all: since_matched_all,
+                                         since_filter: filter)
   end
 
   def mutation(line: 2)
@@ -901,6 +905,36 @@ RSpec.describe ActiveMutator::Runner do
             expect(result).to eq(1)
             expect(stderr).to include("--allow-empty forgives an empty plan only when no candidate source file changed")
             expect(stderr).to include("Changed: lib/a.rb, lib/b.rb")
+          end
+        end
+
+        it "exits 0 when every candidate file changed only comments" do
+          Dir.mktmpdir do |dir|
+            found = discovery([], since_candidates: ["lib/a.rb", "lib/b.rb"], comment_only: ["lib/a.rb", "lib/b.rb"])
+            result, stderr, = run_empty(lenient.with(root: dir), found: found)
+            expect(result).to eq(0)
+            expect(stderr).to include("forgiving empty plan: only comments changed in lib/a.rb, lib/b.rb")
+            expect(stderr).not_to include("Changed:")
+          end
+        end
+
+        it "exits 1 naming only the files whose code changed" do
+          Dir.mktmpdir do |dir|
+            found = discovery([], since_candidates: ["lib/a.rb", "lib/b.rb"], comment_only: ["lib/a.rb"])
+            result, stderr, = run_empty(lenient.with(root: dir), found: found)
+            expect(result).to eq(1)
+            expect(stderr).to include("Changed: lib/b.rb")
+            expect(stderr).not_to include("lib/a.rb")
+          end
+        end
+
+        it "lets a comment-only file ride along with a --no-class-level class-body change" do
+          Dir.mktmpdir do |dir|
+            found = discovery([], since_candidates: ["lib/a.rb", "lib/b.rb"], comment_only: ["lib/b.rb"],
+                                  since_matched_all: [class_body_in(dir)])
+            result, stderr, = run_empty(lenient.with(root: dir, class_level: false), found: found)
+            expect(result).to eq(0)
+            expect(stderr).to include("--no-class-level")
           end
         end
 

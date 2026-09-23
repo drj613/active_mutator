@@ -138,8 +138,8 @@ every status at `0` and no `Mutation score:` line (JSON: `score` is `null`,
 `exit_reason` is `empty_plan`), then warns with the cause and exits `1`
 unless `--allow-empty` is given. The count block is printed on every run,
 whatever the exit code, so log-scraping never has to handle a missing block.
-`--allow-empty` forgives the empty plan only when the `--since` diff touched
-no candidate source file; see [Empty plans in CI](#empty-plans-in-ci).
+`--allow-empty` forgives the empty plan only when the `--since` diff changed
+no code in a candidate source file; see [Empty plans in CI](#empty-plans-in-ci).
 
 When survivors exist, the summary also prints a per-operator table showing
 how often each operator's mutants survive, to help spot likely-equivalent
@@ -263,8 +263,12 @@ itself whether that emptiness is fine:
 - **Exit 0** with `--no-class-level` when every changed line in the
   candidate files falls inside class-body code that flag dropped. The
   warning names `--no-class-level` as the reason.
-- **Exit 1** otherwise. A candidate source file changed but produced no
-  mutants, and the warning lists the file(s). A comment-only edit in `lib/`
+- **Exit 0** when the only changes in the candidate files are comments or
+  blank lines, added or deleted. A magic comment such as
+  `# frozen_string_literal: true` counts as code, and so does a file that
+  fails to parse.
+- **Exit 1** otherwise. A candidate file's code changed but produced no
+  mutants, and the warning lists the file(s). A deletion-only code edit
   counts as a real change here.
 - With `--subject` and no `--since` there is no diff to judge, so
   `--allow-empty` exits `0` unconditionally.
@@ -284,7 +288,7 @@ projects used to tell a docs-only PR from a broken `--since` range.
 | `--exclude PAT` | none | skip files matching glob during subject discovery (repeatable, gitignore-like) |
 | `--max-mutants N` | none | deterministic sample of the first N mutants (quick smoke run on huge scopes; accepted/uncovered mutants count against N) |
 | `--debug-plan` | off | print planned mutants as JSON and exit without running |
-| `--allow-empty` | off | forgive an empty `--since`/`--subject` plan, but only when the `--since` diff touched no candidate source file (default: warn and exit 1) |
+| `--allow-empty` | off | forgive an empty `--since`/`--subject` plan, but only when the `--since` diff changed no code in a candidate source file (default: warn and exit 1) |
 | `--format terminal\|json\|stryker-json\|github` | terminal | report format |
 | `--accept-survivors` | off | record survivors to the acceptance ledger |
 | `--force-baseline` | off | ignore cached coverage map |

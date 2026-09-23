@@ -279,7 +279,8 @@ RSpec.describe ActiveMutator::Runner do
       mutation = mutation_for(user_file)
       runner = described_class.new(config, reporter: recording_reporter)
       found = ActiveMutator::Runner::Discovery.new(subjects: [mutation.subject], scanned_files: [],
-                                                   since_candidates: [], since_matched_all: [mutation.subject])
+                                                   since_candidates: [], since_matched_all: [mutation.subject],
+                                                   since_filter: nil)
       allow(runner).to receive(:discover).and_return(found)
       analysis = ActiveMutator::Analysis.new(mutations: [mutation], invalid_count: 0)
       allow(ActiveMutator::Engine).to receive(:new)
