@@ -1,0 +1,12 @@
+Name:	ruby
+Umask:	0022
+State:	R (running)
+Tgid:	4242
+Pid:	4242
+PPid:	4200
+VmPeak:	 1203400 kB
+VmSize:	 1101200 kB
+VmHWM:	  831488 kB
+VmRSS:	  812032 kB
+RssAnon:	  700000 kB
+Threads:	3

@@ -8,13 +8,18 @@ module ActiveMutator
   class Scheduler
     OrphanedError = Class.new(Error)
 
+    # first_seq: phase-2 escalation runs on its own scheduler; starting its
+    # sequence after phase 1's keeps mutant numbers unique across the run.
     def initialize(jobs:, worker: Worker.method(:run), on_result: nil,
-                   calibrators: nil, orphaned: -> { Process.ppid == 1 })
+                   calibrators: nil, orphaned: -> { Process.ppid == 1 },
+                   events: Events.new, first_seq: 1)
       @jobs = jobs
       @worker = worker
       @on_result = on_result
       @calibrators = calibrators
       @orphaned = orphaned
+      @events = events
+      @next_seq = first_seq
       @last_logged_scale = {} # lane => last scale logged for that lane
     end
 
@@ -78,6 +83,9 @@ module ActiveMutator
         # harmless everywhere else.
         ENV["PGGSSENCMODE"] ||= "disable"
         @worker.call(item.mutation, item.example_ids, writer)
+        # A second line, after the worker's own report: the worker can exit
+        # between two memory samples, so it reports its peak itself.
+        writer.puts("", JSON.generate("peak_rss_kb" => MemoryProbe.peak_rss_kb))
         writer.close
         Process.exit!(0)
       end
@@ -86,8 +94,18 @@ module ActiveMutator
       budget = calibrator ? calibrator.budget_for(item) : item.timeout
       log_scale(calibrator, item.lane)
       started = now
+      seq = @next_seq
+      @next_seq += 1
       running[pid] = { reader: reader, item: item, started: started, stderr_file: stderr_file,
-                       budget: budget, deadline: started + budget }
+                       budget: budget, deadline: started + budget, seq: seq }
+      emit_start(item, pid, seq, budget) if @events.listening?
+    end
+
+    def emit_start(item, pid, seq, budget)
+      m = item.mutation
+      @events.emit(:mutant_start, seq: seq, pid: pid, lane: item.lane, budget: budget,
+                                  examples: item.example_ids.size, subject: m.subject.name,
+                                  file: m.subject.file, line: m.line, description: m.description)
     end
 
     def reap(running, results)
@@ -96,37 +114,46 @@ module ActiveMutator
         if done
           running.delete(pid)
           result = finish(entry)
-          if result.status == :killed
-            calibrator_for(entry[:item])&.record(now - entry[:started], entry[:budget])
-          end
-          results << result
+          calibrator_for(entry[:item])&.record(result.seconds, entry[:budget]) if result.status == :killed
+          results << complete(pid, entry, result)
         elsif now > entry[:deadline]
           kill(pid)
           running.delete(pid)
           entry[:reader].close
           entry[:stderr_file].close!
-          details = format("timed out after %.1fs (budget %.1fs)", now - entry[:started], entry[:budget])
-          results << report(Result.new(mutation: entry[:item].mutation, status: :timeout, details: details))
+          seconds = now - entry[:started]
+          details = format("timed out after %.1fs (budget %.1fs)", seconds, entry[:budget])
+          results << complete(pid, entry, Result.new(mutation: entry[:item].mutation, status: :timeout,
+                                                     details: details, seconds: seconds))
         end
       end
     end
 
     def finish(entry)
-      payload = entry[:reader].read.to_s
+      seconds = now - entry[:started]
+      report_line, stats_line = entry[:reader].read.to_s.lines.map(&:strip).reject(&:empty?)
       entry[:reader].close
       stderr_tail = stderr_tail(entry[:stderr_file])
-      data = payload.empty? ? nil : JSON.parse(payload)
+      data = report_line && JSON.parse(report_line)
       # A self-mutation of Worker#emit can produce well-formed JSON without a
       # "status" key (or with a non-Hash root); treat any unusable payload as
       # a worker error instead of crashing the whole run.
       reported = data.is_a?(Hash) && data.key?("status")
       status = reported ? data["status"].to_sym : :error
       details = reported ? data["details"] : unreported_details(stderr_tail)
+      peak = JSON.parse(stats_line)["peak_rss_kb"] if stats_line
     rescue JSON::ParserError
-      report(Result.new(mutation: entry[:item].mutation, status: :error,
-                        details: "worker emitted unparseable payload"))
+      Result.new(mutation: entry[:item].mutation, status: :error,
+                 details: "worker emitted unparseable payload", seconds: seconds)
     else
-      report(Result.new(mutation: entry[:item].mutation, status: status, details: details))
+      Result.new(mutation: entry[:item].mutation, status: status, details: details,
+                 seconds: seconds, peak_rss_kb: peak)
+    end
+
+    def complete(pid, entry, result)
+      @events.emit(:mutant_end, seq: entry[:seq], pid: pid, status: result.status,
+                                seconds: result.seconds, peak_rss_kb: result.peak_rss_kb)
+      report(result)
     end
 
     def report(result)

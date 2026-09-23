@@ -383,6 +383,75 @@ RSpec.describe ActiveMutator::Scheduler do
     expect(elapsed).to be >= 0.3 # 4 items / 2 jobs => at least two waves
   end
 
+  describe "events" do
+    let(:mutation) do
+      subject = ActiveMutator::Subject.new(name: "Foo#bar", file: "/app/models/foo.rb", byte_range: 0...10,
+                                           line_range: 9..11, constant_scope: "Foo", kind: :instance)
+      ActiveMutator::Mutation.new(
+        subject: subject, original_snippet: ">", line: 10,
+        edit: ActiveMutator::Edit.new(range: 3...4, replacement: ">=", description: "replace > with >="),
+        mutated_file_source: nil, mutated_def_source: nil, mutated_def_line: nil
+      )
+    end
+    let(:events) { [] }
+    let(:bus) { ActiveMutator::Events.new.subscribe { |e| events << e } }
+
+    def work(timeout: 5.0, lane: :parallel)
+      ActiveMutator::WorkItem.new(mutation: mutation, example_ids: %w[a b], timeout: timeout, lane: lane)
+    end
+
+    it "emits mutant_start with the pid and plan, and mutant_end with status, time, and peak" do
+      allow(ActiveMutator::MemoryProbe).to receive(:peak_rss_kb).and_return(812) # inherited by the fork
+      worker = ->(_m, _e, writer) { writer.puts(JSON.generate("status" => "killed", "details" => nil)) }
+      results = described_class.new(jobs: 1, worker: worker, events: bus).run([work])
+
+      start, finish = events
+      expect(start.type).to eq(:mutant_start)
+      expect(start.fields.except(:pid))
+        .to eq(seq: 1, lane: :parallel, budget: 5.0, examples: 2, subject: "Foo#bar",
+               file: "/app/models/foo.rb", line: 10, description: "replace > with >=")
+      expect(start.fields[:pid]).to be_a(Integer).and(be > 0)
+      expect(finish.type).to eq(:mutant_end)
+      expect(finish.fields.except(:seconds))
+        .to eq(seq: 1, pid: start.fields[:pid], status: :killed, peak_rss_kb: 812)
+      expect(finish.fields[:seconds]).to be_a(Float).and(be >= 0)
+      expect(results.first.to_h.slice(:seconds, :peak_rss_kb)).to eq(seconds: finish.fields[:seconds], peak_rss_kb: 812)
+    end
+
+    it "numbers mutants from first_seq on" do
+      worker = ->(_m, _e, writer) { writer.puts(JSON.generate("status" => "killed", "details" => nil)) }
+      described_class.new(jobs: 1, worker: worker, events: bus, first_seq: 7).run([work, work])
+
+      expect(events.select { |e| e.type == :mutant_start }.map { |e| e.fields[:seq] }).to eq([7, 8])
+    end
+
+    it "emits mutant_end for a timed-out worker" do
+      sched = described_class.new(jobs: 1, worker: ->(_m, _e, _w) { sleep 30 }, events: bus)
+      results = run_bounded(sched, [work(timeout: 0.2)])
+
+      finish = events.last
+      expect(finish.fields.slice(:seq, :status, :peak_rss_kb)).to eq(seq: 1, status: :timeout, peak_rss_kb: nil)
+      expect(finish.fields[:seconds]).to be >= 0.2
+      expect(results.first.seconds).to eq(finish.fields[:seconds])
+    end
+
+    it "carries the elapsed time on an unparseable payload" do
+      worker = ->(_m, _e, writer) { writer.puts("{nope") }
+      results = described_class.new(jobs: 1, worker: worker, events: bus).run([work])
+
+      expect(results.first.seconds).to be_a(Float)
+      expect(events.last.fields.slice(:status, :seconds)).to eq(status: :error, seconds: results.first.seconds)
+    end
+
+    it "leaves the peak nil where the worker cannot read it (off Linux)" do
+      allow(ActiveMutator::MemoryProbe).to receive(:peak_rss_kb).and_return(nil)
+      worker = ->(_m, _e, writer) { writer.puts(JSON.generate("status" => "survived", "details" => nil)) }
+      results = described_class.new(jobs: 1, worker: worker, events: bus).run([work])
+
+      expect(results.first.peak_rss_kb).to be_nil
+    end
+  end
+
   describe "adaptive timeouts" do
     def fake_calibrator(budget: nil, scale: 1.0, warmed: false)
       cal = instance_double(ActiveMutator::TimeoutCalibrator,
