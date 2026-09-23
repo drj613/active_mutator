@@ -148,14 +148,14 @@ module ActiveMutator
       mutations = analyses.flat_map(&:mutations)
       mutations = mutations.first(@config.max_mutants) if @config.max_mutants
       @planned = mutations.size
-      invalid_count = analyses.sum(&:invalid_count)
+      @invalid_count = analyses.sum(&:invalid_count)
       # Decide emptiness before the baseline: a scoped run that plans nothing
       # has no use for a coverage map, and building one spawns the whole spec
       # suite (#47).
       if mutations.empty? && (@config.since || @config.subject_filter)
         return debug_plan([], []) if @config.debug_plan
 
-        return empty_plan_exit(invalid_count, discovery)
+        return empty_plan_exit(@invalid_count, discovery)
       end
 
       map = Baseline.new(root: @config.root, spec_paths: @config.spec_paths, events: @events, abort: @abort)
@@ -176,7 +176,7 @@ module ActiveMutator
 
       @events.phase(:reporting) do
         accept_survivors!(ledger, results, fingerprints, scanned_files) if @config.accept_survivors
-        @reporter.summary(results, invalid_count: invalid_count)
+        @reporter.summary(results, invalid_count: @invalid_count)
       end
       exit_code(results)
     end
@@ -204,10 +204,13 @@ module ActiveMutator
       previous.each { |sig, handler| trap(sig, handler) }
     end
 
+    # No --accept-survivors here: a partial run must not rewrite the ledger.
     def aborted_exit(error)
       counts = Reporter::Terminal.counts(error.results)
       @events.emit(:abort, reason: error.reason, in_flight: error.in_flight, planned: @planned,
                            counts: counts, score: error.results.empty? ? nil : Reporter::Terminal.score(counts))
+      @reporter.summary(error.results, invalid_count: @invalid_count || 0,
+                                       aborted: { reason: error.reason, in_flight: error.in_flight, planned: @planned })
       EXIT_CODES.fetch(error.reason)
     end
 

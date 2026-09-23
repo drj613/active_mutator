@@ -60,9 +60,9 @@ RSpec.describe "tiny_project end-to-end", :e2e do
         end
         Process.kill("TERM", wait.pid)
         seen << stderr.read
-        drain.join
 
         expect(wait.value.exitstatus).to eq(143), seen
+        expect(drain.value).to include("Run aborted (SIGTERM): partial results", "Partial mutation score:")
         expect(seen).to match(/\] abort sigterm; in flight: /)
         expect(seen).not_to include("] phase mutating end")
       end

@@ -270,6 +270,15 @@ RSpec.describe ActiveMutator::Runner do
       let(:seen) { [] }
       let(:bus) { ActiveMutator::Events.new.subscribe { |e| seen << [e.type, e.fields] } }
 
+      let(:summaries) { [] }
+      let(:reporter) do
+        calls = summaries
+        r = Object.new
+        r.define_singleton_method(:on_result) { |_| nil }
+        r.define_singleton_method(:summary) { |results, **kw| calls << [results, kw] }
+        r
+      end
+
       def aborting_runner(&run)
         runner = described_class.new(config, reporter: reporter, events: bus)
         allow(runner).to receive(:preload!)
@@ -296,6 +305,7 @@ RSpec.describe ActiveMutator::Runner do
           expect(runner.call).to eq(code)
           expect(abort_event).to eq(reason: reason, in_flight: [], planned: 0,
                                     counts: ActiveMutator::Reporter::Terminal.counts([]), score: nil)
+          expect(summaries).to eq([[[], { invalid_count: 0, aborted: { reason: reason, in_flight: [], planned: 0 } }]])
           expect(seen.reject { |(type, _)| type == :memory }.last(2).map { |(type, fields)| [type, fields[:phase]] })
             .to eq([[:phase_start, :mutating], [:abort, nil]])
         end
@@ -331,6 +341,32 @@ RSpec.describe ActiveMutator::Runner do
         expect(runner.call).to eq(3)
         expect(abort_event).to include(reason: :memory_ceiling, in_flight: in_flight, score: 0.5)
         expect(abort_event[:counts]).to include(killed: 1, survived: 1, uncovered: 1)
+        expect(summaries).to eq([[[killed, survived, uncovered],
+                                  { invalid_count: 0, aborted: { reason: :memory_ceiling, in_flight: in_flight,
+                                                                 planned: 0 } }]])
+      end
+
+      it "reports an abort before planning with no plan size and no invalid count" do
+        runner = aborting_runner { [] }
+        allow(runner).to receive(:preload!) do
+          Process.kill("TERM", Process.pid)
+          sleep 5
+        end
+
+        expect(runner.call).to eq(143)
+        expect(summaries).to eq([[[], { invalid_count: 0, aborted: { reason: :sigterm, in_flight: [], planned: nil } }]])
+        expect(abort_event).to include(planned: nil)
+      end
+
+      it "passes the plan's invalid count to the aborted summary" do
+        runner = aborting_runner { raise ActiveMutator::Aborted, :sigint }
+        analysis = instance_double(ActiveMutator::Analysis, mutations: [], invalid_count: 4)
+        allow(ActiveMutator::Engine).to receive(:new).and_return(instance_double(ActiveMutator::Engine, analyze: analysis))
+        allow(runner).to receive(:discover).and_return(discovery([subject_]))
+        allow(runner).to receive(:plan_work).and_return([[], [], {}])
+
+        expect(runner.call).to eq(130)
+        expect(summaries.last.last).to include(invalid_count: 4)
       end
     end
   end
