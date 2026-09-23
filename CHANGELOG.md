@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-09-23
+
 - `--diagnostics` prints a timestamped line to stderr for each phase
   (`boot`, `planning`, `baseline`, `coverage_load`, `mutating`,
   `escalating`, `reporting`), each mutant's start and end (pid, lane,
