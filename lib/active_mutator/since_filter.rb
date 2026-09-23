@@ -84,10 +84,10 @@ module ActiveMutator
 
     # Whether a changed file's edits since the ref are only comments. Reads
     # the old side with `git show`; a file missing there (untracked, renamed)
-    # compares against an empty source, so any code in it counts.
+    # prints nothing, so it compares against an empty source and any code in
+    # it counts.
     def comment_only?(path)
       old_source = IO.popen(["git", "-C", @root, "show", "#{@ref}:#{path}"], err: File::NULL, &:read)
-      old_source = "" unless $?.success?
       self.class.same_code?(old_source, File.read(File.join(@root, path)))
     end
 

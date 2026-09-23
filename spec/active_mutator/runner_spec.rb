@@ -894,7 +894,7 @@ RSpec.describe ActiveMutator::Runner do
           Dir.mktmpdir do |dir|
             result, stderr, = run_empty(lenient.with(root: dir), found: discovery([], since_candidates: []))
             expect(result).to eq(0)
-            expect(stderr).not_to include("Changed:")
+            expect(stderr).not_to include("Changed:", "forgiving")
           end
         end
 

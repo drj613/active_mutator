@@ -196,6 +196,20 @@ RSpec.describe ActiveMutator::SinceFilter do
     it "is false when either side fails to parse" do
       expect(described_class.same_code?(base, "#{base}end\n")).to be(false)
     end
+
+    it "is false when both sides fail to parse, even if only a comment differs" do
+      broken = "def x(\n"
+      expect(described_class.same_code?(broken, "# note\n#{broken}")).to be(false)
+    end
+
+    it "is false when a line break moved" do
+      expect(described_class.same_code?("a\nb\n", "a b\n")).to be(false)
+    end
+
+    it "is true when an unchanged magic comment sits beside the edited comments" do
+      magic = "# frozen_string_literal: true\n"
+      expect(described_class.same_code?("#{magic}#{base}", "#{magic}# note\n#{base}")).to be(true)
+    end
   end
 
   describe "#comment_only?" do
@@ -220,6 +234,23 @@ RSpec.describe ActiveMutator::SinceFilter do
         repo_with(root, "class A\n  def a = 1\nend\n")
         File.write(File.join(root, "lib", "a.rb"), "class A\n  def a = 2\nend\n")
         expect(described_class.new(ref: "HEAD", root: root).comment_only?("lib/a.rb")).to be(false)
+      end
+    end
+
+    it "compares against the ref, not the staged copy" do
+      Dir.mktmpdir do |root|
+        repo_with(root, "class A\n  def a = 1\nend\n")
+        File.write(File.join(root, "lib", "a.rb"), "class A\n  def a = 2\nend\n")
+        git(root, "add", "-A")
+        expect(described_class.new(ref: "HEAD", root: root).comment_only?("lib/a.rb")).to be(false)
+      end
+    end
+
+    it "is true for an untracked file holding only comments" do
+      Dir.mktmpdir do |root|
+        repo_with(root, "class A; end\n")
+        File.write(File.join(root, "lib", "notes.rb"), "# TODO: fill in\n")
+        expect(described_class.new(ref: "HEAD", root: root).comment_only?("lib/notes.rb")).to be(true)
       end
     end
 

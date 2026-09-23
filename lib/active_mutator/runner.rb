@@ -321,7 +321,6 @@ module ActiveMutator
         subjects = subjects.select { |s| matcher.match?(s.name) }
       end
       since_candidates = []
-      filter = nil
       if @config.since
         filter = SinceFilter.new(ref: @config.since, root: @config.root)
         subjects = subjects.select { |s| filter.cover?(s) }
