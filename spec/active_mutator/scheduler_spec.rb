@@ -159,82 +159,71 @@ RSpec.describe ActiveMutator::Scheduler do
     end
   end
 
-  it "kills running workers and exits with status 130 on SIGINT" do
-    # Touch install_signal_handlers in THIS process too: the real assertion runs
-    # in a fork, and forked coverage never reaches the baseline coverage map, so
-    # without this the example is never selected to run against these mutants.
-    scheduler(worker: ->(_m, _e, _w) {}).run([])
-    Dir.mktmpdir do |dir|
-      worker_pid_file = File.join(dir, "worker_pid")
-      supervisor = fork do
-        sched = described_class.new(jobs: 1, worker: lambda do |_m, _e, _w|
-          File.write(worker_pid_file, Process.pid.to_s)
+  describe "aborting" do
+    let(:flag) { ActiveMutator::AbortFlag.new }
+    let(:mutation) do
+      subject = ActiveMutator::Subject.new(name: "Foo#bar", file: "/app/foo.rb", byte_range: 0...10,
+                                           line_range: 9..11, constant_scope: "Foo", kind: :instance)
+      ActiveMutator::Mutation.new(
+        subject: subject, original_snippet: ">", line: 10,
+        edit: ActiveMutator::Edit.new(range: 3...4, replacement: ">=", description: "replace > with >="),
+        mutated_file_source: nil, mutated_def_source: nil, mutated_def_line: nil
+      )
+    end
+
+    def work(timeout: 30.0) = ActiveMutator::WorkItem.new(mutation: mutation, example_ids: [], timeout: timeout, lane: :parallel)
+
+    it "kills every running worker at once and raises with the finished results and the in-flight list" do
+      Dir.mktmpdir do |dir|
+        worker = lambda do |_m, _e, writer|
+          n = Dir.children(dir).size
+          File.write(File.join(dir, Process.pid.to_s), "")
+          next writer.puts(JSON.generate("status" => "killed", "details" => nil)) if n.zero?
+
           sleep 30
-        end)
-        sched.run([item])
-        Process.exit!(99) # unreachable: the INT trap must exit the process first
-      end
-      begin
-        deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + 5
-        sleep 0.05 until File.exist?(worker_pid_file) ||
-                         Process.clock_gettime(Process::CLOCK_MONOTONIC) > deadline
-        expect(File).to exist(worker_pid_file) # clean failure instead of ENOENT on slow CI
-        worker_pid = File.read(worker_pid_file).to_i
-        expect(worker_pid).to be > 0
-        Process.kill("INT", supervisor)
-        status = wait_with_deadline(supervisor, 5)
-        expect(status&.exitstatus).to eq(130)
-        expect_process_gone(worker_pid)
-      ensure
+        end
+        readers = []
+        allow(IO).to receive(:pipe).and_wrap_original { |orig| orig.call.tap { |r, _| readers << r } }
+        stderr_files = []
+        allow(Tempfile).to receive(:new).and_wrap_original { |orig, *a| orig.call(*a).tap { |t| stderr_files << t } }
+        sched = described_class.new(jobs: 1, worker: worker, abort: flag)
+        tripper = Thread.new do
+          sleep 0.02 until Dir.children(dir).size >= 2
+          flag.trip!(:sigterm)
+        end
+        started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+
+        error = nil
         begin
-          Process.kill("KILL", supervisor)
-          Process.waitpid(supervisor)
-        rescue StandardError
-          nil
+          Timeout.timeout(5) { sched.run([work, work, work]) }
+        rescue ActiveMutator::Aborted => e
+          error = e
         end
-        leaked = File.exist?(worker_pid_file) ? File.read(worker_pid_file).to_i : 0
-        if leaked.positive? # kill(0) would signal our own process group
-          [-leaked, leaked].each do |target|
-            Process.kill("KILL", target)
-          rescue StandardError
-            nil
-          end
-        end
+        tripper.join
+
+        expect(Process.clock_gettime(Process::CLOCK_MONOTONIC) - started).to be < 3
+        expect(error.reason).to eq(:sigterm)
+        expect(error.results.map(&:status)).to eq([:killed])
+        sleeper = Dir.children(dir).map(&:to_i).max_by { |pid| File.mtime(File.join(dir, pid.to_s)) }
+        expect(error.in_flight).to eq([{ seq: 2, pid: sleeper, subject: "Foo#bar", file: "/app/foo.rb", line: 10,
+                                         description: "replace > with >=" }])
+        # Killed but not waited for (the abort path doesn't wait): reaping it
+        # now proves it died.
+        _, status = Timeout.timeout(2) { Process.waitpid2(sleeper) }
+        expect(status.termsig).to eq(9)
+        expect(readers.size).to eq(2)
+        expect(readers).to all(be_closed)
+        expect(stderr_files.map(&:path)).to eq([nil, nil]) # deleted, not left for GC
       end
     end
-  end
 
-  it "installs INT handling for the duration of the run and restores the previous handler" do
-    sentinel = proc {}
-    previous_int = trap("INT", sentinel)
-    begin
-      during = nil
-      worker = ->(_m, _e, writer) { writer.puts(JSON.generate("status" => "killed", "details" => nil)) }
-      on_result = lambda do |_r|
-        during = trap("INT", sentinel) # peek at the active handler...
-        trap("INT", during)            # ...and put it straight back
-      end
-      scheduler(worker: worker, on_result: on_result).run([item])
-      expect(during).not_to eq(sentinel) # scheduler's own handler was active mid-run
-      expect(trap("INT", "DEFAULT")).to eq(sentinel) # original handler restored after
-    ensure
-      trap("INT", previous_int || "DEFAULT")
+    it "spawns nothing when the flag tripped before the run" do
+      flag.deferred { flag.trip!(:sigint) }
+      spawned = false
+      sched = described_class.new(jobs: 1, worker: ->(_m, _e, _w) { spawned = true }, abort: flag)
+      expect { sched.run([work]) }.to raise_error(ActiveMutator::Aborted, /sigint/)
+      expect(spawned).to be(false)
     end
-  end
-
-  it "does not mask an install-time failure by restoring traps that were never captured" do
-    # If install_signal_handlers itself raises, previous_traps is nil; the
-    # ensure must skip restoration rather than crash on nil (which would
-    # replace the original error with a NoMethodError).
-    sched = scheduler(worker: ->(_m, _e, _w) {})
-    allow(sched).to receive(:install_signal_handlers).and_raise(ActiveMutator::Error, "boom")
-    expect { sched.run([]) }.to raise_error(ActiveMutator::Error, "boom")
-  end
-
-  it "restores DEFAULT for signals whose previous handler was nil" do
-    trap("USR1", proc {})
-    scheduler(worker: ->(_m, _e, _w) {}).send(:restore_traps, { "USR1" => nil })
-    expect(trap("USR1", "DEFAULT")).to eq("DEFAULT")
   end
 
   it "aborts and kills workers when the parent is orphaned" do

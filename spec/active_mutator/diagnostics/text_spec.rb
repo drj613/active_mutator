@@ -69,8 +69,18 @@ RSpec.describe ActiveMutator::Diagnostics::Text do
     end
   end
 
+  it "prints an abort with its reason and the mutants still running" do
+    in_flight = [{ seq: 301, pid: 1, subject: "Foo#baz", file: "/proj/app/models/foo.rb", line: 40, description: "x" },
+                 { seq: 302, pid: 2, subject: "Foo#qux", file: "/proj/app/models/foo.rb", line: 52, description: "y" }]
+    expect(line(:abort, reason: :memory_ceiling, in_flight: in_flight, planned: 9, counts: {}, score: nil))
+      .to end_with("] abort memory_ceiling; in flight: #301 Foo#baz app/models/foo.rb:40, #302 Foo#qux app/models/foo.rb:52\n")
+    out.truncate(0)
+    out.rewind
+    expect(line(:abort, reason: :sigint, in_flight: [])).to end_with("] abort sigint; in flight: none\n")
+  end
+
   it "prints other events as key=value pairs" do
-    expect(line(:abort, reason: :sigterm)).to end_with("] abort reason=sigterm\n")
+    expect(line(:tick, reason: :sigterm, n: 2)).to end_with("] tick reason=sigterm n=2\n")
   end
 
   describe ".size_kb" do

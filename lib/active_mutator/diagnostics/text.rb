@@ -31,6 +31,7 @@ module ActiveMutator
         when :mutant_start then mutant_start(fields)
         when :mutant_end then mutant_end(fields)
         when :memory then memory(fields)
+        when :abort then abort(fields)
         else [type, *pairs(fields)].join(" ")
         end
       end
@@ -47,6 +48,11 @@ module ActiveMutator
 
       def mutant_end(f)
         "mutant end ##{f[:seq]} #{f[:status]} #{format("%.1f", f[:seconds])}s peak=#{Diagnostics.size_kb(f[:peak_rss_kb])}"
+      end
+
+      def abort(f)
+        running = f[:in_flight].map { |m| "##{m[:seq]} #{m[:subject]} #{m[:file].delete_prefix(@prefix)}:#{m[:line]}" }
+        "abort #{f[:reason]}; in flight: #{running.empty? ? "none" : running.join(", ")}"
       end
 
       # mem parent=1.6G workers=4:3.2G baseline=2.1G total=6.9G avail=3.0G swap=0 psi=0.3 load=1.52

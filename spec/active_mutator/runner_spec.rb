@@ -265,6 +265,74 @@ RSpec.describe ActiveMutator::Runner do
     ensure
       ActiveMutator::ClosureReload.cap = original_cap
     end
+
+    describe "aborting" do
+      let(:seen) { [] }
+      let(:bus) { ActiveMutator::Events.new.subscribe { |e| seen << [e.type, e.fields] } }
+
+      def aborting_runner(&run)
+        runner = described_class.new(config, reporter: reporter, events: bus)
+        allow(runner).to receive(:preload!)
+        allow(runner).to receive(:preload_spec_helper!)
+        allow(runner).to receive(:discover).and_return(discovery([]))
+        allow(ActiveMutator::Baseline).to receive(:new).and_return(
+          instance_double(ActiveMutator::Baseline, coverage_map: instance_double(ActiveMutator::CoverageMap))
+        )
+        scheduler = instance_double(ActiveMutator::Scheduler)
+        allow(scheduler).to receive(:run, &run)
+        allow(ActiveMutator::Scheduler).to receive(:new).and_return(scheduler)
+        runner
+      end
+
+      def abort_event = seen.find { |(type, _)| type == :abort }&.last
+
+      { "TERM" => [:sigterm, 143], "INT" => [:sigint, 130] }.each do |sig, (reason, code)|
+        it "exits #{code} on SIG#{sig}, emitting abort and leaving the phase open" do
+          runner = aborting_runner do
+            Process.kill(sig, Process.pid)
+            sleep 5
+          end
+
+          expect(runner.call).to eq(code)
+          expect(abort_event).to eq(reason: reason, in_flight: [], planned: 0,
+                                    counts: ActiveMutator::Reporter::Terminal.counts([]), score: nil)
+          expect(seen.reject { |(type, _)| type == :memory }.last(2).map { |(type, fields)| [type, fields[:phase]] })
+            .to eq([[:phase_start, :mutating], [:abort, nil]])
+        end
+      end
+
+      it "gives the host its own signal handlers back, including an ignored one" do
+        host = proc {}
+        previous_term = trap("TERM", host)
+        previous_int = trap("INT", nil)
+        aborting_runner { [] }.call
+        expect(trap("TERM", previous_term)).to be(host)
+        expect(trap("INT", previous_int)).to be_nil
+      end
+
+      it "hands its one flag to the baseline and the scheduler" do
+        runner = aborting_runner { [] }
+        runner.call
+        flag = runner.instance_variable_get(:@abort)
+        expect(ActiveMutator::Baseline).to have_received(:new).with(hash_including(abort: flag))
+        expect(ActiveMutator::Scheduler).to have_received(:new).with(hash_including(abort: flag))
+      end
+
+      it "exits 3 on a memory ceiling abort, counting what finished plus the pre-resolved mutants" do
+        killed = ActiveMutator::Result.new(mutation: mutation, status: :killed, details: nil)
+        survived = ActiveMutator::Result.new(mutation: mutation, status: :survived, details: nil)
+        uncovered = ActiveMutator::Result.new(mutation: mutation, status: :uncovered, details: nil)
+        in_flight = [{ seq: 3 }]
+        runner = aborting_runner do
+          raise ActiveMutator::Aborted.new(:memory_ceiling, results: [killed, survived], in_flight: in_flight)
+        end
+        allow(runner).to receive(:plan_work).and_return([[], [uncovered], {}])
+
+        expect(runner.call).to eq(3)
+        expect(abort_event).to include(reason: :memory_ceiling, in_flight: in_flight, score: 0.5)
+        expect(abort_event[:counts]).to include(killed: 1, survived: 1, uncovered: 1)
+      end
+    end
   end
 
   it "exits 1 when mutants survive, 0 otherwise" do

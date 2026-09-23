@@ -12,7 +12,8 @@ module ActiveMutator
     # sequence after phase 1's keeps mutant numbers unique across the run.
     def initialize(jobs:, worker: Worker.method(:run), on_result: nil,
                    calibrators: nil, orphaned: -> { Process.ppid == 1 },
-                   events: Events.new, first_seq: 1)
+                   events: Events.new, first_seq: 1, abort: AbortFlag.new)
+      @abort = abort
       @jobs = jobs
       @worker = worker
       @on_result = on_result
@@ -23,33 +24,48 @@ module ActiveMutator
       @last_logged_scale = {} # lane => last scale logged for that lane
     end
 
+    # Signals are the Runner's: its AbortFlag trips, and the poll loop here
+    # kills every worker and raises Aborted with what finished.
     def run(items)
-      previous_traps = nil
       running = {}
-      previous_traps = install_signal_handlers(running)
       results = []
-      # Browser-covered mutants each boot Chrome + an app server; running them
-      # concurrently melts CPUs and manufactures false timeouts. Parallel lane
-      # first at full width, then the serial lane one at a time.
-      results.concat(run_pool(items.select { |i| i.lane == :parallel }, @jobs, running))
-      results.concat(run_pool(items.select { |i| i.lane == :serial }, 1, running))
+      @abort.deferred do
+        # Browser-covered mutants each boot Chrome + an app server; running
+        # them concurrently melts CPUs and manufactures false timeouts.
+        # Parallel lane first at full width, then the serial lane one at a time.
+        run_pool(items.select { |i| i.lane == :parallel }, @jobs, running, results)
+        run_pool(items.select { |i| i.lane == :serial }, 1, running, results)
+      end
       results
-    ensure
-      restore_traps(previous_traps) if previous_traps
     end
 
     private
 
-    def run_pool(items, width, running)
+    def run_pool(items, width, running, results)
       queue = items.dup
-      results = []
       until queue.empty? && running.empty?
         abort_if_orphaned!(running)
+        abort!(running, results) if @abort.tripped?
         spawn(queue.shift, running) while running.size < width && !queue.empty?
         reap(running, results)
         sleep 0.02 unless running.empty?
       end
-      results
+    end
+
+    # CI allows only seconds between SIGTERM and SIGKILL, so kill every
+    # worker group and move on without waiting for any of them.
+    def abort!(running, results)
+      in_flight = running.map do |pid, entry|
+        m = entry[:item].mutation
+        { seq: entry[:seq], pid: pid, subject: m.subject.name, file: m.subject.file, line: m.line,
+          description: m.description }
+      end
+      running.each do |pid, entry|
+        signal_group(pid)
+        entry[:reader].close
+        entry[:stderr_file].close!
+      end
+      raise Aborted.new(@abort.reason, results: results, in_flight: in_flight)
     end
 
     # SIGKILL on the parent (or a closed terminal, or CI teardown) cannot be
@@ -176,14 +192,7 @@ module ActiveMutator
     end
 
     def kill(pid)
-      Process.kill("KILL", -pid) # negative pid = whole process group
-    rescue Errno::ESRCH, Errno::EPERM
-      # Group not established yet (setpgid race) or already gone: direct kill.
-      begin
-        Process.kill("KILL", pid)
-      rescue Errno::ESRCH
-        nil
-      end
+      signal_group(pid)
     ensure
       begin
         Process.waitpid(pid)
@@ -192,24 +201,15 @@ module ActiveMutator
       end
     end
 
-    # Returns {sig => previous_handler} so #run can restore on exit,
-    # otherwise our traps permanently replace the host's (e.g. RSpec's Ctrl-C).
-    def install_signal_handlers(running)
-      %w[INT TERM].to_h do |sig|
-        previous = trap(sig) do
-          running.each_key do |pid|
-            Process.kill("KILL", -pid)
-          rescue StandardError
-            nil
-          end
-          exit(130)
-        end
-        [sig, previous]
+    def signal_group(pid)
+      Process.kill("KILL", -pid) # negative pid = whole process group
+    rescue Errno::ESRCH, Errno::EPERM
+      # Group not established yet (setpgid race) or already gone: direct kill.
+      begin
+        Process.kill("KILL", pid)
+      rescue Errno::ESRCH
+        nil
       end
-    end
-
-    def restore_traps(previous)
-      previous.each { |sig, handler| trap(sig, handler || "DEFAULT") }
     end
 
     def calibrator_for(item)

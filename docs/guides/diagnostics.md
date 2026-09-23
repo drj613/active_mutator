@@ -24,6 +24,7 @@ A relative `FILE` is relative to the project root.
 [active_mutator 14:08:59 +411.3s] phase coverage_load start size=2.1G
 [active_mutator 14:09:30 +442.0s] mutant start #12 pid=4242 parallel Foo#bar app/models/foo.rb:10 replace > with >=
 [active_mutator 14:09:32 +443.8s] mutant end #12 killed 1.8s peak=812M
+[active_mutator 14:09:40 +451.0s] abort sigterm; in flight: #13 Foo#baz app/models/foo.rb:40
 ```
 
 Each line starts with the wall-clock time and the seconds since the run
@@ -56,6 +57,23 @@ own peak (`VmHWM`) in its `mutant_end` event.
 In the text line, `workers=4:3.2G` means four live workers using 3.2 GB
 together, and `swap` is swap in use. A field the platform can't read
 shows as `?` or is left out.
+
+## Aborted runs
+
+On SIGINT or SIGTERM, in any phase, the run kills its baseline child or
+every running worker (each with its whole process group) without waiting
+for them, emits an `abort` event naming the mutants still running, and
+exits. CI runners give only a few seconds between SIGTERM and SIGKILL, so
+nothing on this path waits.
+
+| Reason | Exit |
+|---|---|
+| SIGINT | 130 |
+| SIGTERM | 143 |
+
+An aborted run never passes, whatever `--fail-at` says. SIGKILL (an OOM
+kill, a VM teardown) can't be caught. For those, the lines already written
+are what survives.
 
 ## Phases
 
@@ -125,3 +143,15 @@ New fields may be added under `v: 1`. Renaming or removing a field bumps
 | `system` | Linux only, else `null`: `{mem_available_kb, swap_total_kb, swap_free_kb, psi_some_avg10, load1}`, each `null` when its file is missing |
 
 `pss_kb` is `null` off Linux, and on kernels without `smaps_rollup`.
+
+### `abort`
+
+| Field | Meaning |
+|---|---|
+| `reason` | `sigint` or `sigterm` |
+| `in_flight` | `[{seq, pid, subject, file, line, description}]`, the mutants killed mid-run; empty outside the `mutating` and `escalating` phases |
+| `planned` | how many mutants the run planned, or `null` if it stopped before planning finished |
+| `counts` | finished mutants by status, the same keys as the reporter's counts |
+| `score` | the score over finished mutants only (0 to 1), or `null` if none finished |
+
+The phase that was running gets no `phase_end`.

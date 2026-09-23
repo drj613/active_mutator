@@ -10,19 +10,30 @@ module ActiveMutator
     # without --since). The last three feed the --allow-empty verdict (#46).
     Discovery = Data.define(:subjects, :scanned_files, :since_candidates, :since_matched_all, :since_filter)
 
+    SIGNALS = { "INT" => :sigint, "TERM" => :sigterm }.freeze
+    # An aborted run never passes, whatever --fail-at says.
+    EXIT_CODES = { sigint: 130, sigterm: 143, memory_ceiling: 3 }.freeze
+
     def initialize(config, reporter: nil, events: nil)
       @config = config
       @reporter = reporter || build_reporter
       @events = events || build_events
+      @abort = AbortFlag.new
     end
 
+    # The traps go in first so boot, planning, and the baseline are covered
+    # too, and come out last so the host gets its own handlers back.
     def call
+      previous_traps = trap_signals
       events_file = open_events_file
       sampler = start_sampler
       run
+    rescue Aborted => e
+      aborted_exit(e)
     ensure
       sampler&.stop
       events_file&.close
+      restore_traps(previous_traps)
     end
 
     # Returns [work_items, pre_results, phase1_ids]. phase1_ids maps each
@@ -84,9 +95,14 @@ module ActiveMutator
       return results if items.empty?
 
       # Numbered after phase 1's mutants, so seq stays unique across the run.
-      scheduler ||= Scheduler.new(jobs: @config.jobs, events: @events, first_seq: phase1_ids.size + 1)
-      escalated = @events.phase(:escalating, mutants: items.size) do
-        scheduler.run(items.values).to_h { |res| [res.mutation, res] }
+      scheduler ||= Scheduler.new(jobs: @config.jobs, events: @events, first_seq: phase1_ids.size + 1, abort: @abort)
+      escalated = begin
+        @events.phase(:escalating, mutants: items.size) do
+          scheduler.run(items.values).to_h { |res| [res.mutation, res] }
+        end
+      rescue Aborted => e
+        # Every phase-1 verdict is final; a half-done escalation proves nothing.
+        raise e.with_results(results)
       end
       results.map do |r|
         # A replacement only ever exists for a survived candidate (items is
@@ -131,6 +147,7 @@ module ActiveMutator
       subjects = discovery.subjects
       mutations = analyses.flat_map(&:mutations)
       mutations = mutations.first(@config.max_mutants) if @config.max_mutants
+      @planned = mutations.size
       invalid_count = analyses.sum(&:invalid_count)
       # Decide emptiness before the baseline: a scoped run that plans nothing
       # has no use for a coverage map, and building one spawns the whole spec
@@ -141,7 +158,7 @@ module ActiveMutator
         return empty_plan_exit(invalid_count, discovery)
       end
 
-      map = Baseline.new(root: @config.root, spec_paths: @config.spec_paths, events: @events)
+      map = Baseline.new(root: @config.root, spec_paths: @config.spec_paths, events: @events, abort: @abort)
               .coverage_map(force: @config.force_baseline)
       @reporter.coverage_map = map if @reporter.respond_to?(:coverage_map=)
 
@@ -153,15 +170,7 @@ module ActiveMutator
       items, pre_results, phase1_ids = plan_work(mutations, map, ledger: ledger, fingerprints: fingerprints)
       return debug_plan(items, pre_results) if @config.debug_plan
 
-      results = @events.phase(:mutating, mutants: items.size) do
-        pre_results.each { |r| @reporter.on_result(r) }
-        calibrators = if @config.adaptive_timeout
-                        { parallel: TimeoutCalibrator.new, serial: TimeoutCalibrator.new }
-                      end
-        scheduler = Scheduler.new(jobs: @config.jobs, on_result: @reporter.method(:on_result),
-                                  calibrators: calibrators, events: @events)
-        scheduler.run(items) + pre_results
-      end
+      results = @events.phase(:mutating, mutants: items.size) { mutate(items, pre_results) }
       # Phase 2 runs on its own scheduler (built lazily inside), so pass nil.
       results = escalate_class_body_survivors(results, nil, map, phase1_ids: phase1_ids)
 
@@ -170,6 +179,36 @@ module ActiveMutator
         @reporter.summary(results, invalid_count: invalid_count)
       end
       exit_code(results)
+    end
+
+    def mutate(items, pre_results)
+      pre_results.each { |r| @reporter.on_result(r) }
+      calibrators = if @config.adaptive_timeout
+                      { parallel: TimeoutCalibrator.new, serial: TimeoutCalibrator.new }
+                    end
+      scheduler = Scheduler.new(jobs: @config.jobs, on_result: @reporter.method(:on_result),
+                                calibrators: calibrators, events: @events, abort: @abort)
+      scheduler.run(items) + pre_results
+    rescue Aborted => e
+      raise e.with_results(e.results + pre_results)
+    end
+
+    # The trap only trips the flag: no I/O is safe inside a handler. The
+    # main loop does the killing and raises Aborted.
+    def trap_signals
+      SIGNALS.to_h { |sig, reason| [sig, trap(sig) { @abort.trip!(reason) }] }
+    end
+
+    # Passed back as is: a nil handler means the host ignored the signal.
+    def restore_traps(previous)
+      previous.each { |sig, handler| trap(sig, handler) }
+    end
+
+    def aborted_exit(error)
+      counts = Reporter::Terminal.counts(error.results)
+      @events.emit(:abort, reason: error.reason, in_flight: error.in_flight, planned: @planned,
+                           counts: counts, score: error.results.empty? ? nil : Reporter::Terminal.score(counts))
+      EXIT_CODES.fetch(error.reason)
     end
 
     # A scoped run that plans nothing must not report "100%" and pass --fail-at:

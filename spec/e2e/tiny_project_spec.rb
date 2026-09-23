@@ -1,5 +1,6 @@
 require "json"
 require "open3"
+require "timeout"
 require "fileutils"
 
 RSpec.describe "tiny_project end-to-end", :e2e do
@@ -40,6 +41,32 @@ RSpec.describe "tiny_project end-to-end", :e2e do
     expect(uncovered.map { |r| r["subject"] }.uniq).to eq(["Calculator#untested_helper"])
 
     expect(status.exitstatus).to eq(1) # survivors present
+  end
+
+  it "exits 143 on SIGTERM mid-run and names what was in flight" do
+    Bundler.with_unbundled_env do
+      Open3.popen3({ "BUNDLE_GEMFILE" => File.join(root, "Gemfile") },
+                   "bundle", "exec", "active_mutator", "lib", "--diagnostics", "--jobs", "1",
+                   chdir: root) do |stdin, stdout, stderr, wait|
+        stdin.close
+        drain = Thread.new { stdout.read }
+        drain.report_on_exception = false # popen3 closes stdout under it if the spec fails early
+        seen = +""
+        Timeout.timeout(120) do
+          until seen.include?("] mutant start #")
+            line = stderr.gets or raise "active_mutator exited before any mutant started:\n#{seen}"
+            seen << line
+          end
+        end
+        Process.kill("TERM", wait.pid)
+        seen << stderr.read
+        drain.join
+
+        expect(wait.value.exitstatus).to eq(143), seen
+        expect(seen).to match(/\] abort sigterm; in flight: /)
+        expect(seen).not_to include("] phase mutating end")
+      end
+    end
   end
 
   it "finds specs under test/ with --spec-path" do
