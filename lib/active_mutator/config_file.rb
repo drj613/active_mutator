@@ -27,7 +27,8 @@ module ActiveMutator
       "class_level" => :boolean,
       "class_level_closure_cap" => :positive_integer,
       "allow_empty" => :boolean,
-      "diagnostics" => :boolean
+      "diagnostics" => :boolean,
+      "events_file" => :string
     }.freeze
 
     def self.load(root)
@@ -73,6 +74,9 @@ module ActiveMutator
           raise Error, "#{FILENAME}: format must be one of #{FORMATS.join(", ")}"
         end
         value.tr("-", "_").to_sym
+      when :string
+        raise Error, "#{FILENAME}: #{key} must be a string" unless value.is_a?(String)
+        value
       when :string_list
         unless value.is_a?(Array) && value.all?(String)
           raise Error, "#{FILENAME}: #{key} must be a list of strings"

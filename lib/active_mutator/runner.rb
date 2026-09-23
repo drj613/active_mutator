@@ -17,53 +17,10 @@ module ActiveMutator
     end
 
     def call
-      @events.phase(:boot) { boot! }
-      discovery, analyses = @events.phase(:planning) do
-        found = discover
-        [found, found.subjects.map { |s| Engine.new.analyze(s) }]
-      end
-      subjects = discovery.subjects
-      mutations = analyses.flat_map(&:mutations)
-      mutations = mutations.first(@config.max_mutants) if @config.max_mutants
-      invalid_count = analyses.sum(&:invalid_count)
-      # Decide emptiness before the baseline: a scoped run that plans nothing
-      # has no use for a coverage map, and building one spawns the whole spec
-      # suite (#47).
-      if mutations.empty? && (@config.since || @config.subject_filter)
-        return debug_plan([], []) if @config.debug_plan
-
-        return empty_plan_exit(invalid_count, discovery)
-      end
-
-      map = Baseline.new(root: @config.root, spec_paths: @config.spec_paths, events: @events)
-              .coverage_map(force: @config.force_baseline)
-      @reporter.coverage_map = map if @reporter.respond_to?(:coverage_map=)
-
-      fingerprints = Fingerprint.for_mutations(mutations, root: @config.root)
-      ledger = AcceptedLedger.load(@config.root)
-      scanned_files = prune_scope(subjects)
-      warn_stale(ledger, fingerprints.values, scanned_files)
-
-      items, pre_results, phase1_ids = plan_work(mutations, map, ledger: ledger, fingerprints: fingerprints)
-      return debug_plan(items, pre_results) if @config.debug_plan
-
-      results = @events.phase(:mutating, mutants: items.size) do
-        pre_results.each { |r| @reporter.on_result(r) }
-        calibrators = if @config.adaptive_timeout
-                        { parallel: TimeoutCalibrator.new, serial: TimeoutCalibrator.new }
-                      end
-        scheduler = Scheduler.new(jobs: @config.jobs, on_result: @reporter.method(:on_result),
-                                  calibrators: calibrators, events: @events)
-        scheduler.run(items) + pre_results
-      end
-      # Phase 2 runs on its own scheduler (built lazily inside), so pass nil.
-      results = escalate_class_body_survivors(results, nil, map, phase1_ids: phase1_ids)
-
-      @events.phase(:reporting) do
-        accept_survivors!(ledger, results, fingerprints, scanned_files) if @config.accept_survivors
-        @reporter.summary(results, invalid_count: invalid_count)
-      end
-      exit_code(results)
+      events_file = open_events_file
+      run
+    ensure
+      events_file&.close
     end
 
     # Returns [work_items, pre_results, phase1_ids]. phase1_ids maps each
@@ -162,6 +119,56 @@ module ActiveMutator
     end
 
     private
+
+    def run
+      @events.phase(:boot) { boot! }
+      discovery, analyses = @events.phase(:planning) do
+        found = discover
+        [found, found.subjects.map { |s| Engine.new.analyze(s) }]
+      end
+      subjects = discovery.subjects
+      mutations = analyses.flat_map(&:mutations)
+      mutations = mutations.first(@config.max_mutants) if @config.max_mutants
+      invalid_count = analyses.sum(&:invalid_count)
+      # Decide emptiness before the baseline: a scoped run that plans nothing
+      # has no use for a coverage map, and building one spawns the whole spec
+      # suite (#47).
+      if mutations.empty? && (@config.since || @config.subject_filter)
+        return debug_plan([], []) if @config.debug_plan
+
+        return empty_plan_exit(invalid_count, discovery)
+      end
+
+      map = Baseline.new(root: @config.root, spec_paths: @config.spec_paths, events: @events)
+              .coverage_map(force: @config.force_baseline)
+      @reporter.coverage_map = map if @reporter.respond_to?(:coverage_map=)
+
+      fingerprints = Fingerprint.for_mutations(mutations, root: @config.root)
+      ledger = AcceptedLedger.load(@config.root)
+      scanned_files = prune_scope(subjects)
+      warn_stale(ledger, fingerprints.values, scanned_files)
+
+      items, pre_results, phase1_ids = plan_work(mutations, map, ledger: ledger, fingerprints: fingerprints)
+      return debug_plan(items, pre_results) if @config.debug_plan
+
+      results = @events.phase(:mutating, mutants: items.size) do
+        pre_results.each { |r| @reporter.on_result(r) }
+        calibrators = if @config.adaptive_timeout
+                        { parallel: TimeoutCalibrator.new, serial: TimeoutCalibrator.new }
+                      end
+        scheduler = Scheduler.new(jobs: @config.jobs, on_result: @reporter.method(:on_result),
+                                  calibrators: calibrators, events: @events)
+        scheduler.run(items) + pre_results
+      end
+      # Phase 2 runs on its own scheduler (built lazily inside), so pass nil.
+      results = escalate_class_body_survivors(results, nil, map, phase1_ids: phase1_ids)
+
+      @events.phase(:reporting) do
+        accept_survivors!(ledger, results, fingerprints, scanned_files) if @config.accept_survivors
+        @reporter.summary(results, invalid_count: invalid_count)
+      end
+      exit_code(results)
+    end
 
     # A scoped run that plans nothing must not report "100%" and pass --fail-at:
     # the usual cause is a --since range or --subject filter that matched no
@@ -297,6 +304,17 @@ module ActiveMutator
       rel = file.delete_prefix(@config.root.chomp("/") + "/").delete_suffix(".rb")
       rest = rel.sub(%r{\A[^/]+/}, "")
       @config.spec_paths.map { |sp| "#{sp}/#{rest}_spec.rb" }
+    end
+
+    # Opened per call, not per Runner, so the file is closed on every exit.
+    def open_events_file
+      return unless @config.events_file
+
+      file = File.open(File.expand_path(@config.events_file, @config.root), "w")
+      @events.subscribe(Diagnostics::Ndjson.new(file))
+      file
+    rescue SystemCallError => e
+      raise Error, "cannot write --events file: #{e.message}"
     end
 
     def build_events

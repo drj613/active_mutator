@@ -301,7 +301,8 @@ projects used to tell a docs-only PR from a broken `--since` range.
 | `--require FILE` | none | preload files (repeatable) |
 | `--operator FILE` | none | load a custom operator file before analysis (repeatable) |
 | `--[no-]class-level` | on | mutate class-level code (macros, constants, DSL/scope lambdas) via class-body subjects |
-| `--diagnostics` | off | print timestamped phase, mutant, and memory lines to stderr, for finding out where a CI run died |
+| `--diagnostics` | off | print timestamped phase, mutant, and memory lines to stderr, for finding out where a CI run died (see [Run diagnostics](docs/guides/diagnostics.md)) |
+| `--events FILE` | none | write the same events as NDJSON, one object per line, flushed as they happen |
 | `--fail-at SCORE` | none (strict) | exit 0 if score >= SCORE even with survivors (opt-in relaxation for gradual adoption; 0 = report-only) |
 
 `--spec-path` tells active_mutator where spec files live (coverage
@@ -340,7 +341,8 @@ replaces the default `spec`),
 `class_level` (`true`/`false`, default `true` — mutate class-level code),
 `class_level_closure_cap` (integer, default `10` — max constants a
 class-body mutant may reload before it is `skipped`),
-`diagnostics` (`true`/`false`, default `false`).
+`diagnostics` (`true`/`false`, default `false`),
+`events_file` (a path).
 Unknown keys and wrong types are errors, not silent no-ops.
 
 ```yaml
@@ -427,6 +429,9 @@ remaining limits are:
 - [Operator reference](docs/guides/operators.md): every mutation
   active_mutator can generate, with before/after examples and what a
   survivor of each one means.
+- [Run diagnostics](docs/guides/diagnostics.md): `--diagnostics` and
+  `--events`. Find the phase and mutants a dying CI run was in, and the
+  `--events` NDJSON schema.
 - [Custom operators](docs/guides/custom-operators.md): write and load your
   own mutation operators with `--operator` / the `operators:` config key.
 - [Mutation-check skill](docs/skills/mutation-check.md): the agent-facing

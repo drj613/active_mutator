@@ -219,6 +219,27 @@ RSpec.describe ActiveMutator::Runner do
       end
     end
 
+    it "writes every event to the --events file, relative to the root, and closes it" do
+      Dir.mktmpdir do |dir|
+        runner = stub_runner(config.with(root: dir, events_file: "run.ndjson"))
+        allow(ActiveMutator::Scheduler).to receive(:new).and_return(instance_double(ActiveMutator::Scheduler, run: []))
+        opened = nil
+        allow(File).to receive(:open).and_wrap_original { |orig, *args| opened = orig.call(*args) }
+
+        runner.call
+
+        lines = File.readlines(File.join(dir, "run.ndjson")).map { |l| JSON.parse(l) }
+        expect(lines.map { |l| [l["event"], l["phase"]] }.first(2)).to eq([%w[phase_start boot], %w[phase_end boot]])
+        expect(lines.map { |l| l["v"] }.uniq).to eq([1])
+        expect(opened).to be_closed
+      end
+    end
+
+    it "reports an unwritable --events file as a usage error" do
+      runner = stub_runner(config.with(events_file: "/nonexistent/dir/run.ndjson"))
+      expect { runner.call }.to raise_error(ActiveMutator::Error, /\Acannot write --events file: No such file or directory/)
+    end
+
     it "sets ClosureReload.cap from config before scheduling (forks inherit it)" do
       original_cap = ActiveMutator::ClosureReload.cap
       runner = stub_runner(config.with(class_level_closure_cap: 42))

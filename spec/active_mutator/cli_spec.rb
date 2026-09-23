@@ -111,6 +111,7 @@ RSpec.describe ActiveMutator::CLI do
         "Deterministically sample the first N mutants",
         "Print the planned mutant list as JSON and exit",
         "Print phase, mutant, and memory lines to stderr",
+        "Write run events to FILE as NDJSON, one object per line",
         "Exit 0 when --since/--subject plan no mutants and the --since diff changed no code " \
         "in a mutable source file (default: exit 1)"
       ].each { |desc| expect(help).to include(desc) }
@@ -238,6 +239,11 @@ RSpec.describe ActiveMutator::CLI do
       expect(described_class.parse(["--no-class-level"]).class_level).to be(false)
     end
 
+    it "takes an --events file, none by default" do
+      expect(described_class.parse([]).events_file).to be_nil
+      expect(described_class.parse(%w[--events tmp/run.ndjson]).events_file).to eq("tmp/run.ndjson")
+    end
+
     it "defaults diagnostics off and turns it on with --diagnostics" do
       expect(described_class.parse([]).diagnostics).to be(false)
       expect(described_class.parse(["--diagnostics"]).diagnostics).to be(true)
@@ -290,6 +296,11 @@ RSpec.describe ActiveMutator::CLI do
 
     it "works with no config file present" do
       expect(described_class.parse([]).fail_at).to be_nil
+    end
+
+    it "reads events_file from the config file" do
+      File.write(".active_mutator.yml", "events_file: tmp/run.ndjson\n")
+      expect(described_class.parse([]).events_file).to eq("tmp/run.ndjson")
     end
 
     it "reads diagnostics from the config file" do

@@ -213,6 +213,13 @@ RSpec.describe ActiveMutator::ConfigFile do
     expect { described_class.load(root) }.to raise_error(ActiveMutator::Error, /requires must be a list of strings/)
   end
 
+  it "accepts a string events_file and rejects anything else" do
+    write_config("events_file: tmp/run.ndjson\n")
+    expect(described_class.load(root)).to eq(events_file: "tmp/run.ndjson")
+    write_config("events_file: 3\n")
+    expect { described_class.load(root) }.to raise_error(ActiveMutator::Error, ".active_mutator.yml: events_file must be a string")
+  end
+
   it "rejects a non-boolean class_level" do
     write_config("class_level: 1\n")
     expect { described_class.load(root) }.to raise_error(ActiveMutator::Error, /class_level must be true or false/)
