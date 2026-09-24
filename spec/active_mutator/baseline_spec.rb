@@ -269,6 +269,17 @@ RSpec.describe ActiveMutator::Baseline do
         expect(baseline.child_pid).to be_nil
       end
 
+      # Only a wait that ends early kills the group. A suite that finished
+      # on its own is left alone.
+      it "sends no signal to a child that exited on its own" do
+        fake_command({})
+        allow(Process).to receive(:kill).and_call_original
+
+        baseline.coverage_map
+
+        expect(Process).not_to have_received(:kill)
+      end
+
       it "polls the child gently instead of spinning" do
         pid = Process.spawn("ruby", "-e", "sleep 0.3")
         polls = 0
