@@ -170,13 +170,22 @@ module ActiveMutator
       items, pre_results, phase1_ids = plan_work(mutations, map, ledger: ledger, fingerprints: fingerprints)
       return debug_plan(items, pre_results) if @config.debug_plan
 
-      results = @events.phase(:mutating, mutants: items.size) { mutate(items, pre_results) }
-      # Phase 2 runs on its own scheduler (built lazily inside), so pass nil.
-      results = escalate_class_body_survivors(results, nil, map, phase1_ids: phase1_ids)
+      # From here on a trip only records its reason. Raised at once, it could
+      # land between two steps (the sample as mutating ends, the spec reads
+      # before escalation) and drop every finished verdict. Each step checks
+      # the flag instead and raises with the results it has.
+      results = @abort.deferred do
+        done = @events.phase(:mutating, mutants: items.size) { mutate(items, pre_results) }
+        stop_if_tripped!(done)
+        # Phase 2 runs on its own scheduler (built lazily inside), so pass nil.
+        done = escalate_class_body_survivors(done, nil, map, phase1_ids: phase1_ids)
+        stop_if_tripped!(done)
 
-      reporting(results) do
-        accept_survivors!(ledger, results, fingerprints, scanned_files) if @config.accept_survivors
-        @reporter.summary(results, invalid_count: @invalid_count)
+        reporting(done) do
+          accept_survivors!(ledger, done, fingerprints, scanned_files) if @config.accept_survivors
+          @reporter.summary(done, invalid_count: @invalid_count)
+        end
+        done
       end
       exit_code(results)
     end

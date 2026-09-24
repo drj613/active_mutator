@@ -1,5 +1,6 @@
 require "tmpdir"
 require "fileutils"
+require "timeout"
 
 RSpec.describe ActiveMutator::Runner do
   let(:config) do
@@ -297,9 +298,13 @@ RSpec.describe ActiveMutator::Runner do
 
       { "TERM" => [:sigterm, 143], "INT" => [:sigint, 130] }.each do |sig, (reason, code)|
         it "exits #{code} on SIG#{sig}, emitting abort and leaving the phase open" do
+          # Like the real scheduler: the trap only trips the flag, and the
+          # poll loop raises.
           runner = aborting_runner do
+            flag = runner.instance_variable_get(:@abort)
             Process.kill(sig, Process.pid)
-            sleep 5
+            Timeout.timeout(5) { sleep 0.01 until flag.tripped? }
+            raise ActiveMutator::Aborted, flag.reason
           end
 
           expect(runner.call).to eq(code)
@@ -417,6 +422,33 @@ RSpec.describe ActiveMutator::Runner do
 
         expect(runner.call).to eq(3)
         expect(summaries).to eq([[[], { invalid_count: 0 }]])
+      end
+
+      it "keeps the finished results when the flag trips as the mutating phase ends" do
+        killed = ActiveMutator::Result.new(mutation: mutation, status: :killed, details: nil)
+        runner = aborting_runner { [killed] }
+        bus.subscribe do |e|
+          next unless e.type == :phase_end && e.fields[:phase] == :mutating
+
+          runner.instance_variable_get(:@abort).trip!(:memory_ceiling)
+        end
+
+        expect(runner.call).to eq(3)
+        expect(summaries).to eq([[[killed], { invalid_count: 0,
+                                              aborted: { reason: :memory_ceiling, in_flight: [], planned: 0 } }]])
+      end
+
+      it "keeps the phase-1 results when the flag trips while escalation is planned" do
+        survived = ActiveMutator::Result.new(mutation: mutation, status: :survived, details: nil)
+        runner = aborting_runner { [survived] }
+        allow(runner).to receive(:escalate_class_body_survivors) do |results, *|
+          runner.instance_variable_get(:@abort).trip!(:sigint)
+          results
+        end
+
+        expect(runner.call).to eq(130)
+        expect(summaries).to eq([[[survived], { invalid_count: 0,
+                                                aborted: { reason: :sigint, in_flight: [], planned: 0 } }]])
       end
 
       it "prints no second summary when the abort lands after the report" do
