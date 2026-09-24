@@ -71,6 +71,20 @@
   },
   {
     "file": "lib/active_mutator/scheduler.rb",
+    "subject": "ActiveMutator::Scheduler#run_pool",
+    "description": "force condition to `true`",
+    "original_snippet": "running.empty?",
+    "ordinal": 0
+  },
+  {
+    "file": "lib/active_mutator/scheduler.rb",
+    "subject": "ActiveMutator::Scheduler#run_pool",
+    "description": "delete `sleep 0.02 unless running.empty?`",
+    "original_snippet": "sleep 0.02 unless running.empty?",
+    "ordinal": 0
+  },
+  {
+    "file": "lib/active_mutator/scheduler.rb",
     "subject": "ActiveMutator::Scheduler#abort_if_orphaned!",
     "description": "delete `running.clear`",
     "original_snippet": "running.clear",
