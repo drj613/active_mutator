@@ -239,6 +239,22 @@ RSpec.describe ActiveMutator::Baseline do
         expect(child_argv).to eq(["spec/b_spec.rb"])
       end
 
+      # --max-rss sizes each parse at coverage_load's start, so the partial
+      # output gets its own.
+      it "sizes the partial output before parsing it, in its own coverage_load" do
+        write_cache(baseline.send(:current_digests))
+        File.write(File.join(@tmp, "spec/b_spec.rb"), "RSpec.describe(A) { it { A.new.x } }\n")
+        fake_command({})
+
+        baseline.coverage_map
+
+        expect(seen.map { |(type, fields)| [fields[:phase], type] })
+          .to eq([%i[coverage_load phase_start], %i[coverage_load phase_end],
+                  %i[baseline phase_start], %i[baseline phase_end],
+                  %i[coverage_load phase_start], %i[coverage_load phase_end]])
+        expect(seen[4].last[:bytes]).to eq(JSON.generate("version" => 2, "records" => {}).bytesize)
+      end
+
       it "exposes the child's pid while it runs, and clears it after" do
         fake_command({})
         during = nil

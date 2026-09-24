@@ -121,8 +121,9 @@ are what survives.
 | `reporting` | the reporter's summary, and `--accept-survivors` |
 
 A cached run has no `baseline` phase, only `coverage_load`. A partial
-refresh reads the old cache, runs a `partial` baseline, and writes the
-merged file without reading it back.
+refresh reads the old cache, runs a `partial` baseline, reads its output
+in a second `coverage_load`, and writes the merged file without reading
+it back.
 
 ## The `--events` schema (v1)
 

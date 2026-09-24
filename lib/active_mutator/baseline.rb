@@ -92,10 +92,11 @@ module ActiveMutator
 
     # Its own phase, apart from the child's run: 0.6.0 died here, in the
     # parent reading a huge file back. The size goes out BEFORE the parse, so
-    # the log names the cause even if nothing runs after it.
-    def load_payload
-      @events.emit(:phase_start, phase: :coverage_load, bytes: File.size(@out_path))
-      data = JSON.parse(File.read(@out_path))
+    # the log names the cause even if nothing runs after it, and --max-rss
+    # can stop the run before the parse.
+    def load_payload(path = @out_path)
+      @events.emit(:phase_start, phase: :coverage_load, bytes: File.size(path))
+      data = JSON.parse(File.read(path))
       @events.emit(:phase_end, phase: :coverage_load, examples: data.fetch("records", {}).size)
       data
     end
@@ -198,7 +199,7 @@ module ActiveMutator
         raise BaselineFailed, "partial baseline run failed, fix the suite before mutating" unless ok
         raise BaselineFailed, "partial baseline produced no output" unless File.exist?(partial_out)
 
-        part = JSON.parse(File.read(partial_out))
+        part = load_payload(partial_out)
         verify_complete!(part)
       end
       merge_partial!(cache, part, delta)
