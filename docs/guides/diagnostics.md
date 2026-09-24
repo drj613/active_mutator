@@ -94,8 +94,9 @@ exits. CI runners give only a few seconds between SIGTERM and SIGKILL, so
 nothing on this path waits. The reporter still prints its summary for the
 mutants that finished, marked as partial: a `Partial mutation score:`
 line in the terminal, and `"complete": false` in `--format json`. A
-signal that lands once the report has started doesn't cut it short: the
-report finishes, and no second one is printed.
+signal or breach that lands once the report has started doesn't cut it
+short: the report finishes, no second one is printed, and the run still
+exits with the code below.
 
 | Reason | Exit |
 |---|---|

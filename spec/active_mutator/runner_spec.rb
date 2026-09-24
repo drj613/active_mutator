@@ -395,7 +395,7 @@ RSpec.describe ActiveMutator::Runner do
         end
       end
 
-      it "lets the report finish when a signal lands during it, printing it once" do
+      it "lets the report finish when a signal lands during it, printing it once, then exits as aborted" do
         runner = aborting_runner { [] }
         allow(reporter).to receive(:summary).and_wrap_original do |orig, *args, **kw|
           Process.kill("TERM", Process.pid)
@@ -403,7 +403,19 @@ RSpec.describe ActiveMutator::Runner do
           orig.call(*args, **kw)
         end
 
-        expect(runner.call).to eq(0)
+        expect(runner.call).to eq(143)
+        expect(summaries).to eq([[[], { invalid_count: 0 }]])
+        expect(abort_event).to include(reason: :sigterm)
+      end
+
+      it "exits 3 when the memory ceiling trips during the report" do
+        runner = aborting_runner { [] }
+        allow(reporter).to receive(:summary).and_wrap_original do |orig, *args, **kw|
+          runner.instance_variable_get(:@abort).trip!(:memory_ceiling)
+          orig.call(*args, **kw)
+        end
+
+        expect(runner.call).to eq(3)
         expect(summaries).to eq([[[], { invalid_count: 0 }]])
       end
 

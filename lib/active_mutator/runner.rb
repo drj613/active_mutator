@@ -174,7 +174,7 @@ module ActiveMutator
       # Phase 2 runs on its own scheduler (built lazily inside), so pass nil.
       results = escalate_class_body_survivors(results, nil, map, phase1_ids: phase1_ids)
 
-      reporting do
+      reporting(results) do
         accept_survivors!(ledger, results, fingerprints, scanned_files) if @config.accept_survivors
         @reporter.summary(results, invalid_count: @invalid_count)
       end
@@ -206,12 +206,18 @@ module ActiveMutator
 
     # No --accept-survivors here: a partial run must not rewrite the ledger.
     # Once the report starts, a signal only records its reason: the report
-    # finishes, and `--format json` stays one document.
-    def reporting(&)
+    # finishes, and `--format json` stays one document. The run still exits
+    # as aborted, so a memory breach or a CI cancel never passes.
+    def reporting(results = [], &)
       @abort.deferred do
         @reported = true
         @events.phase(:reporting, &)
       end
+      stop_if_tripped!(results)
+    end
+
+    def stop_if_tripped!(results)
+      raise Aborted.new(@abort.reason, results: results) if @abort.tripped?
     end
 
     # No summary if the full one already went out: a signal landing after
