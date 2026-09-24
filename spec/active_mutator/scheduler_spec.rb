@@ -217,6 +217,17 @@ RSpec.describe ActiveMutator::Scheduler do
       end
     end
 
+    it "stops filling the pool when the flag trips between two spawns" do
+      sched = described_class.new(jobs: 3, worker: ->(_m, _e, _w) { sleep 30 }, abort: flag)
+      allow(sched).to receive(:spawn).and_wrap_original do |orig, *args|
+        orig.call(*args).tap { flag.trip!(:sigterm) }
+      end
+
+      expect { Timeout.timeout(5) { sched.run([work, work, work]) } }
+        .to raise_error(ActiveMutator::Aborted) { |e| expect(e.in_flight.size).to eq(1) }
+      expect(sched).to have_received(:spawn).once
+    end
+
     it "spawns nothing when the flag tripped before the run" do
       flag.deferred { flag.trip!(:sigint) }
       spawned = false

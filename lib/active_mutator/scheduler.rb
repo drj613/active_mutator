@@ -46,7 +46,8 @@ module ActiveMutator
       until queue.empty? && running.empty?
         abort_if_orphaned!(running)
         abort!(running, results) if @abort.tripped?
-        spawn(queue.shift, running) while running.size < width && !queue.empty?
+        # A trip mid-fill stops the forking; the next pass kills what started.
+        spawn(queue.shift, running) while running.size < width && !queue.empty? && !@abort.tripped?
         reap(running, results)
         sleep 0.02 unless running.empty?
       end
