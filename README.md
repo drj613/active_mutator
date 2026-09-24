@@ -127,12 +127,26 @@ Each character on the progress line is one mutant, printed as it finishes:
 | `A` | `accepted` | matches a known-equivalent entry in the acceptance ledger. Excluded from the score |
 
 `invalid` mutants (edits that don't even re-parse as valid Ruby) are
-discarded before scheduling and reported as a count only. Exit code is `1`
-if unaccepted survivors or errors exist (or, with `--fail-at`, if the score
-is below the threshold), `0` otherwise, including when there are only
-`uncovered` or `accepted` results. The JSON report's `exit_reason` field
-(`unaccepted_survivors`, `worker_errors`, `clean`, `empty_plan`) is
-independent of the `--fail-at` gate. A `--since` or `--subject` run that
+discarded before scheduling and reported as a count only.
+
+| Exit | When |
+|---|---|
+| `0` | no unaccepted survivors or errors (only `uncovered` or `accepted` results count as clean), or the score meets `--fail-at` |
+| `1` | unaccepted survivors or errors (with `--fail-at`, only when the score is below it), or an empty plan (below) |
+| `2` | a usage or setup problem: a bad flag or config file, or a red baseline suite |
+| `3` | the run reached `--max-rss` and stopped |
+| `130` | the run was stopped by SIGINT (Ctrl-C) |
+| `143` | the run was stopped by SIGTERM (130 before 0.7.0) |
+
+A stopped run (`3`, `130`, `143`) kills its child processes, prints the
+summary for the mutants that finished with a `Partial mutation score:`
+line in place of `Mutation score:`, and never passes, whatever `--fail-at`
+says. See [Run diagnostics](docs/guides/diagnostics.md#aborted-runs).
+
+The JSON report's `exit_reason` field (`unaccepted_survivors`,
+`worker_errors`, `clean`, `empty_plan`, and for a stopped run `interrupted`
+or `memory_ceiling`) is independent of the `--fail-at` gate. `complete` is
+`false` only for a stopped run. A `--since` or `--subject` run that
 plans zero mutants skips the baseline, prints the usual count block with
 every status at `0` and no `Mutation score:` line (JSON: `score` is `null`,
 `exit_reason` is `empty_plan`), then warns with the cause and exits `1`
@@ -301,6 +315,10 @@ projects used to tell a docs-only PR from a broken `--since` range.
 | `--require FILE` | none | preload files (repeatable) |
 | `--operator FILE` | none | load a custom operator file before analysis (repeatable) |
 | `--[no-]class-level` | on | mutate class-level code (macros, constants, DSL/scope lambdas) via class-body subjects |
+| `--diagnostics` | off | print timestamped phase, mutant, and memory lines to stderr, for finding out where a CI run died (see [Run diagnostics](docs/guides/diagnostics.md)) |
+| `--events FILE` | none | write the same events as NDJSON, one object per line, flushed as they happen |
+| `--sample-interval S` | 5 | seconds between memory samples with `--diagnostics`, `--events`, or `--max-rss` |
+| `--max-rss SIZE` | none | stop the run and exit 3 when the gem's total memory reaches SIZE (`6G`, `6144M`, or plain MB); warns once at 90% |
 | `--fail-at SCORE` | none (strict) | exit 0 if score >= SCORE even with survivors (opt-in relaxation for gradual adoption; 0 = report-only) |
 
 `--spec-path` tells active_mutator where spec files live (coverage
@@ -338,7 +356,10 @@ replaces the default `spec`),
 `adaptive_timeout` (`true`/`false`),
 `class_level` (`true`/`false`, default `true` — mutate class-level code),
 `class_level_closure_cap` (integer, default `10` — max constants a
-class-body mutant may reload before it is `skipped`).
+class-body mutant may reload before it is `skipped`),
+`diagnostics` (`true`/`false`, default `false`),
+`events_file` (a path), `sample_interval` (seconds, default `5`),
+`max_rss` (a size like `6G`, `6144M`, or plain MB).
 Unknown keys and wrong types are errors, not silent no-ops.
 
 ```yaml
@@ -425,6 +446,10 @@ remaining limits are:
 - [Operator reference](docs/guides/operators.md): every mutation
   active_mutator can generate, with before/after examples and what a
   survivor of each one means.
+- [Run diagnostics](docs/guides/diagnostics.md): `--diagnostics`,
+  `--events`, and `--max-rss`. Find the phase and mutants a dying CI run
+  was in, stop a run before it runs out of memory, and the `--events`
+  NDJSON schema.
 - [Custom operators](docs/guides/custom-operators.md): write and load your
   own mutation operators with `--operator` / the `operators:` config key.
 - [Mutation-check skill](docs/skills/mutation-check.md): the agent-facing

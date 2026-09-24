@@ -1,5 +1,6 @@
 require "tmpdir"
 require "fileutils"
+require "timeout"
 
 RSpec.describe ActiveMutator::Runner do
   let(:config) do
@@ -186,6 +187,75 @@ RSpec.describe ActiveMutator::Runner do
       runner.call
     end
 
+    it "brackets each step of the run in a phase" do
+      seen = []
+      bus = ActiveMutator::Events.new.subscribe { |e| seen << [e.type, e.fields] }
+      runner = described_class.new(config, reporter: reporter, events: bus)
+      allow(runner).to receive(:preload!)
+      allow(runner).to receive(:preload_spec_helper!)
+      allow(runner).to receive(:discover).and_return(discovery([]))
+      allow(ActiveMutator::Baseline).to receive(:new).and_return(
+        instance_double(ActiveMutator::Baseline, coverage_map: instance_double(ActiveMutator::CoverageMap))
+      )
+      allow(ActiveMutator::Scheduler).to receive(:new).and_return(instance_double(ActiveMutator::Scheduler, run: []))
+
+      runner.call
+
+      expect(seen.reject { |(type, _)| type == :memory }).to eq([
+                           [:phase_start, { phase: :boot }], [:phase_end, { phase: :boot }],
+                           [:phase_start, { phase: :planning }], [:phase_end, { phase: :planning }],
+                           [:phase_start, { phase: :mutating, mutants: 0 }], [:phase_end, { phase: :mutating }],
+                           [:phase_start, { phase: :reporting }], [:phase_end, { phase: :reporting }]
+                         ])
+      expect(ActiveMutator::Baseline).to have_received(:new).with(hash_including(events: bus))
+      expect(ActiveMutator::Scheduler).to have_received(:new).with(hash_including(events: bus))
+    end
+
+    it "prints diagnostic lines to stderr with --diagnostics, and none without" do
+      [true, false].each do |on|
+        runner = stub_runner(config.with(diagnostics: on))
+        allow(ActiveMutator::Scheduler).to receive(:new).and_return(instance_double(ActiveMutator::Scheduler, run: []))
+        expectation = output(on ? /\] phase boot start\n/ : /phase/).to_stderr_from_any_process
+        on ? expect { runner.call }.to(expectation) : expect { runner.call }.not_to(expectation)
+      end
+    end
+
+    it "writes every event to the --events file, relative to the root, and closes it" do
+      Dir.mktmpdir do |dir|
+        runner = stub_runner(config.with(root: dir, events_file: "run.ndjson"))
+        allow(ActiveMutator::Scheduler).to receive(:new).and_return(instance_double(ActiveMutator::Scheduler, run: []))
+        opened = nil
+        allow(File).to receive(:open).and_wrap_original { |orig, *args| opened = orig.call(*args) }
+
+        runner.call
+
+        lines = File.readlines(File.join(dir, "run.ndjson")).map { |l| JSON.parse(l) }
+        expect(lines.map { |l| [l["event"], l["phase"]] }.first(3))
+          .to eq([%w[phase_start boot], ["memory", nil], %w[phase_end boot]]) # a sample at each boundary
+        expect(lines.map { |l| l["v"] }.uniq).to eq([1])
+        expect(opened).to be_closed
+      end
+    end
+
+    it "reports an unwritable --events file as a usage error" do
+      runner = stub_runner(config.with(events_file: "/nonexistent/dir/run.ndjson"))
+      expect { runner.call }.to raise_error(ActiveMutator::Error, /\Acannot write --events file: No such file or directory/)
+    end
+
+    it "samples memory only when something reads the samples, and stops the sampler after" do
+      sampler = instance_double(ActiveMutator::Sampler, call: nil, stop: nil)
+      allow(sampler).to receive(:start).and_return(sampler)
+      allow(ActiveMutator::Sampler).to receive(:new).and_return(sampler)
+      allow(ActiveMutator::Scheduler).to receive(:new).and_return(instance_double(ActiveMutator::Scheduler, run: []))
+
+      stub_runner(config).call
+      expect(ActiveMutator::Sampler).not_to have_received(:new)
+
+      expect { stub_runner(config.with(diagnostics: true, sample_interval: 0.5)).call }.to output.to_stderr_from_any_process
+      expect(ActiveMutator::Sampler).to have_received(:new).with(events: kind_of(ActiveMutator::Events), interval: 0.5)
+      expect(sampler).to have_received(:stop)
+    end
+
     it "sets ClosureReload.cap from config before scheduling (forks inherit it)" do
       original_cap = ActiveMutator::ClosureReload.cap
       runner = stub_runner(config.with(class_level_closure_cap: 42))
@@ -195,6 +265,235 @@ RSpec.describe ActiveMutator::Runner do
       expect(ActiveMutator::ClosureReload.cap).to eq(42)
     ensure
       ActiveMutator::ClosureReload.cap = original_cap
+    end
+
+    describe "aborting" do
+      let(:seen) { [] }
+      let(:bus) { ActiveMutator::Events.new.subscribe { |e| seen << [e.type, e.fields] } }
+
+      let(:summaries) { [] }
+      let(:reporter) do
+        calls = summaries
+        r = Object.new
+        r.define_singleton_method(:on_result) { |_| nil }
+        r.define_singleton_method(:summary) { |results, **kw| calls << [results, kw] }
+        r
+      end
+
+      def aborting_runner(&run)
+        runner = described_class.new(config, reporter: reporter, events: bus)
+        allow(runner).to receive(:preload!)
+        allow(runner).to receive(:preload_spec_helper!)
+        allow(runner).to receive(:discover).and_return(discovery([]))
+        allow(ActiveMutator::Baseline).to receive(:new).and_return(
+          instance_double(ActiveMutator::Baseline, coverage_map: instance_double(ActiveMutator::CoverageMap))
+        )
+        scheduler = instance_double(ActiveMutator::Scheduler)
+        allow(scheduler).to receive(:run, &run)
+        allow(ActiveMutator::Scheduler).to receive(:new).and_return(scheduler)
+        runner
+      end
+
+      def abort_event = seen.find { |(type, _)| type == :abort }&.last
+
+      { "TERM" => [:sigterm, 143], "INT" => [:sigint, 130] }.each do |sig, (reason, code)|
+        it "exits #{code} on SIG#{sig}, emitting abort and leaving the phase open" do
+          # Like the real scheduler: the trap only trips the flag, and the
+          # poll loop raises.
+          runner = aborting_runner do
+            flag = runner.instance_variable_get(:@abort)
+            Process.kill(sig, Process.pid)
+            Timeout.timeout(5) { sleep 0.01 until flag.tripped? }
+            raise ActiveMutator::Aborted, flag.reason
+          end
+
+          expect(runner.call).to eq(code)
+          expect(abort_event).to eq(reason: reason, in_flight: [], planned: 0,
+                                    counts: ActiveMutator::Reporter::Terminal.counts([]), score: nil)
+          expect(summaries).to eq([[[], { invalid_count: 0, aborted: { reason: reason, in_flight: [], planned: 0 } }]])
+          expect(seen.reject { |(type, _)| type == :memory }.last(2).map { |(type, fields)| [type, fields[:phase]] })
+            .to eq([[:phase_start, :mutating], [:abort, nil]])
+        end
+      end
+
+      it "gives the host its own signal handlers back, including an ignored one" do
+        host = proc {}
+        previous_term = trap("TERM", host)
+        previous_int = trap("INT", nil)
+        aborting_runner { [] }.call
+        expect(trap("TERM", previous_term)).to be(host)
+        expect(trap("INT", previous_int)).to be_nil
+      end
+
+      it "hands its one flag to the baseline and the scheduler" do
+        runner = aborting_runner { [] }
+        runner.call
+        flag = runner.instance_variable_get(:@abort)
+        expect(ActiveMutator::Baseline).to have_received(:new).with(hash_including(abort: flag))
+        expect(ActiveMutator::Scheduler).to have_received(:new).with(hash_including(abort: flag))
+      end
+
+      it "exits 3 on a memory ceiling abort, counting what finished plus the pre-resolved mutants" do
+        killed = ActiveMutator::Result.new(mutation: mutation, status: :killed, details: nil)
+        survived = ActiveMutator::Result.new(mutation: mutation, status: :survived, details: nil)
+        uncovered = ActiveMutator::Result.new(mutation: mutation, status: :uncovered, details: nil)
+        in_flight = [{ seq: 3 }]
+        runner = aborting_runner do
+          raise ActiveMutator::Aborted.new(:memory_ceiling, results: [killed, survived], in_flight: in_flight)
+        end
+        allow(runner).to receive(:plan_work).and_return([[], [uncovered], {}])
+
+        expect(runner.call).to eq(3)
+        expect(abort_event).to include(reason: :memory_ceiling, in_flight: in_flight, score: 0.5)
+        expect(abort_event[:counts]).to include(killed: 1, survived: 1, uncovered: 1)
+        expect(summaries).to eq([[[killed, survived, uncovered],
+                                  { invalid_count: 0, aborted: { reason: :memory_ceiling, in_flight: in_flight,
+                                                                 planned: 0 } }]])
+      end
+
+      describe "with --max-rss" do
+        def probe(total_kb)
+          instance_double(ActiveMutator::MemoryProbe, system: nil,
+                                                      processes: { Process.pid => { rss_kb: total_kb, hwm_kb: total_kb,
+                                                                                    pss_kb: total_kb } })
+        end
+
+        def watched_runner(total_kb, **cfg)
+          allow(ActiveMutator::Sampler).to receive(:new).and_wrap_original { |orig, **kw| orig.call(**kw, probe: probe(total_kb)) }
+          runner = aborting_runner { [] }
+          runner.instance_variable_set(:@config, config.with(max_rss: 1000, **cfg))
+          runner
+        end
+
+        it "stops the run with exit 3 at the ceiling, saying so on stderr without --diagnostics" do
+          runner = watched_runner(1000)
+          code = nil
+          expect { code = runner.call }
+            .to output(/\] memory at 100% of --max-rss 1000K \(1000K\); stopping the run\n/).to_stderr_from_any_process
+          expect(code).to eq(3)
+          expect(summaries.last.last[:aborted]).to include(reason: :memory_ceiling)
+        end
+
+        it "warns once at 90% and lets the run finish" do
+          runner = watched_runner(950)
+          code = nil
+          expect { code = runner.call }.to output(/\A[^\n]*\] warn memory at 95% of --max-rss 1000K \(950K\)\n\z/)
+            .to_stderr_from_any_process
+          expect(code).to eq(0)
+        end
+
+        it "prints the warning once with --diagnostics too" do
+          allow(ActiveMutator::Baseline).to receive(:new).and_return(
+            instance_double(ActiveMutator::Baseline, coverage_map: instance_double(ActiveMutator::CoverageMap))
+          )
+          allow(ActiveMutator::Scheduler).to receive(:new).and_return(instance_double(ActiveMutator::Scheduler, run: []))
+          allow(ActiveMutator::Sampler).to receive(:new).and_wrap_original { |orig, **kw| orig.call(**kw, probe: probe(950)) }
+
+          # Built inside the block: the --diagnostics sink holds the $stderr it was built with.
+          expect do
+            runner = described_class.new(config.with(max_rss: 1000, diagnostics: true), reporter: reporter)
+            allow(runner).to receive(:preload!)
+            allow(runner).to receive(:preload_spec_helper!)
+            allow(runner).to receive(:discover).and_return(discovery([]))
+            runner.call
+          end.to output(satisfy { |text| text.scan("warn memory at").size == 1 }).to_stderr
+        end
+      end
+
+      it "lets the report finish when a signal lands during it, printing it once, then exits as aborted" do
+        runner = aborting_runner { [] }
+        allow(reporter).to receive(:summary).and_wrap_original do |orig, *args, **kw|
+          Process.kill("TERM", Process.pid)
+          sleep 0.2 # the trap runs here; it must not interrupt the report
+          orig.call(*args, **kw)
+        end
+
+        expect(runner.call).to eq(143)
+        expect(summaries).to eq([[[], { invalid_count: 0 }]])
+        expect(abort_event).to include(reason: :sigterm)
+      end
+
+      it "exits 3 when the memory ceiling trips during the report" do
+        runner = aborting_runner { [] }
+        allow(reporter).to receive(:summary).and_wrap_original do |orig, *args, **kw|
+          runner.instance_variable_get(:@abort).trip!(:memory_ceiling)
+          orig.call(*args, **kw)
+        end
+
+        expect(runner.call).to eq(3)
+        expect(summaries).to eq([[[], { invalid_count: 0 }]])
+      end
+
+      it "keeps the finished results and skips escalation when the flag trips as the mutating phase ends" do
+        killed = ActiveMutator::Result.new(mutation: mutation, status: :killed, details: nil)
+        runner = aborting_runner { [killed] }
+        bus.subscribe do |e|
+          next unless e.type == :phase_end && e.fields[:phase] == :mutating
+
+          runner.instance_variable_get(:@abort).trip!(:memory_ceiling)
+        end
+        expect(runner).not_to receive(:escalate_class_body_survivors)
+
+        expect(runner.call).to eq(3)
+        expect(summaries).to eq([[[killed], { invalid_count: 0,
+                                              aborted: { reason: :memory_ceiling, in_flight: [], planned: 0 } }]])
+      end
+
+      it "keeps the phase-1 results when the flag trips while escalation is planned" do
+        survived = ActiveMutator::Result.new(mutation: mutation, status: :survived, details: nil)
+        runner = aborting_runner { [survived] }
+        allow(runner).to receive(:escalate_class_body_survivors) do |results, *|
+          runner.instance_variable_get(:@abort).trip!(:sigint)
+          results
+        end
+
+        expect(runner.call).to eq(130)
+        expect(summaries).to eq([[[survived], { invalid_count: 0,
+                                                aborted: { reason: :sigint, in_flight: [], planned: 0 } }]])
+      end
+
+      it "prints no second summary when the abort lands after the report" do
+        runner = aborting_runner { [] }
+        allow(runner).to receive(:exit_code) { runner.instance_variable_get(:@abort).trip!(:sigterm) }
+
+        expect(runner.call).to eq(143)
+        expect(summaries).to eq([[[], { invalid_count: 0 }]])
+        expect(abort_event).to include(reason: :sigterm)
+      end
+
+      it "prints the partial summary when the flag tripped just before the report" do
+        runner = aborting_runner do
+          flag = runner.instance_variable_get(:@abort)
+          flag.deferred { flag.trip!(:sigint) }
+          []
+        end
+
+        expect(runner.call).to eq(130)
+        expect(summaries).to eq([[[], { invalid_count: 0, aborted: { reason: :sigint, in_flight: [], planned: 0 } }]])
+      end
+
+      it "reports an abort before planning with no plan size and no invalid count" do
+        runner = aborting_runner { [] }
+        allow(runner).to receive(:preload!) do
+          Process.kill("TERM", Process.pid)
+          sleep 5
+        end
+
+        expect(runner.call).to eq(143)
+        expect(summaries).to eq([[[], { invalid_count: 0, aborted: { reason: :sigterm, in_flight: [], planned: nil } }]])
+        expect(abort_event).to include(planned: nil)
+      end
+
+      it "passes the plan's invalid count to the aborted summary" do
+        runner = aborting_runner { raise ActiveMutator::Aborted, :sigint }
+        analysis = instance_double(ActiveMutator::Analysis, mutations: [], invalid_count: 4)
+        allow(ActiveMutator::Engine).to receive(:new).and_return(instance_double(ActiveMutator::Engine, analyze: analysis))
+        allow(runner).to receive(:discover).and_return(discovery([subject_]))
+        allow(runner).to receive(:plan_work).and_return([[], [], {}])
+
+        expect(runner.call).to eq(130)
+        expect(summaries.last.last).to include(invalid_count: 4)
+      end
     end
   end
 

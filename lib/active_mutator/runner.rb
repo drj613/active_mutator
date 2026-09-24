@@ -10,58 +10,30 @@ module ActiveMutator
     # without --since). The last three feed the --allow-empty verdict (#46).
     Discovery = Data.define(:subjects, :scanned_files, :since_candidates, :since_matched_all, :since_filter)
 
-    def initialize(config, reporter: nil)
+    SIGNALS = { "INT" => :sigint, "TERM" => :sigterm }.freeze
+    # An aborted run never passes, whatever --fail-at says.
+    EXIT_CODES = { sigint: 130, sigterm: 143, memory_ceiling: 3 }.freeze
+
+    def initialize(config, reporter: nil, events: nil)
       @config = config
       @reporter = reporter || build_reporter
+      @events = events || build_events
+      @abort = AbortFlag.new
     end
 
+    # The traps go in first so boot, planning, and the baseline are covered
+    # too, and come out last so the host gets its own handlers back.
     def call
-      ENV["ACTIVE_MUTATOR"] = "1"
-      load_operators
-      ClosureReload.cap = @config.class_level_closure_cap
-      preload!
-      preload_spec_helper!
-      discovery = discover
-      subjects = discovery.subjects
-      analyses = subjects.map { |s| Engine.new.analyze(s) }
-      mutations = analyses.flat_map(&:mutations)
-      mutations = mutations.first(@config.max_mutants) if @config.max_mutants
-      invalid_count = analyses.sum(&:invalid_count)
-      # Decide emptiness before the baseline: a scoped run that plans nothing
-      # has no use for a coverage map, and building one spawns the whole spec
-      # suite (#47).
-      if mutations.empty? && (@config.since || @config.subject_filter)
-        return debug_plan([], []) if @config.debug_plan
-
-        return empty_plan_exit(invalid_count, discovery)
-      end
-
-      map = Baseline.new(root: @config.root, spec_paths: @config.spec_paths)
-              .coverage_map(force: @config.force_baseline)
-      @reporter.coverage_map = map if @reporter.respond_to?(:coverage_map=)
-
-      fingerprints = Fingerprint.for_mutations(mutations, root: @config.root)
-      ledger = AcceptedLedger.load(@config.root)
-      scanned_files = prune_scope(subjects)
-      warn_stale(ledger, fingerprints.values, scanned_files)
-
-      items, pre_results, phase1_ids = plan_work(mutations, map, ledger: ledger, fingerprints: fingerprints)
-      return debug_plan(items, pre_results) if @config.debug_plan
-
-      pre_results.each { |r| @reporter.on_result(r) }
-      calibrators = if @config.adaptive_timeout
-                      { parallel: TimeoutCalibrator.new, serial: TimeoutCalibrator.new }
-                    end
-      scheduler = Scheduler.new(jobs: @config.jobs, on_result: @reporter.method(:on_result),
-                                calibrators: calibrators)
-      results = scheduler.run(items) + pre_results
-      # Phase 2 runs on its own scheduler (built lazily inside), so pass nil.
-      results = escalate_class_body_survivors(results, nil, map, phase1_ids: phase1_ids)
-
-      accept_survivors!(ledger, results, fingerprints, scanned_files) if @config.accept_survivors
-
-      @reporter.summary(results, invalid_count: invalid_count)
-      exit_code(results)
+      previous_traps = trap_signals
+      events_file = open_events_file
+      sampler = start_sampler
+      run
+    rescue Aborted => e
+      aborted_exit(e)
+    ensure
+      sampler&.stop
+      events_file&.close
+      restore_traps(previous_traps)
     end
 
     # Returns [work_items, pre_results, phase1_ids]. phase1_ids maps each
@@ -122,8 +94,16 @@ module ActiveMutator
       end
       return results if items.empty?
 
-      scheduler ||= Scheduler.new(jobs: @config.jobs)
-      escalated = scheduler.run(items.values).to_h { |res| [res.mutation, res] }
+      # Numbered after phase 1's mutants, so seq stays unique across the run.
+      scheduler ||= Scheduler.new(jobs: @config.jobs, events: @events, first_seq: phase1_ids.size + 1, abort: @abort)
+      escalated = begin
+        @events.phase(:escalating, mutants: items.size) do
+          scheduler.run(items.values).to_h { |res| [res.mutation, res] }
+        end
+      rescue Aborted => e
+        # Every phase-1 verdict is final; a half-done escalation proves nothing.
+        raise e.with_results(results)
+      end
       results.map do |r|
         # A replacement only ever exists for a survived candidate (items is
         # built solely from those), so no redundant status re-check is needed.
@@ -158,12 +138,116 @@ module ActiveMutator
 
     private
 
+    def run
+      @events.phase(:boot) { boot! }
+      discovery, analyses = @events.phase(:planning) do
+        found = discover
+        [found, found.subjects.map { |s| Engine.new.analyze(s) }]
+      end
+      subjects = discovery.subjects
+      mutations = analyses.flat_map(&:mutations)
+      mutations = mutations.first(@config.max_mutants) if @config.max_mutants
+      @planned = mutations.size
+      @invalid_count = analyses.sum(&:invalid_count)
+      # Decide emptiness before the baseline: a scoped run that plans nothing
+      # has no use for a coverage map, and building one spawns the whole spec
+      # suite (#47).
+      if mutations.empty? && (@config.since || @config.subject_filter)
+        return debug_plan([], []) if @config.debug_plan
+
+        return empty_plan_exit(@invalid_count, discovery)
+      end
+
+      map = Baseline.new(root: @config.root, spec_paths: @config.spec_paths, events: @events, abort: @abort)
+              .coverage_map(force: @config.force_baseline)
+      @reporter.coverage_map = map if @reporter.respond_to?(:coverage_map=)
+
+      fingerprints = Fingerprint.for_mutations(mutations, root: @config.root)
+      ledger = AcceptedLedger.load(@config.root)
+      scanned_files = prune_scope(subjects)
+      warn_stale(ledger, fingerprints.values, scanned_files)
+
+      items, pre_results, phase1_ids = plan_work(mutations, map, ledger: ledger, fingerprints: fingerprints)
+      return debug_plan(items, pre_results) if @config.debug_plan
+
+      # From here on a trip only records its reason. Raised at once, it could
+      # land between two steps (the sample as mutating ends, the spec reads
+      # before escalation) and drop every finished verdict. Each step checks
+      # the flag instead and raises with the results it has.
+      results = @abort.deferred do
+        done = @events.phase(:mutating, mutants: items.size) { mutate(items, pre_results) }
+        stop_if_tripped!(done)
+        # Phase 2 runs on its own scheduler (built lazily inside), so pass nil.
+        done = escalate_class_body_survivors(done, nil, map, phase1_ids: phase1_ids)
+        stop_if_tripped!(done)
+
+        reporting(done) do
+          accept_survivors!(ledger, done, fingerprints, scanned_files) if @config.accept_survivors
+          @reporter.summary(done, invalid_count: @invalid_count)
+        end
+        done
+      end
+      exit_code(results)
+    end
+
+    def mutate(items, pre_results)
+      pre_results.each { |r| @reporter.on_result(r) }
+      calibrators = if @config.adaptive_timeout
+                      { parallel: TimeoutCalibrator.new, serial: TimeoutCalibrator.new }
+                    end
+      scheduler = Scheduler.new(jobs: @config.jobs, on_result: @reporter.method(:on_result),
+                                calibrators: calibrators, events: @events, abort: @abort)
+      scheduler.run(items) + pre_results
+    rescue Aborted => e
+      raise e.with_results(e.results + pre_results)
+    end
+
+    # The trap only trips the flag: no I/O is safe inside a handler. The
+    # main loop does the killing and raises Aborted.
+    def trap_signals
+      SIGNALS.to_h { |sig, reason| [sig, trap(sig) { @abort.trip!(reason) }] }
+    end
+
+    # Passed back as is: a nil handler means the host ignored the signal.
+    def restore_traps(previous)
+      previous.each { |sig, handler| trap(sig, handler) }
+    end
+
+    # No --accept-survivors here: a partial run must not rewrite the ledger.
+    # Once the report starts, a signal only records its reason: the report
+    # finishes, and `--format json` stays one document. The run still exits
+    # as aborted, so a memory breach or a CI cancel never passes.
+    def reporting(results = [], &)
+      @abort.deferred do
+        @reported = true
+        @events.phase(:reporting, &)
+      end
+      stop_if_tripped!(results)
+    end
+
+    def stop_if_tripped!(results)
+      raise Aborted.new(@abort.reason, results: results) if @abort.tripped?
+    end
+
+    # No summary if the full one already went out: a signal landing after
+    # the report would otherwise print a second one.
+    def aborted_exit(error)
+      counts = Reporter::Terminal.counts(error.results)
+      @events.emit(:abort, reason: error.reason, in_flight: error.in_flight, planned: @planned,
+                           counts: counts, score: error.results.empty? ? nil : Reporter::Terminal.score(counts))
+      unless @reported
+        @reporter.summary(error.results, invalid_count: @invalid_count || 0,
+                                         aborted: { reason: error.reason, in_flight: error.in_flight, planned: @planned })
+      end
+      EXIT_CODES.fetch(error.reason)
+    end
+
     # A scoped run that plans nothing must not report "100%" and pass --fail-at:
     # the usual cause is a --since range or --subject filter that matched no
     # mutable code, or class-body code dropped by --no-class-level (#23 covers
     # the zero-subject case for explicit paths).
     def empty_plan_exit(invalid_count, discovery)
-      @reporter.summary([], invalid_count: invalid_count, empty_plan: true)
+      reporting { @reporter.summary([], invalid_count: invalid_count, empty_plan: true) }
       causes = []
       causes << "--since #{@config.since} matched no mutable code" if @config.since
       causes << "--subject #{@config.subject_filter} matched no subjects" if @config.subject_filter
@@ -247,6 +331,14 @@ module ActiveMutator
       end.flatten.uniq.sort
     end
 
+    def boot!
+      ENV["ACTIVE_MUTATOR"] = "1"
+      load_operators
+      ClosureReload.cap = @config.class_level_closure_cap
+      preload!
+      preload_spec_helper!
+    end
+
     # Custom operators must exist in the PARENT before Engine analysis:
     # subclassing Operators::Base self-registers, and forks inherit the
     # loaded class. `requires` can't serve — those load inside the fork's
@@ -284,6 +376,41 @@ module ActiveMutator
       rel = file.delete_prefix(@config.root.chomp("/") + "/").delete_suffix(".rb")
       rest = rel.sub(%r{\A[^/]+/}, "")
       @config.spec_paths.map { |sp| "#{sp}/#{rest}_spec.rb" }
+    end
+
+    # Only when something reads the samples. Subscribed last, so each phase
+    # line prints before the sample taken at it.
+    def start_sampler
+      watch_memory if @config.max_rss
+      return unless @events.listening?
+
+      sampler = Sampler.new(events: @events, interval: @config.sample_interval)
+      @events.subscribe(sampler)
+      sampler.start
+    end
+
+    # Without --diagnostics, the 90% warning and the breach still reach stderr.
+    def watch_memory
+      notices = %i[memory_warning memory_ceiling]
+      @events.subscribe(Diagnostics::Text.new(root: @config.root, only: notices)) unless @config.diagnostics
+      @events.subscribe(MemoryCeiling.new(max_rss_kb: @config.max_rss, events: @events, abort: @abort))
+    end
+
+    # Opened per call, not per Runner, so the file is closed on every exit.
+    def open_events_file
+      return unless @config.events_file
+
+      file = File.open(File.expand_path(@config.events_file, @config.root), "w")
+      @events.subscribe(Diagnostics::Ndjson.new(file))
+      file
+    rescue SystemCallError => e
+      raise Error, "cannot write --events file: #{e.message}"
+    end
+
+    def build_events
+      events = Events.new
+      events.subscribe(Diagnostics::Text.new(root: @config.root)) if @config.diagnostics
+      events
     end
 
     def build_reporter

@@ -71,6 +71,20 @@
   },
   {
     "file": "lib/active_mutator/scheduler.rb",
+    "subject": "ActiveMutator::Scheduler#run_pool",
+    "description": "force condition to `true`",
+    "original_snippet": "running.empty?",
+    "ordinal": 0
+  },
+  {
+    "file": "lib/active_mutator/scheduler.rb",
+    "subject": "ActiveMutator::Scheduler#run_pool",
+    "description": "delete `sleep 0.02 unless running.empty?`",
+    "original_snippet": "sleep 0.02 unless running.empty?",
+    "ordinal": 0
+  },
+  {
+    "file": "lib/active_mutator/scheduler.rb",
     "subject": "ActiveMutator::Scheduler#abort_if_orphaned!",
     "description": "delete `running.clear`",
     "original_snippet": "running.clear",
@@ -326,6 +340,41 @@
     "subject": "ActiveMutator::Scheduler#spawn",
     "description": "replace string with \"\"",
     "original_snippet": "\"active_mutator-worker\"",
+    "ordinal": 0
+  },
+  {
+    "file": "lib/active_mutator/baseline.rb",
+    "subject": "ActiveMutator::Baseline (class body)",
+    "description": "delete `private`",
+    "original_snippet": "private",
+    "ordinal": 0
+  },
+  {
+    "file": "lib/active_mutator/diagnostics/text.rb",
+    "subject": "ActiveMutator::Diagnostics::Text (class body)",
+    "description": "delete `private`",
+    "original_snippet": "private",
+    "ordinal": 0
+  },
+  {
+    "file": "lib/active_mutator/memory_probe.rb",
+    "subject": "ActiveMutator::MemoryProbe (class body)",
+    "description": "delete `private`",
+    "original_snippet": "private",
+    "ordinal": 0
+  },
+  {
+    "file": "lib/active_mutator/sampler.rb",
+    "subject": "ActiveMutator::Sampler (class body)",
+    "description": "delete `private`",
+    "original_snippet": "private",
+    "ordinal": 0
+  },
+  {
+    "file": "lib/active_mutator/memory_ceiling.rb",
+    "subject": "ActiveMutator::MemoryCeiling (class body)",
+    "description": "delete `private`",
+    "original_snippet": "private",
     "ordinal": 0
   }
 ]

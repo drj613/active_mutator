@@ -12,12 +12,23 @@ module ActiveMutator
 
       def on_result(result) = @terminal.on_result(result)
 
-      def summary(results, invalid_count:, empty_plan: false)
-        @terminal.summary(results, invalid_count: invalid_count, empty_plan: empty_plan)
+      def summary(results, invalid_count:, empty_plan: false, aborted: nil)
+        @terminal.summary(results, invalid_count: invalid_count, empty_plan: empty_plan, aborted: aborted)
         results.select { |r| r.status == :survived }.each { |r| annotate(r) }
+        annotate_abort(aborted, results) if aborted
       end
 
       private
+
+      # One annotation for the whole run, after the survivors that did finish.
+      def annotate_abort(aborted, results)
+        reason = Terminal::ABORT_LABELS.fetch(aborted[:reason])
+        lines = ["The run stopped early (#{reason}), so this is not a full result."]
+        in_flight = aborted[:in_flight].map { |entry| Terminal.in_flight_label(entry) }
+        lines << "In flight: #{in_flight.join("; ")}" unless in_flight.empty?
+        lines << "Partial mutation score: #{Terminal.partial_score(results, aborted[:planned])}"
+        @out.puts "::error title=Mutation run aborted::#{encode(lines.join("\n"))}"
+      end
 
       def annotate(result)
         m = result.mutation

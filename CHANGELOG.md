@@ -6,6 +6,48 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-09-23
+
+- `--diagnostics` prints a timestamped line to stderr for each phase
+  (`boot`, `planning`, `baseline`, `coverage_load`, `mutating`,
+  `escalating`, `reporting`), each mutant's start and end (pid, lane,
+  budget, status, seconds, peak memory), and memory samples. If a CI run
+  dies, the last lines show the phase and the mutants it was in. See
+  [Run diagnostics](docs/guides/diagnostics.md).
+- `--events FILE` writes the same events as NDJSON, one object per line,
+  flushed as they happen. The schema is versioned (`"v": 1`) and
+  documented in the diagnostics guide. It is the public contract; there is
+  no Ruby hook API.
+- Memory samples cover the parent, every live worker, and the baseline
+  child, every `--sample-interval` seconds (default 5) and at each phase
+  boundary. Linux reads RSS, peak, and Pss from `/proc`, plus
+  `MemAvailable`, swap, memory pressure, and load. macOS uses one `ps` call
+  per sample. On Linux the total uses Pss, so pages shared with forks
+  count once.
+- `--max-rss SIZE` (`6G`, `6144M`, or plain MB; config key `max_rss`)
+  warns once at 90% and stops the run at 100% with exit code 3. It also
+  checks coverage.json's size before parsing it, because the parse blocks
+  sampling and signals until it returns.
+- SIGINT and SIGTERM now stop the run cleanly in any phase, not just while
+  mutating. The baseline child and every running worker are killed with
+  their whole process groups, and the reporter prints the finished mutants
+  with the in-flight ones listed and a `Partial mutation score:` line.
+- **Changed:** SIGTERM now exits 143 instead of 130. SIGINT still exits 130.
+- **Changed:** custom reporters must accept an `aborted:` keyword on
+  `summary` (`{reason:, in_flight:, planned:}`). It is passed only when a
+  run stops early, the same way `empty_plan:` is.
+- `--format json` adds `complete`, `in_flight`, and `planned`, the
+  `interrupted` and `memory_ceiling` exit reasons, and `seconds` and
+  `peak_rss_kb` for each result. `--format github` adds one
+  `::error title=Mutation run aborted::` annotation for a stopped run.
+  `--format stryker-json` reports only the mutants that finished.
+- The baseline parses coverage.json once per path instead of up to seven
+  times (a partial refresh took 7 parses, a full rebuild 3), and the
+  parent no longer keeps the old map in memory while the child runs. On a large suite this was the difference between fitting in
+  the runner's memory and an OOM kill.
+- The baseline child is now started with `Process.spawn` and polled, so
+  its pid is known for sampling and killing.
+
 ## [0.6.1] - 2026-09-23
 
 - The baseline coverage map now skips gem files even when gems are installed

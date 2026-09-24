@@ -26,7 +26,11 @@ module ActiveMutator
       "adaptive_timeout" => :boolean,
       "class_level" => :boolean,
       "class_level_closure_cap" => :positive_integer,
-      "allow_empty" => :boolean
+      "allow_empty" => :boolean,
+      "diagnostics" => :boolean,
+      "events_file" => :string,
+      "sample_interval" => :positive_number,
+      "max_rss" => :size
     }.freeze
 
     def self.load(root)
@@ -63,6 +67,10 @@ module ActiveMutator
       when :number
         raise Error, "#{FILENAME}: #{key} must be a number" unless value.is_a?(Numeric)
         value.to_f
+      when :positive_number
+        raise Error, "#{FILENAME}: #{key} must be a number" unless value.is_a?(Numeric)
+        raise Error, "#{FILENAME}: #{key} must be > 0" unless value.positive?
+        value.to_f
       when :score
         raise Error, "#{FILENAME}: #{key} must be a number" unless value.is_a?(Numeric)
         raise Error, "#{FILENAME}: #{key} must be within 0..100" unless (0..100).cover?(value)
@@ -72,6 +80,9 @@ module ActiveMutator
           raise Error, "#{FILENAME}: format must be one of #{FORMATS.join(", ")}"
         end
         value.tr("-", "_").to_sym
+      when :string
+        raise Error, "#{FILENAME}: #{key} must be a string" unless value.is_a?(String)
+        value
       when :string_list
         unless value.is_a?(Array) && value.all?(String)
           raise Error, "#{FILENAME}: #{key} must be a list of strings"
@@ -88,6 +99,11 @@ module ActiveMutator
           raise Error, "#{FILENAME}: #{key} must be true or false"
         end
         value
+      when :size
+        kb = MemoryCeiling.parse_kb(value)
+        raise Error, "#{FILENAME}: #{key} must be a size like 6G, 6144M, or 6144 (MB)" unless kb
+
+        kb
       when :preload_helper
         return :none if value == false
         raise Error, "#{FILENAME}: preload_helper must be a path or false" unless value.is_a?(String)

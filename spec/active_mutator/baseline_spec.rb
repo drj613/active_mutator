@@ -1,88 +1,83 @@
 require "fileutils"
+require "timeout"
 require "tmpdir"
 
-RSpec.describe ActiveMutator::Baseline, :integration do
+RSpec.describe ActiveMutator::Baseline do
   let(:root) { File.expand_path("../fixtures/tiny_project", __dir__) }
   let(:cache_dir) { File.join(root, ".active_mutator") }
 
-  before { ensure_fixture_bundle! }
-  after { FileUtils.rm_rf(cache_dir) }
+  context "with the tiny fixture's real suite", :integration do
+    before { ensure_fixture_bundle! }
+    after { FileUtils.rm_rf(cache_dir) }
 
-  def run_in_fixture
-    Bundler.with_unbundled_env do
-      ENV["BUNDLE_GEMFILE"] = File.join(root, "Gemfile")
-      yield
-    ensure
-      ENV.delete("BUNDLE_GEMFILE")
+    def run_in_fixture
+      Bundler.with_unbundled_env do
+        ENV["BUNDLE_GEMFILE"] = File.join(root, "Gemfile")
+        yield
+      ensure
+        ENV.delete("BUNDLE_GEMFILE")
+      end
     end
-  end
 
-  it "runs an instrumented baseline and returns a usable map" do
-    map = run_in_fixture { described_class.new(root: root).coverage_map }
-    calculator = File.join(root, "lib/calculator.rb")
-    # eligible? body (lines 3-7) is covered:
-    expect(map.examples_for(calculator, 3..3)).not_to be_empty
-    # untested_helper body (`42`, line 16) is not:
-    expect(map.examples_for(calculator, 16..16)).to eq([])
-    # cache dir must ignore its own contents (never committed by hosts):
-    expect(File.read(File.join(cache_dir, ".gitignore"))).to eq("*\n")
-  end
-
-  it "reuses a fresh cache without re-running" do
-    baseline = described_class.new(root: root)
-    run_in_fixture { baseline.coverage_map }
-    mtime = File.mtime(File.join(cache_dir, "coverage.json"))
-    run_in_fixture { baseline.coverage_map }
-    expect(File.mtime(File.join(cache_dir, "coverage.json"))).to eq(mtime)
-  end
-
-  it "raises BaselineFailed when the suite is red" do
-    broken_spec = File.join(root, "spec", "broken_spec.rb")
-    File.write(broken_spec, "RSpec.describe('x') { it { expect(1).to eq(2) } }\n")
-    begin
-      expect { run_in_fixture { described_class.new(root: root).coverage_map } }
-        .to raise_error(ActiveMutator::BaselineFailed)
-    ensure
-      File.delete(broken_spec)
+    it "runs an instrumented baseline and returns a usable map" do
+      map = run_in_fixture { described_class.new(root: root).coverage_map }
+      calculator = File.join(root, "lib/calculator.rb")
+      # eligible? body (lines 3-7) is covered:
+      expect(map.examples_for(calculator, 3..3)).not_to be_empty
+      # untested_helper body (`42`, line 16) is not:
+      expect(map.examples_for(calculator, 16..16)).to eq([])
+      # cache dir must ignore its own contents (never committed by hosts):
+      expect(File.read(File.join(cache_dir, ".gitignore"))).to eq("*\n")
     end
-  end
 
-  it "includes Gemfile.lock and .rspec in the digest set" do
-    baseline = described_class.new(root: root)
-    digests = baseline.send(:current_digests)
-    expect(digests).to have_key("Gemfile.lock")
-    expect(digests).to have_key(".rspec")
+    it "reuses a fresh cache without re-running" do
+      baseline = described_class.new(root: root)
+      run_in_fixture { baseline.coverage_map }
+      mtime = File.mtime(File.join(cache_dir, "coverage.json"))
+      run_in_fixture { baseline.coverage_map }
+      expect(File.mtime(File.join(cache_dir, "coverage.json"))).to eq(mtime)
+    end
+
+    it "raises BaselineFailed when the suite is red" do
+      broken_spec = File.join(root, "spec", "broken_spec.rb")
+      File.write(broken_spec, "RSpec.describe('x') { it { expect(1).to eq(2) } }\n")
+      begin
+        expect { run_in_fixture { described_class.new(root: root).coverage_map } }
+          .to raise_error(ActiveMutator::BaselineFailed)
+      ensure
+        File.delete(broken_spec)
+      end
+    end
+
+    it "includes Gemfile.lock and .rspec in the digest set" do
+      baseline = described_class.new(root: root)
+      digests = baseline.send(:current_digests)
+      expect(digests).to have_key("Gemfile.lock")
+      expect(digests).to have_key(".rspec")
+    end
   end
 
   describe "aborted-run detection" do
-    def write_payload(dir, records:, expected: :omit)
-      out = File.join(dir, "coverage.json")
+    def payload(records:, expected: :omit)
       data = { "version" => 2, "records" => records, "times" => {} }
       data["expected_examples"] = expected unless expected == :omit
-      File.write(out, JSON.generate(data))
-      out
+      data
     end
 
     it "raises when the subprocess recorded fewer examples than it expected to run" do
-      Dir.mktmpdir do |dir|
-        out = write_payload(dir, records: { "./spec/a_spec.rb[1:1]" => [] }, expected: 3)
-        expect { described_class.new(root: dir).send(:verify_complete!, out) }
-          .to raise_error(ActiveMutator::BaselineFailed, /1 of 3/)
-      end
+      data = payload(records: { "./spec/a_spec.rb[1:1]" => [] }, expected: 3)
+      expect { described_class.new(root: "/proj").send(:verify_complete!, data) }
+        .to raise_error(ActiveMutator::BaselineFailed, /1 of 3/)
     end
 
     it "accepts a complete run" do
-      Dir.mktmpdir do |dir|
-        out = write_payload(dir, records: { "./spec/a_spec.rb[1:1]" => [] }, expected: 1)
-        expect { described_class.new(root: dir).send(:verify_complete!, out) }.not_to raise_error
-      end
+      data = payload(records: { "./spec/a_spec.rb[1:1]" => [] }, expected: 1)
+      expect { described_class.new(root: "/proj").send(:verify_complete!, data) }.not_to raise_error
     end
 
     it "accepts a payload without an expected count (pre-0.4.0 hooks)" do
-      Dir.mktmpdir do |dir|
-        out = write_payload(dir, records: {})
-        expect { described_class.new(root: dir).send(:verify_complete!, out) }.not_to raise_error
-      end
+      data = payload(records: {})
+      expect { described_class.new(root: "/proj").send(:verify_complete!, data) }.not_to raise_error
     end
   end
 
@@ -118,7 +113,7 @@ RSpec.describe ActiveMutator::Baseline, :integration do
           baseline = described_class.new(root: root, spec_paths: ["test"], cache_dir: cache_dir)
           digests = baseline.send(:current_digests)
           write_cache(out_path, digests, spec_paths: ["spec"])
-          allow(baseline).to receive(:run_baseline!)
+          allow(baseline).to receive(:run_baseline!).and_return("version" => 2, "records" => {}, "times" => {})
 
           map = baseline.coverage_map
 
@@ -136,7 +131,7 @@ RSpec.describe ActiveMutator::Baseline, :integration do
           baseline = described_class.new(root: root, cache_dir: cache_dir)
           digests = baseline.send(:current_digests)
           write_cache(out_path, digests) # no spec_paths key at all
-          allow(baseline).to receive(:run_baseline!)
+          allow(baseline).to receive(:run_baseline!).and_return("version" => 2, "records" => {}, "times" => {})
 
           baseline.coverage_map
 
@@ -152,13 +147,358 @@ RSpec.describe ActiveMutator::Baseline, :integration do
           out_path = File.join(cache_dir, "coverage.json")
           baseline = described_class.new(root: root, spec_paths: ["test"], cache_dir: cache_dir)
           write_cache(out_path, {})
-          allow(baseline).to receive(:run_baseline!)
+          allow(baseline).to receive(:run_baseline!).and_return("version" => 2, "records" => {}, "times" => {})
 
           baseline.coverage_map
 
           expect(JSON.parse(File.read(out_path))["spec_paths"]).to eq(["test"])
         end
       end
+    end
+  end
+
+  describe "refresh decisions and child failures" do
+    around do |example|
+      Dir.mktmpdir do |dir|
+        @tmp = File.realpath(dir)
+        FileUtils.mkdir_p(File.join(@tmp, "lib"))
+        FileUtils.mkdir_p(File.join(@tmp, "spec"))
+        File.write(File.join(@tmp, "lib/a.rb"), "class A; def x = 1; end\n")
+        File.write(File.join(@tmp, "spec/a_spec.rb"), "RSpec.describe(A) { it { A.new.x } }\n")
+        example.run
+      end
+    end
+
+    let(:tmp_cache) { File.join(@tmp, ".active_mutator") }
+    let(:out_path) { File.join(tmp_cache, "coverage.json") }
+    let(:baseline) { described_class.new(root: @tmp, cache_dir: tmp_cache) }
+    let(:a_hit) { [[File.join(@tmp, "lib/a.rb"), 1]] }
+
+    def write_cache(digests, version: 2, records: { "./spec/a_spec.rb[1:1]" => a_hit })
+      FileUtils.mkdir_p(tmp_cache)
+      File.write(out_path, JSON.generate("version" => version, "records" => records,
+                                         "times" => records.transform_values { 0.1 },
+                                         "digests" => digests, "spec_paths" => ["spec"]))
+    end
+
+    # ok: the child's exit; payload: what it leaves at the out path (nil = nothing).
+    def fake_child(ok: true, payload: { "version" => 2, "records" => {}, "times" => {} })
+      allow(baseline).to receive(:run_rspec) do |path, _targets = []|
+        File.write(path, JSON.generate(payload)) if payload
+        ok
+      end
+    end
+
+    describe "phase events" do
+      let(:seen) { [] }
+      let(:baseline) do
+        bus = ActiveMutator::Events.new.subscribe { |e| seen << [e.type, e.fields] }
+        described_class.new(root: @tmp, cache_dir: tmp_cache, events: bus)
+      end
+
+      # A real child, standing in for `bundle exec rspec`: writes the payload
+      # where the hooks would, plus its argv, so run_rspec's own launch and
+      # phase are exercised.
+      def fake_command(records, exit_code: 0)
+        script = <<~RUBY
+          require "json"
+          File.write(ENV.fetch("ACTIVE_MUTATOR_BASELINE_OUT"), JSON.generate("version" => 2, "records" => #{records.inspect}))
+          File.write("argv.json", JSON.generate(ARGV))
+          exit #{exit_code}
+        RUBY
+        allow(baseline).to receive(:rspec_command) { |targets| ["ruby", "-e", script, "--", *targets] }
+      end
+
+      def child_argv = JSON.parse(File.read(File.join(@tmp, "argv.json")))
+
+      it "marks the child's run apart from the parent reading the map back, sizing the file before the parse" do
+        fake_command({ "./spec/a_spec.rb[1:1]" => a_hit })
+
+        baseline.coverage_map
+
+        size = JSON.generate("version" => 2, "records" => { "./spec/a_spec.rb[1:1]" => a_hit }).bytesize
+        pid = seen.first.last[:pid]
+        expect(pid).to be_a(Integer)
+        expect(seen).to eq([
+                             [:phase_start, { phase: :baseline, refresh: :full, pid: pid }],
+                             [:phase_end, { phase: :baseline }],
+                             [:phase_start, { phase: :coverage_load, bytes: size }],
+                             [:phase_end, { phase: :coverage_load, examples: 1 }]
+                           ])
+        expect(child_argv).to eq([]) # a full run names no targets, and runs in the root
+      end
+
+      it "marks a partial child run as partial and hands it the targets" do
+        write_cache(baseline.send(:current_digests))
+        File.write(File.join(@tmp, "spec/b_spec.rb"), "RSpec.describe(A) { it { A.new.x } }\n")
+        fake_command({})
+
+        baseline.coverage_map
+
+        expect(seen.map(&:last)).to include(hash_including(phase: :baseline, refresh: :partial))
+        expect(child_argv).to eq(["spec/b_spec.rb"])
+      end
+
+      # --max-rss sizes each parse at coverage_load's start, so the partial
+      # output gets its own.
+      it "sizes the partial output before parsing it, in its own coverage_load" do
+        write_cache(baseline.send(:current_digests))
+        File.write(File.join(@tmp, "spec/b_spec.rb"), "RSpec.describe(A) { it { A.new.x } }\n")
+        fake_command({})
+
+        baseline.coverage_map
+
+        expect(seen.map { |(type, fields)| [fields[:phase], type] })
+          .to eq([%i[coverage_load phase_start], %i[coverage_load phase_end],
+                  %i[baseline phase_start], %i[baseline phase_end],
+                  %i[coverage_load phase_start], %i[coverage_load phase_end]])
+        expect(seen[4].last[:bytes]).to eq(JSON.generate("version" => 2, "records" => {}).bytesize)
+      end
+
+      it "exposes the child's pid while it runs, and clears it after" do
+        fake_command({})
+        during = nil
+        allow(baseline).to receive(:wait_child).and_wrap_original do |original, pid|
+          during = [baseline.child_pid, pid]
+          original.call(pid)
+        end
+
+        baseline.coverage_map
+
+        expect(during.first).to be_a(Integer).and(eq(during.last))
+        expect(baseline.child_pid).to be_nil
+      end
+
+      # Only a wait that ends early kills the group. A suite that finished
+      # on its own is left alone.
+      it "sends no signal to a child that exited on its own" do
+        fake_command({})
+        allow(Process).to receive(:kill).and_call_original
+
+        baseline.coverage_map
+
+        expect(Process).not_to have_received(:kill)
+      end
+
+      it "polls the child gently instead of spinning" do
+        pid = Process.spawn("ruby", "-e", "sleep 0.3")
+        polls = 0
+        allow(Process).to receive(:waitpid2).and_wrap_original do |original, *args|
+          polls += 1
+          original.call(*args)
+        end
+
+        expect(baseline.send(:wait_child, pid)).to be_success
+        expect(polls).to be < 50 # 0.3s at 0.05s a poll, with room for a slow boot
+      end
+
+      context "when the run is aborted" do
+        let(:flag) { ActiveMutator::AbortFlag.new }
+        let(:baseline) { described_class.new(root: @tmp, cache_dir: tmp_cache, events: bus, abort: flag) }
+        let(:bus) { ActiveMutator::Events.new.subscribe { |e| seen << [e.type, e.fields] } }
+
+        it "kills the child's whole process group and raises, leaving the phase open" do
+          grandchild_file = File.join(@tmp, "grandchild")
+          script = "pid = spawn('sleep', '30'); File.write(#{grandchild_file.inspect}, pid.to_s); sleep 30"
+          allow(baseline).to receive(:rspec_command).and_return(["ruby", "-e", script])
+          Thread.new do
+            sleep 0.02 until File.exist?(grandchild_file) && !File.read(grandchild_file).empty?
+            flag.trip!(:sigterm)
+          end
+
+          expect { Timeout.timeout(5) { baseline.coverage_map } }.to raise_error(ActiveMutator::Aborted, /sigterm/)
+          expect(seen.map(&:first)).to eq([:phase_start])
+          expect(baseline.child_pid).to be_nil
+          grandchild = File.read(grandchild_file).to_i
+          expect_gone(grandchild)
+        end
+
+        # The child has its own process group, so a hangup (closed terminal,
+        # dropped SSH) no longer reaches it: the parent must kill it.
+        it "kills the child's whole process group when anything else ends the wait" do
+          grandchild_file = File.join(@tmp, "grandchild")
+          script = "pid = spawn('sleep', '30'); File.write(#{grandchild_file.inspect}, pid.to_s); sleep 30"
+          allow(baseline).to receive(:rspec_command).and_return(["ruby", "-e", script])
+          child = nil
+          allow(baseline).to receive(:wait_child) do |pid|
+            child = pid
+            sleep 0.02 until File.exist?(grandchild_file) && !File.read(grandchild_file).empty?
+            raise SignalException, "HUP"
+          end
+
+          expect { Timeout.timeout(5) { baseline.coverage_map } }.to raise_error(SignalException, /HUP/)
+          _, status = Timeout.timeout(2) { Process.waitpid2(child) }
+          expect(status.termsig).to eq(9)
+          expect_gone(File.read(grandchild_file).to_i)
+        end
+
+        it "still aborts when the trip lands as the child exits" do
+          allow(baseline).to receive(:rspec_command).and_return(["ruby", "-e", "exit 0"])
+          allow(Process).to receive(:waitpid2).and_wrap_original do |orig, *args|
+            orig.call(*args).tap { |_, status| flag.trip!(:sigterm) if status }
+          end
+
+          expect { baseline.coverage_map }.to raise_error(ActiveMutator::Aborted, /sigterm/)
+        end
+
+        it "stops before reading coverage when the sample at the phase's end trips the flag" do
+          allow(baseline).to receive(:rspec_command).and_return(["ruby", "-e", "exit 0"])
+          bus.subscribe do |e|
+            flag.trip!(:memory_ceiling) if e.type == :phase_end && e.fields[:phase] == :baseline
+          end
+
+          expect { baseline.coverage_map }.to raise_error(ActiveMutator::Aborted, /memory_ceiling/)
+          expect(seen.map { |(type, fields)| [type, fields[:phase]] }).to eq([%i[phase_start baseline], %i[phase_end baseline]])
+        end
+
+        it "starts no child once the flag has tripped" do
+          flag.deferred { flag.trip!(:sigint) }
+          allow(Process).to receive(:spawn).and_call_original
+
+          expect { baseline.coverage_map }.to raise_error(ActiveMutator::Aborted, /sigint/)
+          expect(Process).not_to have_received(:spawn)
+        end
+
+        # The grandchild isn't ours to reap, so poll until the kernel drops it.
+        def expect_gone(pid)
+          Timeout.timeout(3) do
+            loop do
+              Process.kill(0, pid)
+              sleep 0.02
+            rescue Errno::ESRCH
+              break
+            end
+          end
+        end
+      end
+
+      it "fails the baseline when the child exits non-zero" do
+        fake_command({}, exit_code: 1)
+        expect { baseline.coverage_map }.to raise_error(ActiveMutator::BaselineFailed, /baseline suite failed/)
+        expect(baseline.child_pid).to be_nil
+      end
+
+      it "fails the baseline when the command cannot start" do
+        allow(baseline).to receive(:rspec_command).and_return(["/nonexistent/bundle"])
+        expect { baseline.coverage_map }.to raise_error(ActiveMutator::BaselineFailed, /baseline suite failed/)
+      end
+    end
+
+    it "rebuilds a fresh cache when forced" do
+      write_cache(baseline.send(:current_digests))
+      fake_child
+
+      baseline.coverage_map(force: true)
+
+      expect(baseline.last_refresh).to eq(:full)
+      expect(baseline).to have_received(:run_rspec).with(out_path)
+    end
+
+    it "rebuilds rather than delta-refreshing a pre-v2 cache" do
+      write_cache(baseline.send(:current_digests).except("spec/a_spec.rb"), version: 1)
+      fake_child
+
+      baseline.coverage_map
+
+      expect(baseline.last_refresh).to eq(:full)
+      expect(baseline).to have_received(:run_rspec).with(out_path)
+    end
+
+    it "fails a full rebuild when the suite fails" do
+      fake_child(ok: false)
+      expect { baseline.coverage_map }
+        .to raise_error(ActiveMutator::BaselineFailed, "baseline suite failed, fix the suite before mutating")
+    end
+
+    it "fails a full rebuild when the suite writes no coverage" do
+      fake_child(payload: nil)
+      expect { baseline.coverage_map }
+        .to raise_error(ActiveMutator::BaselineFailed, "baseline produced no coverage output")
+    end
+
+    it "fails a full rebuild when the suite stopped early" do
+      fake_child(payload: { "version" => 2, "records" => {}, "expected_examples" => 2 })
+      expect { baseline.coverage_map }
+        .to raise_error(ActiveMutator::BaselineFailed, "baseline aborted early: 0 of 2 examples recorded — " \
+                                                       "re-run without interrupting the suite")
+    end
+
+    context "with a new spec file (a partial refresh)" do
+      before do
+        write_cache(baseline.send(:current_digests))
+        File.write(File.join(@tmp, "spec/b_spec.rb"), "RSpec.describe(A) { it { A.new.x } }\n")
+      end
+
+      it "runs only the new file and removes the partial output" do
+        fake_child(payload: { "records" => { "./spec/b_spec.rb[1:1]" => a_hit } })
+
+        baseline.coverage_map
+
+        expect(baseline).to have_received(:run_rspec).with(File.join(tmp_cache, "partial.json"), ["spec/b_spec.rb"])
+        expect(File.exist?(File.join(tmp_cache, "partial.json"))).to be(false)
+      end
+
+      it "fails when the partial run fails" do
+        fake_child(ok: false)
+        expect { baseline.coverage_map }
+          .to raise_error(ActiveMutator::BaselineFailed, "partial baseline run failed, fix the suite before mutating")
+      end
+
+      it "fails when the partial run writes nothing" do
+        fake_child(payload: nil)
+        expect { baseline.coverage_map }
+          .to raise_error(ActiveMutator::BaselineFailed, "partial baseline produced no output")
+      end
+
+      it "fails when the partial run stopped early" do
+        fake_child(payload: { "records" => {}, "expected_examples" => 1 })
+        expect { baseline.coverage_map }
+          .to raise_error(ActiveMutator::BaselineFailed, /0 of 1 examples recorded/)
+      end
+    end
+
+    it "drops a deleted spec file's examples without running a child" do
+      File.write(File.join(@tmp, "spec/b_spec.rb"), "RSpec.describe(A) { it { A.new.x } }\n")
+      write_cache(baseline.send(:current_digests),
+                  records: { "./spec/a_spec.rb[1:1]" => a_hit, "./spec/b_spec.rb[1:1]" => a_hit })
+      File.delete(File.join(@tmp, "spec/b_spec.rb"))
+      allow(baseline).to receive(:run_rspec)
+
+      map = baseline.coverage_map
+
+      expect(baseline.last_refresh).to eq(:partial)
+      expect(baseline).not_to have_received(:run_rspec)
+      expect(map.records.keys).to eq(["./spec/a_spec.rb[1:1]"])
+    end
+  end
+
+  describe "merging a partial run" do
+    let(:delta) do
+      ActiveMutator::BaselineDelta::Delta.new(
+        full: false, rerun_spec_files: ["spec/c_spec.rb"], rerun_example_ids: ["./spec/a_spec.rb[1:1]"],
+        drop_example_ids: ["./spec/b_spec.rb[1:1]"], drop_source_files: ["/r/lib/gone.rb"]
+      )
+    end
+    let(:cache) do
+      ids = ["./spec/a_spec.rb[1:1]", "./spec/b_spec.rb[1:1]", "./spec/c_spec.rb[1:1]",
+             "./spec/c_spec.rb_other_spec.rb[1:1]", "./spec/keep_spec.rb[1:1]"]
+      { "records" => ids.to_h { |id| [id, [["/r/lib/a.rb", 1], ["/r/lib/gone.rb", 2]]] },
+        "times" => ids.to_h { |id| [id, 1.0] } }
+    end
+    let(:part) do
+      { "records" => { "./spec/c_spec.rb[1:2]" => [["/r/lib/a.rb", 3]] }, "times" => { "./spec/c_spec.rb[1:2]" => 2.0 } }
+    end
+
+    before { described_class.new(root: "/r").send(:merge_partial!, cache, part, delta) }
+
+    it "drops rerun, dropped, and rerun-file examples and adds the partial run's" do
+      kept = ["./spec/c_spec.rb_other_spec.rb[1:1]", "./spec/keep_spec.rb[1:1]", "./spec/c_spec.rb[1:2]"]
+      expect(cache["records"].keys).to eq(kept)
+      expect(cache["times"]).to eq(kept.to_h { |id| [id, id.end_with?("[1:2]") ? 2.0 : 1.0] })
+    end
+
+    it "drops hits in deleted source files" do
+      expect(cache["records"]["./spec/keep_spec.rb[1:1]"]).to eq([["/r/lib/a.rb", 1]])
     end
   end
 end

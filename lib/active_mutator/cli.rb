@@ -32,7 +32,8 @@ module ActiveMutator
         spec_paths: ["spec"],
         browser_boot_seconds: 15.0, accept_survivors: false, exclude: [],
         max_mutants: nil, debug_plan: false, fail_at: nil, adaptive_timeout: true,
-        operators: [], class_level: true, class_level_closure_cap: 10, allow_empty: false
+        operators: [], class_level: true, class_level_closure_cap: 10, allow_empty: false,
+        diagnostics: false, events_file: nil, sample_interval: 5.0, max_rss: nil
       }
       options.merge!(ConfigFile.load(Dir.pwd))
       paths = OptionParser.new do |o|
@@ -69,6 +70,20 @@ module ActiveMutator
         o.on("--allow-empty",
              "Exit 0 when --since/--subject plan no mutants and the --since diff changed no code " \
              "in a mutable source file (default: exit 1)") { options[:allow_empty] = true }
+        o.on("--diagnostics", "Print phase, mutant, and memory lines to stderr") { options[:diagnostics] = true }
+        o.on("--events FILE", "Write run events to FILE as NDJSON, one object per line") { |v| options[:events_file] = v }
+        o.on("--sample-interval S", Float,
+             "Seconds between memory samples with --diagnostics, --events, or --max-rss (default: 5)") do |v|
+          raise OptionParser::InvalidArgument, "--sample-interval must be > 0" unless v.positive?
+          options[:sample_interval] = v
+        end
+        o.on("--max-rss SIZE", "Stop the run (exit 3) when the gem's total memory reaches SIZE: 6G, 6144M, " \
+                               "or MB; warns at 90%") do |v|
+          kb = MemoryCeiling.parse_kb(v)
+          raise OptionParser::InvalidArgument, "--max-rss takes a size like 6G, 6144M, or 6144 (MB)" unless kb
+
+          options[:max_rss] = kb
+        end
         o.on("--fail-at SCORE", Float, "Exit 0 if mutation score >= SCORE even with survivors (default: any survivor fails)") do |v|
           raise OptionParser::InvalidArgument, "--fail-at must be within 0..100" unless (0..100).cover?(v)
           options[:fail_at] = v
