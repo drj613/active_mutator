@@ -358,7 +358,8 @@ replaces the default `spec`),
 `class_level_closure_cap` (integer, default `10` — max constants a
 class-body mutant may reload before it is `skipped`),
 `diagnostics` (`true`/`false`, default `false`),
-`events_file` (a path), `sample_interval` (seconds, default `5`).
+`events_file` (a path), `sample_interval` (seconds, default `5`),
+`max_rss` (a size like `6G`, `6144M`, or plain MB).
 Unknown keys and wrong types are errors, not silent no-ops.
 
 ```yaml
