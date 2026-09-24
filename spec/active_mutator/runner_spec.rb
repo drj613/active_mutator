@@ -424,7 +424,7 @@ RSpec.describe ActiveMutator::Runner do
         expect(summaries).to eq([[[], { invalid_count: 0 }]])
       end
 
-      it "keeps the finished results when the flag trips as the mutating phase ends" do
+      it "keeps the finished results and skips escalation when the flag trips as the mutating phase ends" do
         killed = ActiveMutator::Result.new(mutation: mutation, status: :killed, details: nil)
         runner = aborting_runner { [killed] }
         bus.subscribe do |e|
@@ -432,6 +432,7 @@ RSpec.describe ActiveMutator::Runner do
 
           runner.instance_variable_get(:@abort).trip!(:memory_ceiling)
         end
+        expect(runner).not_to receive(:escalate_class_body_survivors)
 
         expect(runner.call).to eq(3)
         expect(summaries).to eq([[[killed], { invalid_count: 0,
