@@ -286,6 +286,25 @@ RSpec.describe ActiveMutator::Baseline do
           expect_gone(grandchild)
         end
 
+        # The child has its own process group, so a hangup (closed terminal,
+        # dropped SSH) no longer reaches it: the parent must kill it.
+        it "kills the child's whole process group when anything else ends the wait" do
+          grandchild_file = File.join(@tmp, "grandchild")
+          script = "pid = spawn('sleep', '30'); File.write(#{grandchild_file.inspect}, pid.to_s); sleep 30"
+          allow(baseline).to receive(:rspec_command).and_return(["ruby", "-e", script])
+          child = nil
+          allow(baseline).to receive(:wait_child) do |pid|
+            child = pid
+            sleep 0.02 until File.exist?(grandchild_file) && !File.read(grandchild_file).empty?
+            raise SignalException, "HUP"
+          end
+
+          expect { Timeout.timeout(5) { baseline.coverage_map } }.to raise_error(SignalException, /HUP/)
+          _, status = Timeout.timeout(2) { Process.waitpid2(child) }
+          expect(status.termsig).to eq(9)
+          expect_gone(File.read(grandchild_file).to_i)
+        end
+
         it "still aborts when the trip lands as the child exits" do
           allow(baseline).to receive(:rspec_command).and_return(["ruby", "-e", "exit 0"])
           allow(Process).to receive(:waitpid2).and_wrap_original do |orig, *args|

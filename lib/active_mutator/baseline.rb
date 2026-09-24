@@ -125,22 +125,27 @@ module ActiveMutator
     # memory sampler follows. The child gets its own process group so an
     # abort can kill the whole suite (browsers, app servers) in one signal;
     # a Ctrl-C reaches it through the Runner's trap instead of the terminal.
+    # So does nothing else: a hangup from a closed terminal never reaches it,
+    # so anything that ends the wait early (an abort, SIGHUP, SIGQUIT) kills
+    # the group on the way out.
     def run_rspec(out_path, targets = [])
+      status = nil
       @abort.deferred do
         @child_pid = Process.spawn(baseline_env(out_path), *rspec_command(targets), chdir: @root, out: :err,
                                                                                     pgroup: true)
-        passed = @events.phase(:baseline, refresh: targets.empty? ? :full : :partial, pid: @child_pid) do
-          wait_child(@child_pid).success?
+        status = @events.phase(:baseline, refresh: targets.empty? ? :full : :partial, pid: @child_pid) do
+          wait_child(@child_pid)
         end
         # The memory sample taken as the phase ends can trip the ceiling.
         # Stop here, before the coverage parse: that's the spike it guards.
         raise Aborted, @abort.reason if @abort.tripped?
 
-        passed
+        status.success?
       end
     rescue SystemCallError # `bundle` missing: `system` returned nil here
       false
     ensure
+      kill_group(@child_pid) if @child_pid && status.nil?
       @child_pid = nil
     end
 
@@ -148,23 +153,21 @@ module ActiveMutator
 
     # The flag is checked after the wait, so a trip that lands as the child
     # exits still stops the run here, not after the coverage parse.
+    # run_rspec kills the child's group on the way out.
     def wait_child(pid)
       loop do
         _, status = Process.waitpid2(pid, Process::WNOHANG)
-        abort_child!(pid) if @abort.tripped?
+        raise Aborted, @abort.reason if @abort.tripped?
         return status if status
 
         sleep POLL_SECONDS
       end
     end
 
-    def abort_child!(pid)
-      begin
-        Process.kill("KILL", -pid)
-      rescue Errno::ESRCH, Errno::EPERM
-        nil # already gone
-      end
-      raise Aborted, @abort.reason
+    def kill_group(pid)
+      Process.kill("KILL", -pid)
+    rescue Errno::ESRCH, Errno::EPERM
+      nil # already gone
     end
 
     def baseline_env(out_path)
