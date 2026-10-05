@@ -32,6 +32,40 @@ RSpec.describe ActiveMutator::Reporter::Github do
     )
   end
 
+  describe "an aborted run" do
+    let(:in_flight) do
+      [{ seq: 7, pid: 1, subject: "Calc#neg", file: "/repo/lib/calc.rb", line: 9, description: "d1" },
+       { seq: 8, pid: 2, subject: "Calc#abs", file: "/repo/lib/calc.rb", line: 12, description: "d2" }]
+    end
+
+    it "prints the terminal's partial summary, the finished survivors, then one ::error for the abort" do
+      reporter.summary([build_result(:survived), build_result(:killed)], invalid_count: 0,
+                       aborted: { reason: :sigterm, in_flight: in_flight, planned: 10 })
+      lines = out.string.lines
+
+      expect(out.string).to include("Run aborted (SIGTERM): partial results")
+      expect(lines[-2]).to start_with("::warning") # the finished survivor
+      expect(lines.last).to eq(
+        "::error title=Mutation run aborted::The run stopped early (SIGTERM), so this is not a full result.%0A" \
+        "In flight: #7 Calc#neg (/repo/lib/calc.rb:9) d1; #8 Calc#abs (/repo/lib/calc.rb:12) d2%0A" \
+        "Partial mutation score: 50.0%25 (2 of 10 mutants)\n"
+      )
+    end
+
+    it "leaves out the in-flight line when nothing was running" do
+      reporter.summary([], invalid_count: 0, aborted: { reason: :memory_ceiling, in_flight: [], planned: nil })
+      expect(out.string.lines.last).to eq(
+        "::error title=Mutation run aborted::The run stopped early (memory ceiling), so this is not a full result.%0A" \
+        "Partial mutation score: n/a (0 mutants)\n"
+      )
+    end
+
+    it "prints no ::error on a finished run" do
+      reporter.summary([build_result(:killed)], invalid_count: 0)
+      expect(out.string).not_to include("::error")
+    end
+  end
+
   it "percent-encodes newlines and percents in the message" do
     result = build_result(:survived, description: "multi\nline 100%")
     reporter.summary([result], invalid_count: 0)

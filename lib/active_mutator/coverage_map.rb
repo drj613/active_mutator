@@ -8,13 +8,16 @@ module ActiveMutator
   class CoverageMap
     def self.load(path) = new(JSON.parse(File.read(path)))
 
-    attr_reader :version, :records
+    attr_reader :version, :records, :digests, :spec_paths
 
     def initialize(data)
       @version = data["version"]
       @records = data.fetch("records", {})
       @times = data.fetch("times", {})
       @digests = data.fetch("digests", {})
+      # A pre-0.4.0 cache predates spec_paths and has no key; treat that as the
+      # old implicit default so existing default-config caches stay valid.
+      @spec_paths = data.fetch("spec_paths", ["spec"])
       @map = build_map
     end
 

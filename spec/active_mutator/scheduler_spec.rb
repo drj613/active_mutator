@@ -46,6 +46,32 @@ RSpec.describe ActiveMutator::Scheduler do
     end
   end
 
+  def kill_test_group(pid)
+    Process.kill("KILL", -pid)
+  rescue Errno::ESRCH
+    nil
+  ensure
+    begin
+      Process.waitpid(pid)
+    rescue Errno::ECHILD
+      nil
+    end
+  end
+
+  def expect_descendant_stopped(pid)
+    Timeout.timeout(3) do
+      loop do
+        begin
+          Process.kill(0, pid)
+          return if File.exist?("/proc/#{pid}/stat") && File.read("/proc/#{pid}/stat").split[2] == "Z"
+        rescue Errno::ESRCH, Errno::ENOENT
+          return
+        end
+        sleep 0.02
+      end
+    end
+  end
+
   it "collects statuses reported by workers" do
     worker = ->(_m, _e, writer) { writer.puts(JSON.generate("status" => "killed", "details" => nil)) }
     results = scheduler(worker: worker).run([item, item, item])
@@ -66,6 +92,23 @@ RSpec.describe ActiveMutator::Scheduler do
     expect(Dir.children("/dev/fd").size).to eq(baseline)
   ensure
     GC.enable
+  end
+
+  it "closes both pipe ends and the stderr tempfile when fork fails" do
+    pipes = []
+    allow(IO).to receive(:pipe).and_wrap_original { |orig| orig.call.tap { |pair| pipes.concat(pair) } }
+    stderr_files = []
+    allow(Tempfile).to receive(:new).and_wrap_original { |orig, *a| orig.call(*a).tap { |t| stderr_files << t } }
+    sched = scheduler(worker: ->(_m, _e, _w) {})
+    failure = Errno::EAGAIN.new("fork unavailable")
+    allow(sched).to receive(:fork).and_raise(failure)
+
+    expect { sched.run([item]) }.to raise_error { |e| expect(e).to equal(failure) }
+    expect(pipes).to all(be_closed)
+    expect(stderr_files.map(&:path)).to eq([nil])
+  ensure
+    pipes.each { |io| io.close unless io.closed? }
+    stderr_files.each(&:close!)
   end
 
   it "closes the parent's reader copy inside the child" do
@@ -133,6 +176,53 @@ RSpec.describe ActiveMutator::Scheduler do
     expect(results.map(&:status)).to eq([:killed]) # exit! without close would drop the buffer
   end
 
+  it "drains reports larger than the pipe buffer while the worker is still running" do
+    details = "x" * 200_000
+    worker = ->(_m, _e, writer) { writer.puts(JSON.generate("status" => "killed", "details" => details)) }
+    results = run_bounded(scheduler(worker: worker), [item(timeout: 0.5)])
+    expect(results.first.status).to eq(:killed)
+    expect(results.first.details).to eq(details)
+  end
+
+  it "enforces the deadline after a worker exits with a descendant holding its writer open" do
+    Dir.mktmpdir do |dir|
+      pids_path = File.join(dir, "pids")
+      worker = lambda do |_m, _e, writer|
+        parent = Process.pid
+        fork do
+          File.write(pids_path, "#{parent} #{Process.pid}")
+          sleep 30
+          Process.exit!(0)
+        end
+        writer.puts(JSON.generate("status" => "killed", "details" => nil))
+      end
+      results = run_bounded(scheduler(worker: worker), [item(timeout: 0.3)])
+      expect(results.map(&:status)).to eq([:timeout])
+      expect_descendant_stopped(File.read(pids_path).split.last.to_i)
+    ensure
+      kill_test_group(File.read(pids_path).split.first.to_i) if File.exist?(pids_path)
+    end
+  end
+
+  it "enforces the deadline after a worker reports and closes its writer without exiting" do
+    Dir.mktmpdir do |dir|
+      pid_path = File.join(dir, "pid")
+      worker = lambda do |_m, _e, writer|
+        File.write(pid_path, Process.pid.to_s)
+        writer.puts(JSON.generate("status" => "killed", "details" => nil))
+        writer.close
+        sleep 30
+      end
+      results = run_bounded(scheduler(worker: worker), [item(timeout: 0.2)])
+      expect(results.map(&:status)).to eq([:timeout])
+      pid = File.read(pid_path).to_i
+      expect_process_gone(pid)
+      expect { Process.waitpid(pid, Process::WNOHANG) }.to raise_error(Errno::ECHILD)
+    ensure
+      kill_test_group(File.read(pid_path).to_i) if File.exist?(pid_path)
+    end
+  end
+
   it "terminates workers with exit! so child at_exit hooks never run" do
     Dir.mktmpdir do |dir|
       flag = File.join(dir, "flag")
@@ -159,81 +249,129 @@ RSpec.describe ActiveMutator::Scheduler do
     end
   end
 
-  it "kills running workers and exits with status 130 on SIGINT" do
-    # Touch install_signal_handlers in THIS process too: the real assertion runs
-    # in a fork, and forked coverage never reaches the baseline coverage map, so
-    # without this the example is never selected to run against these mutants.
-    scheduler(worker: ->(_m, _e, _w) {}).run([])
-    Dir.mktmpdir do |dir|
-      worker_pid_file = File.join(dir, "worker_pid")
-      supervisor = fork do
-        sched = described_class.new(jobs: 1, worker: lambda do |_m, _e, _w|
-          File.write(worker_pid_file, Process.pid.to_s)
+  describe "aborting" do
+    let(:flag) { ActiveMutator::AbortFlag.new }
+    let(:mutation) do
+      subject = ActiveMutator::Subject.new(name: "Foo#bar", file: "/app/foo.rb", byte_range: 0...10,
+                                           line_range: 9..11, constant_scope: "Foo", kind: :instance)
+      ActiveMutator::Mutation.new(
+        subject: subject, original_snippet: ">", line: 10,
+        edit: ActiveMutator::Edit.new(range: 3...4, replacement: ">=", description: "replace > with >="),
+        mutated_file_source: nil, mutated_def_source: nil, mutated_def_line: nil
+      )
+    end
+
+    def work(timeout: 30.0) = ActiveMutator::WorkItem.new(mutation: mutation, example_ids: [], timeout: timeout, lane: :parallel)
+
+    it "kills every running worker at once and raises with the finished results and the in-flight list" do
+      Dir.mktmpdir do |dir|
+        worker = lambda do |_m, _e, writer|
+          n = Dir.children(dir).size
+          File.write(File.join(dir, Process.pid.to_s), "")
+          next writer.puts(JSON.generate("status" => "killed", "details" => nil)) if n.zero?
+
           sleep 30
-        end)
-        sched.run([item])
-        Process.exit!(99) # unreachable: the INT trap must exit the process first
-      end
-      begin
-        deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + 5
-        sleep 0.05 until File.exist?(worker_pid_file) ||
-                         Process.clock_gettime(Process::CLOCK_MONOTONIC) > deadline
-        expect(File).to exist(worker_pid_file) # clean failure instead of ENOENT on slow CI
-        worker_pid = File.read(worker_pid_file).to_i
-        expect(worker_pid).to be > 0
-        Process.kill("INT", supervisor)
-        status = wait_with_deadline(supervisor, 5)
-        expect(status&.exitstatus).to eq(130)
-        expect_process_gone(worker_pid)
-      ensure
+        end
+        readers = []
+        allow(IO).to receive(:pipe).and_wrap_original { |orig| orig.call.tap { |r, _| readers << r } }
+        stderr_files = []
+        allow(Tempfile).to receive(:new).and_wrap_original { |orig, *a| orig.call(*a).tap { |t| stderr_files << t } }
+        sched = described_class.new(jobs: 1, worker: worker, abort: flag)
+        tripper = Thread.new do
+          sleep 0.02 until Dir.children(dir).size >= 2
+          flag.trip!(:sigterm)
+        end
+        started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+
+        error = nil
         begin
-          Process.kill("KILL", supervisor)
-          Process.waitpid(supervisor)
-        rescue StandardError
-          nil
+          Timeout.timeout(5) { sched.run([work, work, work]) }
+        rescue ActiveMutator::Aborted => e
+          error = e
         end
-        if File.exist?(worker_pid_file)
-          [-File.read(worker_pid_file).to_i, File.read(worker_pid_file).to_i].each do |target|
-            Process.kill("KILL", target)
-          rescue StandardError
-            nil
+        tripper.join
+
+        expect(Process.clock_gettime(Process::CLOCK_MONOTONIC) - started).to be < 3
+        expect(error.reason).to eq(:sigterm)
+        expect(error.results.map(&:status)).to eq([:killed])
+        sleeper = Dir.children(dir).map(&:to_i).max_by { |pid| File.mtime(File.join(dir, pid.to_s)) }
+        expect(error.in_flight).to eq([{ seq: 2, pid: sleeper, subject: "Foo#bar", file: "/app/foo.rb", line: 10,
+                                         description: "replace > with >=" }])
+        # Killed but not waited for (the abort path doesn't wait): reaping it
+        # now proves it died.
+        _, status = Timeout.timeout(2) { Process.waitpid2(sleeper) }
+        expect(status.termsig).to eq(9)
+        expect(readers.size).to eq(2)
+        expect(readers).to all(be_closed)
+        expect(stderr_files.map(&:path)).to eq([nil, nil]) # deleted, not left for GC
+      end
+    end
+
+    it "stops filling the pool when the flag trips between two spawns" do
+      sched = described_class.new(jobs: 3, worker: ->(_m, _e, _w) { sleep 30 }, abort: flag)
+      allow(sched).to receive(:spawn).and_wrap_original do |orig, *args|
+        orig.call(*args).tap { flag.trip!(:sigterm) }
+      end
+
+      expect { Timeout.timeout(5) { sched.run([work, work, work]) } }
+        .to raise_error(ActiveMutator::Aborted) { |e| expect(e.in_flight.size).to eq(1) }
+      expect(sched).to have_received(:spawn).once
+    end
+
+    it "spawns nothing when the flag tripped before the run" do
+      flag.deferred { flag.trip!(:sigint) }
+      spawned = false
+      sched = described_class.new(jobs: 1, worker: ->(_m, _e, _w) { spawned = true }, abort: flag)
+      expect { sched.run([work]) }.to raise_error(ActiveMutator::Aborted, /sigint/)
+      expect(spawned).to be(false)
+    end
+
+    %i[sigterm memory_ceiling].each do |reason|
+      it "honors #{reason} after an exited worker leaves its writer open in a descendant" do
+        Dir.mktmpdir do |dir|
+          pids_path = File.join(dir, "pids")
+          worker = lambda do |_m, _e, writer|
+            parent = Process.pid
+            fork do
+              File.write(pids_path, "#{parent} #{Process.pid}")
+              sleep 30
+              Process.exit!(0)
+            end
+            writer.puts(JSON.generate("status" => "killed", "details" => nil))
           end
+          previous = trap("TERM") { flag.trip!(:sigterm) } if reason == :sigterm
+          tripper = Thread.new do
+            Timeout.timeout(2) do
+              sleep 0.02 until File.exist?(pids_path)
+              worker_pid = File.read(pids_path).split.first.to_i
+              loop do
+                begin
+                  Process.kill(0, worker_pid)
+                rescue Errno::ESRCH
+                  break
+                end
+                sleep 0.02
+              end
+            end
+            reason == :sigterm ? Process.kill("TERM", Process.pid) : flag.trip!(reason)
+          end
+          error = nil
+          expect do
+            run_bounded(described_class.new(jobs: 1, worker: worker, abort: flag), [work])
+          end.to raise_error(ActiveMutator::Aborted) { |e| error = e }
+          tripper.join
+          worker_pid, descendant = File.read(pids_path).split.map(&:to_i)
+          expect(error.reason).to eq(reason)
+          expect(error.results).to be_empty
+          expect(error.in_flight).to include(hash_including(pid: worker_pid, seq: 1))
+          expect_descendant_stopped(descendant)
+        ensure
+          tripper&.kill&.join
+          trap("TERM", previous) if reason == :sigterm
+          kill_test_group(File.read(pids_path).split.first.to_i) if File.exist?(pids_path)
         end
       end
     end
-  end
-
-  it "installs INT handling for the duration of the run and restores the previous handler" do
-    sentinel = proc {}
-    previous_int = trap("INT", sentinel)
-    begin
-      during = nil
-      worker = ->(_m, _e, writer) { writer.puts(JSON.generate("status" => "killed", "details" => nil)) }
-      on_result = lambda do |_r|
-        during = trap("INT", sentinel) # peek at the active handler...
-        trap("INT", during)            # ...and put it straight back
-      end
-      scheduler(worker: worker, on_result: on_result).run([item])
-      expect(during).not_to eq(sentinel) # scheduler's own handler was active mid-run
-      expect(trap("INT", "DEFAULT")).to eq(sentinel) # original handler restored after
-    ensure
-      trap("INT", previous_int || "DEFAULT")
-    end
-  end
-
-  it "does not mask an install-time failure by restoring traps that were never captured" do
-    # If install_signal_handlers itself raises, previous_traps is nil; the
-    # ensure must skip restoration rather than crash on nil (which would
-    # replace the original error with a NoMethodError).
-    sched = scheduler(worker: ->(_m, _e, _w) {})
-    allow(sched).to receive(:install_signal_handlers).and_raise(ActiveMutator::Error, "boom")
-    expect { sched.run([]) }.to raise_error(ActiveMutator::Error, "boom")
-  end
-
-  it "restores DEFAULT for signals whose previous handler was nil" do
-    trap("USR1", proc {})
-    scheduler(worker: ->(_m, _e, _w) {}).send(:restore_traps, { "USR1" => nil })
-    expect(trap("USR1", "DEFAULT")).to eq("DEFAULT")
   end
 
   it "aborts and kills workers when the parent is orphaned" do
@@ -249,18 +387,23 @@ RSpec.describe ActiveMutator::Scheduler do
   end
 
   it "leaves no live worker processes behind after an orphaned abort" do
-    pid_file = Tempfile.new("pids").path
-    worker = lambda do |_m, _e, _w|
-      File.open(pid_file, "a") { |f| f.flock(File::LOCK_EX); f.puts(Process.pid) }
-      sleep 30
+    Tempfile.create("pids") do |file|
+      pid_file = file.path
+      worker = lambda do |_m, _e, _w|
+        File.open(pid_file, "a") { |f| f.flock(File::LOCK_EX); f.puts(Process.pid) }
+        sleep 30
+      end
+      orphaned = lambda do
+        GC.start
+        File.read(pid_file).lines.size >= 2 # both workers running
+      end
+      sched = described_class.new(jobs: 2, worker: worker, orphaned: orphaned)
+      expect { run_bounded(sched, [item, item]) }
+        .to raise_error(ActiveMutator::Scheduler::OrphanedError)
+      pids = File.readlines(pid_file).map(&:to_i)
+      expect(pids.size).to eq(2)
+      pids.each { |pid| expect_process_gone(pid) }
     end
-    orphaned = -> { File.read(pid_file).lines.size >= 2 } # both workers running
-    sched = described_class.new(jobs: 2, worker: worker, orphaned: orphaned)
-    expect { run_bounded(sched, [item, item]) }
-      .to raise_error(ActiveMutator::Scheduler::OrphanedError)
-    pids = File.readlines(pid_file).map(&:to_i)
-    expect(pids.size).to eq(2)
-    pids.each { |pid| expect_process_gone(pid) }
   end
 
   it "marks payloads missing a status key as :error instead of crashing" do
@@ -339,25 +482,31 @@ RSpec.describe ActiveMutator::Scheduler do
   end
 
   it "actually kills the timed-out worker process and closes its pipe" do
-    GC.disable
-    pid_file = Tempfile.new("pid").path
-    baseline = Dir.children("/dev/fd").size
-    worker = lambda do |_m, _e, _w|
-      File.write(pid_file, Process.pid.to_s)
-      sleep 30
-    end
-    results = run_bounded(scheduler(worker: worker), [item(timeout: 0.3)])
-    expect(results.map(&:status)).to eq([:timeout])
-    pid = File.read(pid_file).to_i
-    expect(pid).to be > 0
-    expect_process_gone(pid)
-    expect(Dir.children("/dev/fd").size).to eq(baseline)
-  ensure
-    GC.enable
-    begin
-      Process.kill("KILL", File.read(pid_file).to_i) # cleanup if the mutant leaked it
-    rescue StandardError
-      nil
+    Tempfile.create("pid") do |file|
+      GC.start
+      GC.disable
+      pid_file = file.path
+      baseline = Dir.children("/dev/fd").size
+      worker = lambda do |_m, _e, _w|
+        File.write(pid_file, Process.pid.to_s)
+        sleep 30
+      end
+      results = run_bounded(scheduler(worker: worker, on_result: ->(_) { GC.start }), [item(timeout: 0.3)])
+      expect(results.map(&:status)).to eq([:timeout])
+      pid = File.read(pid_file).to_i
+      expect(pid).to be > 0
+      expect_process_gone(pid)
+      expect(Dir.children("/dev/fd").size).to eq(baseline)
+    ensure
+      GC.enable
+      leaked = File.read(pid_file).to_i
+      begin
+        # Cleanup if the mutant leaked it. An empty pid file reads as 0, and
+        # kill(0) would signal our own process group.
+        Process.kill("KILL", leaked) if leaked.positive?
+      rescue StandardError
+        nil
+      end
     end
   end
 
@@ -377,6 +526,128 @@ RSpec.describe ActiveMutator::Scheduler do
     scheduler(worker: worker, jobs: 2).run([item, item, item, item])
     elapsed = Process.clock_gettime(Process::CLOCK_MONOTONIC) - started
     expect(elapsed).to be >= 0.3 # 4 items / 2 jobs => at least two waves
+  end
+
+  describe "events" do
+    let(:mutation) do
+      subject = ActiveMutator::Subject.new(name: "Foo#bar", file: "/app/models/foo.rb", byte_range: 0...10,
+                                           line_range: 9..11, constant_scope: "Foo", kind: :instance)
+      ActiveMutator::Mutation.new(
+        subject: subject, original_snippet: ">", line: 10,
+        edit: ActiveMutator::Edit.new(range: 3...4, replacement: ">=", description: "replace > with >="),
+        mutated_file_source: nil, mutated_def_source: nil, mutated_def_line: nil
+      )
+    end
+    let(:events) { [] }
+    let(:bus) { ActiveMutator::Events.new.subscribe { |e| events << e } }
+
+    def work(timeout: 5.0, lane: :parallel)
+      ActiveMutator::WorkItem.new(mutation: mutation, example_ids: %w[a b], timeout: timeout, lane: lane)
+    end
+
+    it "emits mutant_start with the pid and plan, and mutant_end with status, time, and peak" do
+      allow(ActiveMutator::MemoryProbe).to receive(:peak_rss_kb).and_return(812) # inherited by the fork
+      worker = ->(_m, _e, writer) { writer.puts(JSON.generate("status" => "killed", "details" => nil)) }
+      results = described_class.new(jobs: 1, worker: worker, events: bus).run([work])
+
+      start, finish = events
+      expect(start.type).to eq(:mutant_start)
+      expect(start.fields.except(:pid))
+        .to eq(seq: 1, lane: :parallel, budget: 5.0, examples: 2, subject: "Foo#bar",
+               file: "/app/models/foo.rb", line: 10, description: "replace > with >=")
+      expect(start.fields[:pid]).to be_a(Integer).and(be > 0)
+      expect(finish.type).to eq(:mutant_end)
+      expect(finish.fields.except(:seconds))
+        .to eq(seq: 1, pid: start.fields[:pid], status: :killed, peak_rss_kb: 812)
+      expect(finish.fields[:seconds]).to be_a(Float).and(be >= 0)
+      expect(results.first.to_h.slice(:seconds, :peak_rss_kb)).to eq(seconds: finish.fields[:seconds], peak_rss_kb: 812)
+    end
+
+    it "numbers mutants from first_seq on" do
+      worker = ->(_m, _e, writer) { writer.puts(JSON.generate("status" => "killed", "details" => nil)) }
+      described_class.new(jobs: 1, worker: worker, events: bus, first_seq: 7).run([work, work])
+
+      expect(events.select { |e| e.type == :mutant_start }.map { |e| e.fields[:seq] }).to eq([7, 8])
+    end
+
+    it "emits mutant_end for a timed-out worker" do
+      sched = described_class.new(jobs: 1, worker: ->(_m, _e, _w) { sleep 30 }, events: bus)
+      results = run_bounded(sched, [work(timeout: 0.2)])
+
+      finish = events.last
+      expect(finish.fields.slice(:seq, :status, :peak_rss_kb)).to eq(seq: 1, status: :timeout, peak_rss_kb: nil)
+      expect(finish.fields[:seconds]).to be >= 0.2
+      expect(results.first.seconds).to eq(finish.fields[:seconds])
+    end
+
+    it "carries the elapsed time on an unparseable payload" do
+      worker = ->(_m, _e, writer) { writer.puts("{nope") }
+      results = described_class.new(jobs: 1, worker: worker, events: bus).run([work])
+
+      expect(results.first.seconds).to be_a(Float)
+      expect(events.last.fields.slice(:status, :seconds)).to eq(status: :error, seconds: results.first.seconds)
+    end
+
+    it "leaves the peak nil where the worker cannot read it (off Linux)" do
+      allow(ActiveMutator::MemoryProbe).to receive(:peak_rss_kb).and_return(nil)
+      worker = ->(_m, _e, writer) { writer.puts(JSON.generate("status" => "survived", "details" => nil)) }
+      results = described_class.new(jobs: 1, worker: worker, events: bus).run([work])
+
+      expect(results.first.peak_rss_kb).to be_nil
+    end
+
+    it "kills and reaps workers and closes their resources when the NDJSON sink fails" do
+      output = double("full filesystem", :sync= => nil)
+      failure = Errno::ENOSPC.new("events disk full")
+      allow(output).to receive(:write).and_raise(failure)
+      pid = nil
+      bus.subscribe { |event| pid = event.fields[:pid] if event.type == :mutant_start }
+      bus.subscribe(ActiveMutator::Diagnostics::Ndjson.new(output))
+      readers = []
+      allow(IO).to receive(:pipe).and_wrap_original { |orig| orig.call.tap { |r, _| readers << r } }
+      stderr_files = []
+      allow(Tempfile).to receive(:new).and_wrap_original { |orig, *a| orig.call(*a).tap { |t| stderr_files << t } }
+      sched = described_class.new(jobs: 1, events: bus, worker: ->(_m, _e, _w) { sleep 30 })
+
+      expect { run_bounded(sched, [work]) }.to raise_error { |e| expect(e).to equal(failure) }
+      expect(pid).to be > 0
+      expect { Process.kill(0, pid) }.to raise_error(Errno::ESRCH)
+      expect { Process.waitpid(pid, Process::WNOHANG) }.to raise_error(Errno::ECHILD)
+      expect(readers).to all(be_closed)
+      expect(stderr_files.map(&:path)).to eq([nil])
+    ensure
+      kill_test_group(pid) if pid
+    end
+
+    it "cleans up the finished entry and other workers when the NDJSON sink fails at mutant_end" do
+      failure = Errno::ENOSPC.new("events disk full")
+      output = double("full filesystem", :sync= => nil)
+      allow(output).to receive(:write) do |line|
+        raise failure if JSON.parse(line)["event"] == "mutant_end"
+
+        line.bytesize
+      end
+      bus.subscribe(ActiveMutator::Diagnostics::Ndjson.new(output))
+      worker = lambda do |_m, ids, writer|
+        sleep(ids == ["slow"] ? 30 : 0.1)
+        writer.puts(JSON.generate("status" => "killed", "details" => nil))
+      end
+      slow = ActiveMutator::WorkItem.new(mutation: mutation, example_ids: ["slow"], timeout: 5, lane: :parallel)
+      readers = []
+      allow(IO).to receive(:pipe).and_wrap_original { |orig| orig.call.tap { |r, _| readers << r } }
+      stderr_files = []
+      allow(Tempfile).to receive(:new).and_wrap_original { |orig, *a| orig.call(*a).tap { |t| stderr_files << t } }
+      sched = described_class.new(jobs: 2, events: bus, worker: worker)
+
+      expect { run_bounded(sched, [work, slow]) }.to raise_error { |e| expect(e).to equal(failure) }
+      pids = events.select { |e| e.type == :mutant_start }.map { |e| e.fields[:pid] }
+      expect(pids.size).to eq(2)
+      pids.each { |pid| expect_process_gone(pid) }
+      expect(readers).to all(be_closed)
+      expect(stderr_files.map(&:path)).to eq([nil, nil])
+    ensure
+      events.select { |e| e.type == :mutant_start }.each { |e| kill_test_group(e.fields[:pid]) }
+    end
   end
 
   describe "adaptive timeouts" do
@@ -475,16 +746,20 @@ RSpec.describe ActiveMutator::Scheduler do
     # Workers run in forked child processes, so an in-memory Queue can't
     # observe cross-process ordering (fork gives each child its own copy —
     # pushes never reach the parent). Use a flock-guarded append log instead.
-    log_path = Tempfile.new("order").path
-    append = ->(line) { File.open(log_path, "a") { |f| f.flock(File::LOCK_EX); f.puts(line) } }
-    worker = lambda do |_m, _e, writer|
-      append.call("start")
-      sleep 0.1
-      append.call("finish")
-      writer.puts(JSON.generate("status" => "killed", "details" => nil))
+    Tempfile.create("order") do |file|
+      log_path = file.path
+      append = ->(line) { File.open(log_path, "a") { |f| f.flock(File::LOCK_EX); f.puts(line) } }
+      worker = lambda do |_m, _e, writer|
+        append.call("start")
+        sleep 0.1
+        append.call("finish")
+        writer.puts(JSON.generate("status" => "killed", "details" => nil))
+      end
+      results = scheduler(worker: worker, jobs: 2, on_result: ->(_) { GC.start })
+        .run([item(lane: :serial), item(lane: :serial)])
+      expect(results.map(&:status)).to eq(%i[killed killed])
+      events = File.readlines(log_path).map { |l| l.chomp.to_sym }
+      expect(events).to eq(%i[start finish start finish]) # never two concurrent starts
     end
-    scheduler(worker: worker, jobs: 2).run([item(lane: :serial), item(lane: :serial)])
-    events = File.readlines(log_path).map { |l| l.chomp.to_sym }
-    expect(events).to eq(%i[start finish start finish]) # never two concurrent starts
   end
 end

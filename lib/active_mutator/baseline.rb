@@ -7,47 +7,68 @@ module ActiveMutator
   # caches the CoverageMap. Invalidation is coarse: any digest change in
   # {app,lib}/**/*.rb or the configured spec paths triggers a full re-run.
   class Baseline
-    def initialize(root:, spec_paths: ["spec"], cache_dir: File.join(root, ".active_mutator"))
+    def initialize(root:, spec_paths: ["spec"], cache_dir: File.join(root, ".active_mutator"), events: Events.new,
+                   abort: AbortFlag.new)
+      @abort = abort
       @root = root
       @spec_paths = spec_paths
       @cache_dir = cache_dir
       @out_path = File.join(cache_dir, "coverage.json")
+      @events = events
     end
 
-    attr_reader :last_refresh
+    POLL_SECONDS = 0.05
+
+    # child_pid: the running baseline child, nil between runs. Read by the
+    # memory sampler from its own thread.
+    attr_reader :last_refresh, :child_pid
 
     def coverage_map(force: false)
       digests = current_digests
-      if !force && File.exist?(@out_path)
-        map = CoverageMap.load(@out_path)
-        # A spec_paths change silently degrades the delta classifier: files
-        # under a removed spec path just vanish from the digest scan, so
-        # BaselineDelta treats their stale example records as untouched
-        # source coverage instead of dropping them. Force a full rebuild
-        # whenever the configured spec_paths differ from what the cache was
-        # stamped with.
-        if stored_spec_paths(map) == @spec_paths && map.fresh?(digests)
-          @last_refresh = :cached
-          return map
-        end
-        if stored_spec_paths(map) == @spec_paths && map.version == 2
-          delta = BaselineDelta.compute(old_digests: stored_digests(map), new_digests: digests,
-                                        coverage_map: map, root: @root, spec_paths: @spec_paths)
-          unless delta.full?
-            run_partial!(delta)
-            stamp_digests(digests)
-            @last_refresh = :partial
-            return CoverageMap.load(@out_path)
-          end
-        end
+      unless force
+        map = reuse_cache(digests)
+        return map if map
       end
-      run_baseline!
-      stamp_digests(digests)
+      data = run_baseline!
       @last_refresh = :full
-      CoverageMap.load(@out_path)
+      stamp(data, digests)
     end
 
     private
+
+    # The cached map, refreshed in place when a delta allows it; nil when only
+    # a full rebuild will do. The old map (records plus its inverted index)
+    # lives only in this method, so it is garbage before the full rebuild's
+    # child starts.
+    def reuse_cache(digests)
+      return unless File.exist?(@out_path)
+
+      data = load_payload
+      map = CoverageMap.new(data)
+      # A spec_paths change silently degrades the delta classifier: files
+      # under a removed spec path just vanish from the digest scan, so
+      # BaselineDelta treats their stale example records as untouched
+      # source coverage instead of dropping them. Force a full rebuild
+      # whenever the configured spec_paths differ from what the cache was
+      # stamped with.
+      return unless map.spec_paths == @spec_paths
+
+      if map.fresh?(digests)
+        @last_refresh = :cached
+        return map
+      end
+      return unless map.version == 2
+
+      delta = BaselineDelta.compute(old_digests: map.digests, new_digests: digests,
+                                    coverage_map: map, root: @root, spec_paths: @spec_paths)
+      return if delta.full?
+
+      # The map shares data["records"], and the merge edits it in place: the
+      # old map must not be read past this point.
+      run_partial!(delta, data)
+      @last_refresh = :partial
+      stamp(data, digests)
+    end
 
     # The cache is disposable and must never be committed. Host projects
     # rarely gitignore it themselves, so the directory ignores its own
@@ -60,22 +81,31 @@ module ActiveMutator
 
     def run_baseline!
       prepare_cache_dir
-      env = baseline_env(@out_path)
-      # out: :err: the subprocess suite's progress output must not pollute
-      # our stdout (breaks `--format json` consumers).
-      ok = system(env, "bundle", "exec", "rspec", chdir: @root, out: :err)
+      ok = run_rspec(@out_path)
       raise BaselineFailed, "baseline suite failed, fix the suite before mutating" unless ok
       raise BaselineFailed, "baseline produced no coverage output" unless File.exist?(@out_path)
 
-      verify_complete!(@out_path)
+      data = load_payload
+      verify_complete!(data)
+      data
+    end
+
+    # Its own phase, apart from the child's run: 0.6.0 died here, in the
+    # parent reading a huge file back. The size goes out BEFORE the parse, so
+    # the log names the cause even if nothing runs after it, and --max-rss
+    # can stop the run before the parse.
+    def load_payload(path = @out_path)
+      @events.emit(:phase_start, phase: :coverage_load, bytes: File.size(path))
+      data = JSON.parse(File.read(path))
+      @events.emit(:phase_end, phase: :coverage_load, examples: data.fetch("records", {}).size)
+      data
     end
 
     # An aborted subprocess can still exit 0 with a partial map (RSpec
     # rescues Errno::EPIPE and runs after(:suite)); stamping that as fresh
     # silently reports every mutant uncovered. Payloads without the count
     # predate this check and are accepted as-is.
-    def verify_complete!(out_path)
-      payload = JSON.parse(File.read(out_path))
+    def verify_complete!(payload)
       expected = payload["expected_examples"]
       return unless expected
 
@@ -85,6 +115,60 @@ module ActiveMutator
       raise BaselineFailed,
             "baseline aborted early: #{recorded} of #{expected} examples recorded — " \
             "re-run without interrupting the suite"
+    end
+
+    # Spawned and polled, not `system`, so the parent knows the child's pid
+    # and keeps control while it runs. out: :err: the subprocess suite's
+    # progress output must not pollute our stdout (breaks `--format json`
+    # consumers).
+    #
+    # The phase starts once the child exists, so it carries the pid the
+    # memory sampler follows. The child gets its own process group so an
+    # abort can kill the whole suite (browsers, app servers) in one signal;
+    # a Ctrl-C reaches it through the Runner's trap instead of the terminal.
+    # So does nothing else: a hangup from a closed terminal never reaches it,
+    # so anything that ends the wait early (an abort, SIGHUP, SIGQUIT) kills
+    # the group on the way out.
+    def run_rspec(out_path, targets = [])
+      status = nil
+      @abort.deferred do
+        @child_pid = Process.spawn(baseline_env(out_path), *rspec_command(targets), chdir: @root, out: :err,
+                                                                                    pgroup: true)
+        status = @events.phase(:baseline, refresh: targets.empty? ? :full : :partial, pid: @child_pid) do
+          wait_child(@child_pid)
+        end
+        # The memory sample taken as the phase ends can trip the ceiling.
+        # Stop here, before the coverage parse: that's the spike it guards.
+        raise Aborted, @abort.reason if @abort.tripped?
+
+        status.success?
+      end
+    rescue SystemCallError # `bundle` missing: `system` returned nil here
+      false
+    ensure
+      kill_group(@child_pid) if @child_pid && status.nil?
+      @child_pid = nil
+    end
+
+    def rspec_command(targets) = ["bundle", "exec", "rspec", *targets]
+
+    # The flag is checked after the wait, so a trip that lands as the child
+    # exits still stops the run here, not after the coverage parse.
+    # run_rspec kills the child's group on the way out.
+    def wait_child(pid)
+      loop do
+        _, status = Process.waitpid2(pid, Process::WNOHANG)
+        raise Aborted, @abort.reason if @abort.tripped?
+        return status if status
+
+        sleep POLL_SECONDS
+      end
+    end
+
+    def kill_group(pid)
+      Process.kill("KILL", -pid)
+    rescue Errno::ESRCH, Errno::EPERM
+      nil # already gone
     end
 
     def baseline_env(out_path)
@@ -106,36 +190,25 @@ module ActiveMutator
       }
     end
 
-    def stored_digests(map)
-      JSON.parse(File.read(@out_path)).fetch("digests", {})
-    end
-
-    # A pre-0.4.0 cache predates spec_paths and has no key; treat that as the
-    # old implicit default so existing default-config caches stay valid.
-    def stored_spec_paths(map)
-      JSON.parse(File.read(@out_path)).fetch("spec_paths", ["spec"])
-    end
-
-    def run_partial!(delta)
-      targets = delta.rerun_spec_files + delta.rerun_example_ids
+    def run_partial!(delta, cache)
       partial_out = File.join(@cache_dir, "partial.json")
+      targets = delta.rerun_spec_files + delta.rerun_example_ids
+      part = {}
       if targets.any?
-        env = baseline_env(partial_out)
-        ok = system(env, "bundle", "exec", "rspec", *targets, chdir: @root, out: :err)
+        ok = run_rspec(partial_out, targets)
         raise BaselineFailed, "partial baseline run failed, fix the suite before mutating" unless ok
         raise BaselineFailed, "partial baseline produced no output" unless File.exist?(partial_out)
 
-        verify_complete!(partial_out)
+        part = load_payload(partial_out)
+        verify_complete!(part)
       end
-      merge_partial!(partial_out, delta)
+      merge_partial!(cache, part, delta)
     ensure
-      FileUtils.rm_f(partial_out) if partial_out
+      FileUtils.rm_f(partial_out)
     end
 
-    def merge_partial!(partial_out, delta)
-      cache = JSON.parse(File.read(@out_path))
-      part = File.exist?(partial_out) ? JSON.parse(File.read(partial_out)) : { "records" => {}, "times" => {} }
-
+    # Edits `cache` in place; the caller stamps and writes it.
+    def merge_partial!(cache, part, delta)
       rerun_prefixes = delta.rerun_spec_files.map { |rel| "#{rel}[" }
       obsolete = lambda do |example_id|
         bare = example_id.sub(%r{\A\./}, "")
@@ -151,14 +224,15 @@ module ActiveMutator
       end
       cache["records"].merge!(part.fetch("records", {}))
       cache["times"].merge!(part.fetch("times", {}))
-      AtomicFile.write(@out_path, JSON.generate(cache))
     end
 
-    def stamp_digests(digests)
-      data = JSON.parse(File.read(@out_path))
+    # Writes the stamped payload once and builds the map from the hash in
+    # hand, so the file is never parsed back.
+    def stamp(data, digests)
       data["digests"] = digests
       data["spec_paths"] = @spec_paths
       AtomicFile.write(@out_path, JSON.generate(data))
+      CoverageMap.new(data)
     end
 
     def current_digests

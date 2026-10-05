@@ -37,6 +37,39 @@ RSpec.describe ActiveMutator::Reporter::Terminal do
     expect(text).to include("- <", "+ <=")
   end
 
+  describe "an aborted run" do
+    let(:in_flight) do
+      [{ seq: 13, pid: 4242, subject: "Foo#baz", file: "app/models/foo.rb", line: 40, description: "replace > with >=" }]
+    end
+
+    it "labels the score partial, never as a finished score, and lists what was in flight" do
+      results = [result(:killed), result(:killed), result(:timeout), result(:survived)]
+      reporter.summary(results, invalid_count: 0, aborted: { reason: :sigterm, in_flight: in_flight, planned: 764 })
+      text = out.string
+
+      expect(text).to include("killed: 2", "survived: 1")
+      expect(text).to include("invalid (discarded): 0\n\nRun aborted (SIGTERM): partial results\n" \
+                              "In flight (stopped before a verdict):\n" \
+                              "  #13 Foo#baz (app/models/foo.rb:40) replace > with >=\n" \
+                              "Partial mutation score: 75.0% (4 of 764 mutants)\n")
+      expect(text).not_to include("Mutation score:")
+      expect(text).to include("Surviving mutants:") # finished survivors still print
+    end
+
+    it "names the memory ceiling, skips an empty in-flight list, and has no score when nothing finished" do
+      reporter.summary([], invalid_count: 0, aborted: { reason: :memory_ceiling, in_flight: [], planned: nil })
+      text = out.string
+
+      expect(text).to include("\nRun aborted (memory ceiling): partial results\nPartial mutation score: n/a (0 mutants)\n")
+      expect(text).not_to include("In flight")
+    end
+
+    it "names SIGINT" do
+      reporter.summary([], invalid_count: 0, aborted: { reason: :sigint, in_flight: [], planned: 3 })
+      expect(out.string).to include("Run aborted (SIGINT): partial results\nPartial mutation score: n/a (0 of 3 mutants)")
+    end
+  end
+
   it "prints every status at zero and no score line for an empty plan" do
     reporter.summary([], invalid_count: 0, empty_plan: true)
     text = out.string

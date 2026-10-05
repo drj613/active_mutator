@@ -213,6 +213,32 @@ RSpec.describe ActiveMutator::ConfigFile do
     expect { described_class.load(root) }.to raise_error(ActiveMutator::Error, /requires must be a list of strings/)
   end
 
+  it "reads max_rss as a size string or plain MB, in kB, and rejects anything else" do
+    write_config("max_rss: 6G\n")
+    expect(described_class.load(root)).to eq(max_rss: 6 * 1024 * 1024)
+    write_config("max_rss: 6144\n")
+    expect(described_class.load(root)).to eq(max_rss: 6144 * 1024)
+    write_config("max_rss: [6G]\n")
+    expect { described_class.load(root) }
+      .to raise_error(ActiveMutator::Error, ".active_mutator.yml: max_rss must be a size like 6G, 6144M, or 6144 (MB)")
+  end
+
+  it "accepts a positive sample_interval and rejects zero or a non-number" do
+    write_config("sample_interval: 2\n")
+    expect(described_class.load(root)).to eq(sample_interval: 2.0)
+    write_config("sample_interval: 0\n")
+    expect { described_class.load(root) }.to raise_error(ActiveMutator::Error, ".active_mutator.yml: sample_interval must be > 0")
+    write_config("sample_interval: soon\n")
+    expect { described_class.load(root) }.to raise_error(ActiveMutator::Error, ".active_mutator.yml: sample_interval must be a number")
+  end
+
+  it "accepts a string events_file and rejects anything else" do
+    write_config("events_file: tmp/run.ndjson\n")
+    expect(described_class.load(root)).to eq(events_file: "tmp/run.ndjson")
+    write_config("events_file: 3\n")
+    expect { described_class.load(root) }.to raise_error(ActiveMutator::Error, ".active_mutator.yml: events_file must be a string")
+  end
+
   it "rejects a non-boolean class_level" do
     write_config("class_level: 1\n")
     expect { described_class.load(root) }.to raise_error(ActiveMutator::Error, /class_level must be true or false/)
