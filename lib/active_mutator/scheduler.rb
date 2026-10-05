@@ -37,6 +37,8 @@ module ActiveMutator
         run_pool(items.select { |i| i.lane == :serial }, 1, running, results)
       end
       results
+    ensure
+      cleanup(running)
     end
 
     private
@@ -61,11 +63,7 @@ module ActiveMutator
         { seq: entry[:seq], pid: pid, subject: m.subject.name, file: m.subject.file, line: m.line,
           description: m.description }
       end
-      running.each do |pid, entry|
-        signal_group(pid)
-        entry[:reader].close
-        entry[:stderr_file].close!
-      end
+      cleanup(running, wait: false)
       raise Aborted.new(@abort.reason, results: results, in_flight: in_flight)
     end
 
@@ -76,18 +74,27 @@ module ActiveMutator
     def abort_if_orphaned!(running)
       return unless @orphaned.call
 
-      running.each_key do |pid|
-        kill(pid)
-      rescue StandardError
+      raise OrphanedError, "parent process died; aborting mutation run"
+    end
+
+    def cleanup(running, wait: true)
+      running.each_key { |pid| signal_group(pid) }
+      running.each do |pid, entry|
+        entry[:reader].close unless entry[:reader].closed?
+        entry[:stderr_file].close!
+        Process.waitpid(pid) if wait
+      rescue Errno::ECHILD
         nil
       end
       running.clear
-      raise OrphanedError, "parent process died; aborting mutation run"
     end
 
     STDERR_TAIL_LINES = 20
 
     def spawn(item, running)
+      calibrator = calibrator_for(item)
+      budget = calibrator ? calibrator.budget_for(item) : item.timeout
+      log_scale(calibrator, item.lane)
       reader, writer = IO.pipe
       stderr_file = Tempfile.new("active_mutator-worker")
       pid = fork do
@@ -107,15 +114,18 @@ module ActiveMutator
         Process.exit!(0)
       end
       writer.close
-      calibrator = calibrator_for(item)
-      budget = calibrator ? calibrator.budget_for(item) : item.timeout
-      log_scale(calibrator, item.lane)
       started = now
       seq = @next_seq
       @next_seq += 1
       running[pid] = { reader: reader, item: item, started: started, stderr_file: stderr_file,
-                       budget: budget, deadline: started + budget, seq: seq }
+                       budget: budget, deadline: started + budget, seq: seq, payload: +"" }
       emit_start(item, pid, seq, budget) if @events.listening?
+    ensure
+      unless pid
+        reader&.close unless reader&.closed?
+        writer&.close unless writer&.closed?
+        stderr_file&.close!
+      end
     end
 
     def emit_start(item, pid, seq, budget)
@@ -127,28 +137,34 @@ module ActiveMutator
 
     def reap(running, results)
       running.to_a.each do |pid, entry|
-        done, _status = Process.waitpid2(pid, Process::WNOHANG)
-        if done
-          running.delete(pid)
+        # Read while the worker runs so a full pipe cannot prevent its exit.
+        # A descendant may retain the writer after that exit; keep the group
+        # tracked until EOF so aborts and the deadline still apply to it.
+        chunk = entry[:reader].read_nonblock(65_536, exception: false)
+        entry[:payload] << chunk if chunk.is_a?(String)
+        entry[:eof] = true if chunk.nil?
+        entry[:exited] ||= Process.waitpid(pid, Process::WNOHANG)
+        if entry[:exited] && entry[:eof]
           result = finish(entry)
           calibrator_for(entry[:item])&.record(result.seconds, entry[:budget]) if result.status == :killed
           results << complete(pid, entry, result)
+          running.delete(pid)
         elsif now > entry[:deadline]
           kill(pid)
-          running.delete(pid)
           entry[:reader].close
           entry[:stderr_file].close!
           seconds = now - entry[:started]
           details = format("timed out after %.1fs (budget %.1fs)", seconds, entry[:budget])
           results << complete(pid, entry, Result.new(mutation: entry[:item].mutation, status: :timeout,
                                                      details: details, seconds: seconds))
+          running.delete(pid)
         end
       end
     end
 
     def finish(entry)
       seconds = now - entry[:started]
-      report_line, stats_line = entry[:reader].read.to_s.lines.map(&:strip).reject(&:empty?)
+      report_line, stats_line = entry[:payload].lines.map(&:strip).reject(&:empty?)
       entry[:reader].close
       stderr_tail = stderr_tail(entry[:stderr_file])
       data = report_line && JSON.parse(report_line)
