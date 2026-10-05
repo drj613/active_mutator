@@ -6,7 +6,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
-## [0.7.0] - 2026-09-23
+## [0.7.0] - 2026-10-05
 
 - `--diagnostics` prints a timestamped line to stderr for each phase
   (`boot`, `planning`, `baseline`, `coverage_load`, `mutating`,
@@ -47,6 +47,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   the runner's memory and an OOM kill.
 - The baseline child is now started with `Process.spawn` and polled, so
   its pid is known for sampling and killing.
+- `--since` now treats a pure deletion as an edit to the method around it: a
+  subject whose lines span both sides of the deleted spot is mutated, like
+  any other change to it. Deleting a whole method matches only the class
+  around it, never its neighbors. `--allow-empty` forgives a file that only
+  lost code when no subject spans the deletion (e.g. a removed method in a
+  class with no class-level code). Files that fail to parse and methods
+  excluded by `--subject` still fail an empty run.
 
 ## [0.6.1] - 2026-09-23
 

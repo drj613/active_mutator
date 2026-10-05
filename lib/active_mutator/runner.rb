@@ -5,8 +5,8 @@ module ActiveMutator
     # What discovery saw, beyond the final subject list. `scanned_files` are
     # root-relative source files after path expansion and excludes, minus
     # spec_paths; `since_candidates` are the --since diff's files among them;
-    # `since_matched_all` are the since-covered subjects before --no-class-level
-    # drops class bodies; `since_filter` is the --since SinceFilter (nil
+    # `since_matched_all` are the since-covered subjects before --subject and
+    # --no-class-level narrow them; `since_filter` is the --since SinceFilter (nil
     # without --since). The last three feed the --allow-empty verdict (#46).
     Discovery = Data.define(:subjects, :scanned_files, :since_candidates, :since_matched_all, :since_filter)
 
@@ -262,20 +262,29 @@ module ActiveMutator
     end
 
     # --allow-empty forgives an empty plan only when the --since diff touched no
-    # candidate source file (docs-only, spec-only, excluded paths) or changed
-    # only comments in them. A candidate whose code changed but planned
+    # candidate source file (docs-only, spec-only, excluded paths), changed
+    # only comments in them, or deleted code no subject spans (a removed
+    # method). A candidate whose code changed but planned
     # nothing is the case worth failing on, unless the only code it touched
     # is class-body code that --no-class-level dropped. --subject alone has no
     # diff to judge, so it stays an unconditional 0.
     def allow_empty_exit(discovery)
       return 0 unless @config.since
-      return 0 if discovery.since_candidates.empty?
 
+      filter = discovery.since_filter
+      matched_files = discovery.since_matched_all.map { |s| relative(s.file) }
+      # A deletion no subject spans leaves nothing to mutate. One inside a
+      # subject that still planned nothing falls through to the checks below.
+      deleted = discovery.since_candidates.select do |file|
+        filter.deletion_only?(file) && !matched_files.include?(file) &&
+          Prism.parse_file(File.join(@config.root, file)).success?
+      end
       # Checked only here, on the empty-plan path: it runs `git show` per file.
-      candidates = discovery.since_candidates.reject { |file| discovery.since_filter.comment_only?(file) }
+      commented = (discovery.since_candidates - deleted).select { |f| filter.comment_only?(f) }
+      candidates = discovery.since_candidates - deleted - commented
       if candidates.empty?
-        warn "active_mutator: forgiving empty plan: only comments changed in " \
-             "#{discovery.since_candidates.join(", ")}"
+        warn "active_mutator: forgiving empty plan: deletions in #{deleted.join(", ")} left no method to mutate" if deleted.any?
+        warn "active_mutator: forgiving empty plan: only comments changed in #{commented.join(", ")}" if commented.any?
         return 0
       end
 
@@ -443,18 +452,17 @@ module ActiveMutator
         .sort
       scanned_files = files.map { |f| relative(f) }.reject { |rel| under_spec_paths?(rel) }
       subjects = files.flat_map { |file| SubjectFinder.call(file) }
-      if @config.subject_filter
-        matcher = SubjectMatcher.new(@config.subject_filter)
-        subjects = subjects.select { |s| matcher.match?(s.name) }
-      end
       since_candidates = []
       if @config.since
         filter = SinceFilter.new(ref: @config.since, root: @config.root)
         subjects = subjects.select { |s| filter.cover?(s) }
         since_candidates = filter.changed_files & scanned_files
       end
-      # Class bodies drop out LAST so since_matched_all still knows about them.
       since_matched_all = subjects
+      if @config.subject_filter
+        matcher = SubjectMatcher.new(@config.subject_filter)
+        subjects = subjects.select { |s| matcher.match?(s.name) }
+      end
       subjects = subjects.reject(&:class_body?) unless @config.class_level
       Discovery.new(subjects: subjects, scanned_files: scanned_files,
                     since_candidates: since_candidates, since_matched_all: since_matched_all,
