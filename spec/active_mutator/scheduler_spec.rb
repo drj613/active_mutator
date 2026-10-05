@@ -387,18 +387,23 @@ RSpec.describe ActiveMutator::Scheduler do
   end
 
   it "leaves no live worker processes behind after an orphaned abort" do
-    pid_file = Tempfile.new("pids").path
-    worker = lambda do |_m, _e, _w|
-      File.open(pid_file, "a") { |f| f.flock(File::LOCK_EX); f.puts(Process.pid) }
-      sleep 30
+    Tempfile.create("pids") do |file|
+      pid_file = file.path
+      worker = lambda do |_m, _e, _w|
+        File.open(pid_file, "a") { |f| f.flock(File::LOCK_EX); f.puts(Process.pid) }
+        sleep 30
+      end
+      orphaned = lambda do
+        GC.start
+        File.read(pid_file).lines.size >= 2 # both workers running
+      end
+      sched = described_class.new(jobs: 2, worker: worker, orphaned: orphaned)
+      expect { run_bounded(sched, [item, item]) }
+        .to raise_error(ActiveMutator::Scheduler::OrphanedError)
+      pids = File.readlines(pid_file).map(&:to_i)
+      expect(pids.size).to eq(2)
+      pids.each { |pid| expect_process_gone(pid) }
     end
-    orphaned = -> { File.read(pid_file).lines.size >= 2 } # both workers running
-    sched = described_class.new(jobs: 2, worker: worker, orphaned: orphaned)
-    expect { run_bounded(sched, [item, item]) }
-      .to raise_error(ActiveMutator::Scheduler::OrphanedError)
-    pids = File.readlines(pid_file).map(&:to_i)
-    expect(pids.size).to eq(2)
-    pids.each { |pid| expect_process_gone(pid) }
   end
 
   it "marks payloads missing a status key as :error instead of crashing" do
@@ -477,28 +482,31 @@ RSpec.describe ActiveMutator::Scheduler do
   end
 
   it "actually kills the timed-out worker process and closes its pipe" do
-    GC.disable
-    pid_file = Tempfile.new("pid").path
-    baseline = Dir.children("/dev/fd").size
-    worker = lambda do |_m, _e, _w|
-      File.write(pid_file, Process.pid.to_s)
-      sleep 30
-    end
-    results = run_bounded(scheduler(worker: worker), [item(timeout: 0.3)])
-    expect(results.map(&:status)).to eq([:timeout])
-    pid = File.read(pid_file).to_i
-    expect(pid).to be > 0
-    expect_process_gone(pid)
-    expect(Dir.children("/dev/fd").size).to eq(baseline)
-  ensure
-    GC.enable
-    leaked = File.read(pid_file).to_i
-    begin
-      # Cleanup if the mutant leaked it. An empty pid file reads as 0, and
-      # kill(0) would signal our own process group.
-      Process.kill("KILL", leaked) if leaked.positive?
-    rescue StandardError
-      nil
+    Tempfile.create("pid") do |file|
+      GC.start
+      GC.disable
+      pid_file = file.path
+      baseline = Dir.children("/dev/fd").size
+      worker = lambda do |_m, _e, _w|
+        File.write(pid_file, Process.pid.to_s)
+        sleep 30
+      end
+      results = run_bounded(scheduler(worker: worker, on_result: ->(_) { GC.start }), [item(timeout: 0.3)])
+      expect(results.map(&:status)).to eq([:timeout])
+      pid = File.read(pid_file).to_i
+      expect(pid).to be > 0
+      expect_process_gone(pid)
+      expect(Dir.children("/dev/fd").size).to eq(baseline)
+    ensure
+      GC.enable
+      leaked = File.read(pid_file).to_i
+      begin
+        # Cleanup if the mutant leaked it. An empty pid file reads as 0, and
+        # kill(0) would signal our own process group.
+        Process.kill("KILL", leaked) if leaked.positive?
+      rescue StandardError
+        nil
+      end
     end
   end
 
@@ -738,16 +746,20 @@ RSpec.describe ActiveMutator::Scheduler do
     # Workers run in forked child processes, so an in-memory Queue can't
     # observe cross-process ordering (fork gives each child its own copy —
     # pushes never reach the parent). Use a flock-guarded append log instead.
-    log_path = Tempfile.new("order").path
-    append = ->(line) { File.open(log_path, "a") { |f| f.flock(File::LOCK_EX); f.puts(line) } }
-    worker = lambda do |_m, _e, writer|
-      append.call("start")
-      sleep 0.1
-      append.call("finish")
-      writer.puts(JSON.generate("status" => "killed", "details" => nil))
+    Tempfile.create("order") do |file|
+      log_path = file.path
+      append = ->(line) { File.open(log_path, "a") { |f| f.flock(File::LOCK_EX); f.puts(line) } }
+      worker = lambda do |_m, _e, writer|
+        append.call("start")
+        sleep 0.1
+        append.call("finish")
+        writer.puts(JSON.generate("status" => "killed", "details" => nil))
+      end
+      results = scheduler(worker: worker, jobs: 2, on_result: ->(_) { GC.start })
+        .run([item(lane: :serial), item(lane: :serial)])
+      expect(results.map(&:status)).to eq(%i[killed killed])
+      events = File.readlines(log_path).map { |l| l.chomp.to_sym }
+      expect(events).to eq(%i[start finish start finish]) # never two concurrent starts
     end
-    scheduler(worker: worker, jobs: 2).run([item(lane: :serial), item(lane: :serial)])
-    events = File.readlines(log_path).map { |l| l.chomp.to_sym }
-    expect(events).to eq(%i[start finish start finish]) # never two concurrent starts
   end
 end
