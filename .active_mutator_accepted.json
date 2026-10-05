@@ -376,5 +376,12 @@
     "description": "delete `private`",
     "original_snippet": "private",
     "ordinal": 0
+  },
+  {
+    "file": "lib/active_mutator/scheduler.rb",
+    "subject": "ActiveMutator::Scheduler#reap",
+    "description": "replace `65536` with `65537`",
+    "original_snippet": "65_536",
+    "ordinal": 0
   }
 ]

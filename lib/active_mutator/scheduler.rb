@@ -80,7 +80,7 @@ module ActiveMutator
     def cleanup(running, wait: true)
       running.each_key { |pid| signal_group(pid) }
       running.each do |pid, entry|
-        entry[:reader].close unless entry[:reader].closed?
+        entry[:reader].close
         entry[:stderr_file].close!
         Process.waitpid(pid) if wait
       rescue Errno::ECHILD
@@ -122,8 +122,8 @@ module ActiveMutator
       emit_start(item, pid, seq, budget) if @events.listening?
     ensure
       unless pid
-        reader&.close unless reader&.closed?
-        writer&.close unless writer&.closed?
+        reader&.close
+        writer&.close
         stderr_file&.close!
       end
     end

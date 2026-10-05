@@ -204,6 +204,25 @@ RSpec.describe ActiveMutator::Scheduler do
     end
   end
 
+  it "enforces the deadline after a worker reports and closes its writer without exiting" do
+    Dir.mktmpdir do |dir|
+      pid_path = File.join(dir, "pid")
+      worker = lambda do |_m, _e, writer|
+        File.write(pid_path, Process.pid.to_s)
+        writer.puts(JSON.generate("status" => "killed", "details" => nil))
+        writer.close
+        sleep 30
+      end
+      results = run_bounded(scheduler(worker: worker), [item(timeout: 0.2)])
+      expect(results.map(&:status)).to eq([:timeout])
+      pid = File.read(pid_path).to_i
+      expect_process_gone(pid)
+      expect { Process.waitpid(pid, Process::WNOHANG) }.to raise_error(Errno::ECHILD)
+    ensure
+      kill_test_group(File.read(pid_path).to_i) if File.exist?(pid_path)
+    end
+  end
+
   it "terminates workers with exit! so child at_exit hooks never run" do
     Dir.mktmpdir do |dir|
       flag = File.join(dir, "flag")
