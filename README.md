@@ -267,9 +267,12 @@ itself whether that emptiness is fine:
   blank lines, added or deleted. A magic comment such as
   `# frozen_string_literal: true` counts as code, and so does a file that
   fails to parse.
+- **Exit 0** when a file only lost code and no method spans the spot, e.g.
+  a whole method was removed. A deletion inside a method makes `--since`
+  mutate that method, like any other edit to it, so it never reaches this
+  rule unless the method has nothing left to mutate.
 - **Exit 1** otherwise. A candidate file's code changed but produced no
-  mutants, and the warning lists the file(s). A deletion-only code edit
-  counts as a real change here.
+  mutants, and the warning lists the file(s).
 - With `--subject` and no `--since` there is no diff to judge, so
   `--allow-empty` exits `0` unconditionally.
 

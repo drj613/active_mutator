@@ -6,6 +6,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+- `--since` now treats a pure deletion as an edit to the method around it: a
+  subject whose lines span both sides of the deleted spot is mutated, like
+  any other change to it. Deleting a whole method matches only the class
+  around it, never its neighbors. `--allow-empty` forgives a file that only
+  lost code when no subject spans the deletion (e.g. a removed method in a
+  class with no class-level code). This follows Stryker.NET, which re-tests
+  every mutant in a file the diff touched and passes an empty run.
+
 ## [0.6.1] - 2026-09-23
 
 - The baseline coverage map now skips gem files even when gems are installed

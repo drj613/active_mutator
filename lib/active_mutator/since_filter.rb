@@ -7,17 +7,32 @@ module ActiveMutator
 
     def self.parse(diff_text)
       changed = Hash.new { |h, k| h[k] = [] }
+      each_hunk(diff_text) do |file, start, count|
+        count.times { |i| changed[file] << start + i }
+      end
+      changed.reject { |_, lines| lines.empty? }
+    end
+
+    # New-side line each pure deletion follows (0 = top of file), per file.
+    # The deletion sits between that line and the next, so it is inside a
+    # subject only when the subject spans both.
+    def self.deletion_gaps(diff_text)
+      gaps = Hash.new { |h, k| h[k] = [] }
+      each_hunk(diff_text) do |file, start, count|
+        gaps[file] << start if count.zero?
+      end
+      gaps
+    end
+
+    def self.each_hunk(diff_text)
       current = nil
       diff_text.each_line do |line|
         if line.start_with?("+++ b/")
           current = line.delete_prefix("+++ b/").strip
         elsif current && (match = HUNK.match(line))
-          start = match[1].to_i
-          count = (match[2] || "1").to_i
-          count.times { |i| changed[current] << start + i }
+          yield current, match[1].to_i, (match[2] || "1").to_i
         end
       end
-      changed.reject { |_, lines| lines.empty? }
     end
 
     # Every file the diff touched on the new side, including deletion-only
@@ -66,6 +81,7 @@ module ActiveMutator
       raise Error, "git diff #{ref} failed" unless $?.success?
 
       @changed = self.class.parse(diff)
+      @gaps = self.class.deletion_gaps(diff)
       @touched = self.class.touched_files(diff)
       untracked = IO.popen(
         ["git", "-C", root, "ls-files", "--others", "--exclude-standard", "--", "*.rb"], &:read
@@ -91,12 +107,19 @@ module ActiveMutator
       self.class.same_code?(old_source, File.read(File.join(@root, path)))
     end
 
+    # Whether the file only lost lines since the ref: touched, but with no
+    # added or changed lines (untracked files count as all added).
+    def deletion_only?(path) = !@changed.key?(path)
+
     def cover?(subject)
-      lines = @changed[subject.file.delete_prefix("#{@root}/")]
-      return false unless lines
+      rel = subject.file.delete_prefix("#{@root}/")
+      lines = @changed[rel]
       return true if lines == :all
 
-      lines.any? { |line| subject.line_range.cover?(line) }
+      range = subject.line_range
+      return true if lines&.any? { |line| range.cover?(line) }
+
+      @gaps.fetch(rel, []).any? { |gap| range.cover?(gap) && range.cover?(gap + 1) }
     end
   end
 end
