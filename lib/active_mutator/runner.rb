@@ -5,8 +5,8 @@ module ActiveMutator
     # What discovery saw, beyond the final subject list. `scanned_files` are
     # root-relative source files after path expansion and excludes, minus
     # spec_paths; `since_candidates` are the --since diff's files among them;
-    # `since_matched_all` are the since-covered subjects before --no-class-level
-    # drops class bodies; `since_filter` is the --since SinceFilter (nil
+    # `since_matched_all` are the since-covered subjects before --subject and
+    # --no-class-level narrow them; `since_filter` is the --since SinceFilter (nil
     # without --since). The last three feed the --allow-empty verdict (#46).
     Discovery = Data.define(:subjects, :scanned_files, :since_candidates, :since_matched_all, :since_filter)
 
@@ -191,7 +191,10 @@ module ActiveMutator
       matched_files = discovery.since_matched_all.map { |s| relative(s.file) }
       # A deletion no subject spans leaves nothing to mutate. One inside a
       # subject that still planned nothing falls through to the checks below.
-      deleted = discovery.since_candidates.select { |f| filter.deletion_only?(f) && !matched_files.include?(f) }
+      deleted = discovery.since_candidates.select do |file|
+        filter.deletion_only?(file) && !matched_files.include?(file) &&
+          Prism.parse_file(File.join(@config.root, file)).success?
+      end
       # Checked only here, on the empty-plan path: it runs `git show` per file.
       commented = (discovery.since_candidates - deleted).select { |f| filter.comment_only?(f) }
       candidates = discovery.since_candidates - deleted - commented
@@ -322,18 +325,17 @@ module ActiveMutator
         .sort
       scanned_files = files.map { |f| relative(f) }.reject { |rel| under_spec_paths?(rel) }
       subjects = files.flat_map { |file| SubjectFinder.call(file) }
-      if @config.subject_filter
-        matcher = SubjectMatcher.new(@config.subject_filter)
-        subjects = subjects.select { |s| matcher.match?(s.name) }
-      end
       since_candidates = []
       if @config.since
         filter = SinceFilter.new(ref: @config.since, root: @config.root)
         subjects = subjects.select { |s| filter.cover?(s) }
         since_candidates = filter.changed_files & scanned_files
       end
-      # Class bodies drop out LAST so since_matched_all still knows about them.
       since_matched_all = subjects
+      if @config.subject_filter
+        matcher = SubjectMatcher.new(@config.subject_filter)
+        subjects = subjects.select { |s| matcher.match?(s.name) }
+      end
       subjects = subjects.reject(&:class_body?) unless @config.class_level
       Discovery.new(subjects: subjects, scanned_files: scanned_files,
                     since_candidates: since_candidates, since_matched_all: since_matched_all,

@@ -1,5 +1,6 @@
 require "tmpdir"
 require "fileutils"
+require "open3"
 
 RSpec.describe ActiveMutator::Runner do
   let(:config) do
@@ -891,6 +892,74 @@ RSpec.describe ActiveMutator::Runner do
 
         def def_in(dir) = subject_.with(file: File.join(dir, "lib", "a.rb"))
 
+        def run_deletion(before, after, **overrides)
+          Dir.mktmpdir do |dir|
+            FileUtils.mkdir_p(File.join(dir, "lib"))
+            file = File.join(dir, "lib", "a.rb")
+            File.write(file, before)
+            [%w[init -q], %w[add .],
+             ["-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-qm", "base"]].each do |args|
+              output, status = Open3.capture2e("git", "-C", dir, *args)
+              raise output unless status.success?
+            end
+            File.write(file, after)
+            reporter = instance_double(ActiveMutator::Reporter::Terminal, on_result: nil, summary: nil)
+            runner = described_class.new(lenient.with(root: dir, since: "HEAD", preload_helper: :none, **overrides),
+                                         reporter: reporter)
+            expect(ActiveMutator::Baseline).not_to receive(:new)
+            result = nil
+            stderr = capture_stderr { result = runner.call }
+            [result, stderr]
+          end
+        end
+
+        it "exits 1 when deletion-only changes leave a syntax error" do
+          source = "class A\n  def a = 1\nend\n"
+          result, stderr = run_deletion(source, source.delete_suffix("end\n"))
+          expect(result).to eq(1)
+          expect(stderr).to include("Changed: lib/a.rb")
+          expect(stderr).not_to include("forgiving")
+        end
+
+        it "exits 1 when --subject hides a method spanning an internal deletion" do
+          source = "class A\n  def a\n    return 0 if @x\n    1\n  end\n  def b = 2\nend\n"
+          result, stderr = run_deletion(source, source.sub("    return 0 if @x\n", ""), subject_filter: "A#b")
+          expect(result).to eq(1)
+          expect(stderr).to include("Changed: lib/a.rb")
+          expect(stderr).not_to include("forgiving")
+        end
+
+        it "forgives a whole-method deletion with a surviving method selected" do
+          source = "class A\n  def a = 1\n  def b = 2\nend\n"
+          result, stderr = run_deletion(source, source.sub("  def a = 1\n", ""), subject_filter: "A#b")
+          expect(result).to eq(0)
+          expect(stderr).to include("deletions in lib/a.rb left no method to mutate")
+        end
+
+        it "forgives a deletion in a method excluded by a skip marker" do
+          source = "class A\n  # active_mutator: skip\n  def a\n    return 0 if @x\n    1\n  end\nend\n"
+          result, stderr = run_deletion(source, source.sub("    return 0 if @x\n", ""))
+          expect(result).to eq(0)
+          expect(stderr).to include("deletions in lib/a.rb left no method to mutate")
+        end
+
+        it "forgives a class-body deletion under --no-class-level with an unmatched --subject" do
+          source = "class A\n  X = 1\n  Y = 2\n  def b = 3\nend\n"
+          result, stderr = run_deletion(source, source.sub("  X = 1\n", ""),
+                                       subject_filter: "A#missing", class_level: false)
+          expect(result).to eq(0)
+          expect(stderr).to include("changed lines are class-body code and --no-class-level is set")
+        end
+
+        it "does not forgive a hidden method deletion alongside a --no-class-level class-body deletion" do
+          source = "class A\n  X = 1\n  Y = 2\n  def a\n    return 0 if @x\n    1\n  end\nend\n"
+          changed = source.sub("  X = 1\n", "").sub("    return 0 if @x\n", "")
+          result, stderr = run_deletion(source, changed, subject_filter: "A#missing", class_level: false)
+          expect(result).to eq(1)
+          expect(stderr).to include("Changed: lib/a.rb")
+          expect(stderr).not_to include("forgiving")
+        end
+
         it "exits 0 when the diff has no candidate files" do
           Dir.mktmpdir do |dir|
             result, stderr, = run_empty(lenient.with(root: dir), found: discovery([], since_candidates: []))
@@ -941,6 +1010,8 @@ RSpec.describe ActiveMutator::Runner do
 
         it "exits 0 when a deletion left no subject around it" do
           Dir.mktmpdir do |dir|
+            FileUtils.mkdir_p(File.join(dir, "lib"))
+            %w[a b].each { |name| File.write(File.join(dir, "lib", "#{name}.rb"), "") }
             found = discovery([], since_candidates: ["lib/a.rb", "lib/b.rb"], since_matched_all: [],
                                   deletion_only: ["lib/a.rb", "lib/b.rb"])
             result, stderr, = run_empty(lenient.with(root: dir), found: found)
@@ -962,6 +1033,8 @@ RSpec.describe ActiveMutator::Runner do
 
         it "forgives deletion-only and comment-only files together, naming each" do
           Dir.mktmpdir do |dir|
+            FileUtils.mkdir_p(File.join(dir, "lib"))
+            File.write(File.join(dir, "lib", "a.rb"), "")
             found = discovery([], since_candidates: ["lib/a.rb", "lib/b.rb"], since_matched_all: [],
                                   deletion_only: ["lib/a.rb"], comment_only: ["lib/b.rb"])
             result, stderr, = run_empty(lenient.with(root: dir), found: found)
