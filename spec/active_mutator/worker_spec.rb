@@ -192,6 +192,20 @@ RSpec.describe ActiveMutator::Worker do
       expect(ran).to eq([c, a, b])
     end
 
+    it "captures the selected groups before inserting a mutant of the id parser" do
+      a, b = group("spec/a_spec.rb", "1"), group("spec/b_spec.rb", "1")
+      allow(RSpec.world).to receive(:ordered_example_groups).and_return([a, b])
+      allow_any_instance_of(ActiveMutator::Inserter).to receive(:insert) do
+        allow(ActiveMutator::ExampleId).to receive(:group_key).and_return(nil)
+      end
+      ran = nil
+      allow(rspec_runner).to receive(:run_specs) { |groups| ran = groups; 0 }
+
+      worker_for(%w[spec/b_spec.rb[1:1] spec/a_spec.rb[1:1]]).run
+
+      expect(ran).to eq([b, a])
+    end
+
     it "ranks several top-level groups of one file and the nested ids inside them" do
       a1, a2, b1 = group("spec/a_spec.rb", "1"), group("spec/a_spec.rb", "2"), group("spec/b_spec.rb", "1")
       allow(RSpec.world).to receive(:ordered_example_groups).and_return([a1, a2, b1])
@@ -296,6 +310,77 @@ RSpec.describe ActiveMutator::Worker do
       described_class.new(mutation, %w[./spec/x_spec.rb[1:1]], writer).run
       expect(emitted.keys).to eq(%w[status details])
       expect(emitted["status"]).to eq("error")
+    end
+  end
+
+  # The mutant is inserted into the very process that is still running this
+  # Worker, so a self-mutation can rewrite the code that picks the groups and
+  # reports the verdict. These specs rewrite it at insertion time, like a
+  # mutant would, and expect the run to finish with the original behavior.
+  describe "when the mutant rewrites the worker's own code" do
+    let(:reporter) { instance_double(RSpec::Core::Reporter) }
+    let(:failed) { [] }
+    let(:worker) { described_class.new(mutation, %w[./spec/x_spec.rb[1:1]], writer) }
+
+    def group(file, scoped_id)
+      class_double(RSpec::Core::ExampleGroup,
+                   metadata: { absolute_file_path: File.expand_path(file), scoped_id: scoped_id })
+    end
+
+    def mutate_on_insert(&change)
+      allow_any_instance_of(ActiveMutator::Inserter).to receive(:insert, &change)
+    end
+
+    before do
+      allow(RSpec.configuration).to receive(:reporter).and_return(reporter)
+      allow(reporter).to receive(:failed_examples) { failed }
+    end
+
+    it "reports with the original emit" do
+      allow(rspec_runner).to receive(:run_specs).and_return(0)
+      mutate_on_insert { worker.define_singleton_method(:emit) { |*, **| raise "mutated emit" } }
+      worker.run
+      expect(emitted).to eq("status" => "survived", "details" => nil)
+    end
+
+    it "selects the groups with the original covering_groups" do
+      x = group("spec/x_spec.rb", "1")
+      allow(RSpec.world).to receive(:ordered_example_groups).and_return([x])
+      ran = nil
+      allow(rspec_runner).to receive(:run_specs) { |groups| ran = groups; 0 }
+      mutate_on_insert { worker.define_singleton_method(:covering_groups) { [] } }
+      worker.run
+      expect(ran).to eq([x])
+    end
+
+    it "names the killer with the original killer" do
+      allow(rspec_runner).to receive(:run_specs) do
+        failed << instance_double(RSpec::Core::Example, id: "./spec/x_spec.rb[1:1]")
+        1
+      end
+      mutate_on_insert { worker.define_singleton_method(:killer) { |_| raise "mutated killer" } }
+      worker.run
+      expect(emitted["killer"]).to eq("./spec/x_spec.rb[1:1]")
+    end
+
+    it "names the killer with the original id normalizer" do
+      allow(rspec_runner).to receive(:run_specs) do
+        failed << instance_double(RSpec::Core::Example, id: "./spec/x_spec.rb[1:1]")
+        1
+      end
+      mutate_on_insert { allow(ActiveMutator::ExampleId).to receive(:normalize).and_raise("mutated normalize") }
+      worker.run
+      expect(emitted).to eq("status" => "killed", "details" => nil, "killer" => "./spec/x_spec.rb[1:1]")
+    end
+
+    it "keeps the original id parser when a reload replaces the whole ExampleId module" do
+      allow(rspec_runner).to receive(:run_specs) do
+        failed << instance_double(RSpec::Core::Example, id: "./spec/x_spec.rb[1:1]")
+        1
+      end
+      mutate_on_insert { stub_const("ActiveMutator::ExampleId", Module.new) }
+      worker.run
+      expect(emitted).to eq("status" => "killed", "details" => nil, "killer" => "./spec/x_spec.rb[1:1]")
     end
   end
 
