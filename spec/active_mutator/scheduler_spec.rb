@@ -819,6 +819,18 @@ RSpec.describe ActiveMutator::Scheduler do
       expect(orders(results).last).to eq(%w[./spec/b_spec.rb[1:1] ./spec/b_spec.rb[1:2] ./spec/a_spec.rb[1:1] ./spec/a_spec.rb[2:1]])
     end
 
+    it "does not reorder a plan with a malformed id while no killer is known" do
+      messy = [a1, "garbage", b1]
+      results = run_jobs1({ 1 => ["killed", nil] }, [work(foo, messy)])
+      expect(orders(results)).to eq([messy])
+    end
+
+    it "keeps a malformed id after the promoted group" do
+      messy = [a1, "garbage", b1]
+      results = run_jobs1({ 1 => ["killed", b1], 2 => ["killed", nil] }, [work(foo, ids), work(foo2, messy)])
+      expect(orders(results).last).to eq([b1, a1, "garbage"])
+    end
+
     it "matches the killer's top-level group, not the exact example" do
       # The sibling selected only b[1:1]; the killer was b[1:5] of another run.
       results = run_jobs1({ 1 => ["killed", "./spec/b_spec.rb[1:5]"], 2 => ["killed", nil] },

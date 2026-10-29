@@ -172,7 +172,7 @@ module ActiveMutator
       return item unless key
 
       first, rest = item.example_ids.partition { |id| ExampleId.group_key(id) == key }
-      first.empty? ? item : item.with(example_ids: first + rest)
+      item.with(example_ids: first + rest)
     end
 
     # Only a kill that names one of the examples it was given counts. Anything
