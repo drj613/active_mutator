@@ -105,6 +105,11 @@ RSpec.describe ActiveMutator::Runner, "covering group order" do
     expect(item.example_ids).to match_array(%w[weird ./spec/a_spec.rb[1:1]])
   end
 
+  it "ranks malformed ids separately instead of merging them into one group" do
+    item = plan("bad_slow" => 5.0, "bad_fast" => 0.1, "./spec/a_spec.rb[1:1]" => 1.0)
+    expect(item.example_ids).to eq(%w[bad_fast ./spec/a_spec.rb[1:1] bad_slow])
+  end
+
   it "changes only the order: same selected set, lane, timeout, and variable" do
     times = { "./spec/slow_spec.rb[1:1]" => 9.0, "./spec/fast_spec.rb[1:1]" => 0.1,
               "./spec/system/browser_spec.rb[1:1]" => 2.0 }
