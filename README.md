@@ -90,9 +90,9 @@ coverage map. The map is cached in `.active_mutator/` and refreshed
 incrementally after that (see
 [`docs/guides/how-it-works.md`](docs/guides/how-it-works.md)).
 Then each mutant runs in its own fork against only its covering examples.
-Top-level groups run in a cost-aware order (the subject's own spec first,
-then the cheapest groups, then whichever group killed the previous mutant of
-the same subject), so a kill ends the fork sooner. Specs that depend on
+Top-level groups run the group that last killed a sibling mutant first,
+then the subject's convention spec, then the cheapest remaining groups by
+baseline time. A kill ends the fork sooner. Specs that depend on
 another top-level group having run first can behave differently; see
 [how it works](docs/guides/how-it-works.md).
 

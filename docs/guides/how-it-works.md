@@ -286,7 +286,7 @@ dependence is already a bug under `--order random`, but it now shows up as
 a kill or a survivor here. And a fork that dies on its first group finishes
 sooner, so the adaptive timeout calibrator sees lower utilization and may
 settle at a smaller scale than before; it never goes below the static
-budget, so a mutant that needs the full suite is not cut short.
+budget. A survivor under load may receive less extra time than before.
 
 **Per-fork worker lifecycle** (`Worker#run`):
 1. `require` the subject's file: guarantees the target constant is defined
