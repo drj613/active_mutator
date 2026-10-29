@@ -273,6 +273,8 @@ Scheduler then learns from kills: when a worker's report names the failing
 example (`"killer"`, one of the examples it was given), the next mutant of
 the *same subject* starts with that example's whole top-level group. The
 hint lives only in the Scheduler, for that run; it is not part of `Result`.
+A hint applies only to mutants that have not started yet. With parallel
+workers, the first wave of siblings runs before a killer is known.
 A timeout, error, survivor, or a hint that does not match the mutant's
 selected examples leaves the last killer in place.
 The worker still loads spec files in sorted order, so constants and shared
