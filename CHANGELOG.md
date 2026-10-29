@@ -6,6 +6,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+- A mutant's covering top-level groups now run in priority order: the
+  subject's convention spec first, then the cheapest groups by baseline time
+  of the selected examples. The worker reports the example that killed a
+  mutant, and the next mutant of the same subject starts with that example's
+  top-level group, so a kill ends the fork sooner. The selected examples,
+  timeout budgets, and results are unchanged. Part of #52.
+- **Changed:** the order of top-level groups inside a worker differs from a
+  plain `rspec` run. A spec that relies on another top-level group having run
+  first can now behave differently. Faster kills also feed the adaptive
+  timeout calibrator lower utilization samples, so its scale may settle lower
+  (it never drops below the static budget).
+
 ## [0.7.0] - 2026-10-05
 
 - `--diagnostics` prints a timestamped line to stderr for each phase

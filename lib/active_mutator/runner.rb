@@ -308,14 +308,27 @@ module ActiveMutator
     end
 
     # Single source of truth for lane/timeout/variable derivation, shared by
-    # phase-1 planning and phase-2 escalation so the two never drift.
+    # phase-1 planning and phase-2 escalation so the two never drift. Lane and
+    # budget come from the whole selection; only the order of the ids changes.
     def build_work_item(mutation, example_ids, map)
       lane = example_ids.any? { |id| serial_example?(id) } ? :serial : :parallel
       variable = map.time_for(example_ids) * @config.timeout_factor
       boot_extra = lane == :serial ? @config.browser_boot_seconds : 0.0
       timeout = variable + @config.timeout_floor + boot_extra
-      WorkItem.new(mutation: mutation, example_ids: example_ids,
+      WorkItem.new(mutation: mutation, example_ids: prioritize(mutation, example_ids, map),
                    timeout: timeout, lane: lane, variable: variable)
+    end
+
+    # Run order for the covering set: the subject's convention spec first, then
+    # the cheapest top-level groups (summing only the selected examples), so a
+    # killing spec is found before a slow one. Ties keep sorted-selection order.
+    # Ids inside a group keep their order, and malformed ids stay their own group.
+    def prioritize(mutation, example_ids, map)
+      convention = convention_spec_rels(mutation.subject.file)
+      groups = example_ids.group_by { |id| ExampleId.group_key(id) || id }.values
+      groups.each_with_index.sort_by do |ids, position|
+        [convention.include?(BaselineDelta.spec_file_of(ids.first)) ? 0 : 1, map.time_for(ids), position]
+      end.flat_map(&:first)
     end
 
     # Spec files that textually match `pattern` (a constant-reference pattern

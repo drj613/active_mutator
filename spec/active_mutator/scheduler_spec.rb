@@ -5,7 +5,17 @@ require "tmpdir"
 
 RSpec.describe ActiveMutator::Scheduler do
   def item(timeout: 5.0, lane: :parallel)
-    ActiveMutator::WorkItem.new(mutation: nil, example_ids: [], timeout: timeout, lane: lane)
+    ActiveMutator::WorkItem.new(mutation: mutation_in("/app/item.rb"), example_ids: [], timeout: timeout, lane: lane)
+  end
+
+  def mutation_in(file, name: "Foo#bar", line: 10)
+    subject = ActiveMutator::Subject.new(name: name, file: file, byte_range: 0...10,
+                                         line_range: 9..11, constant_scope: "Foo", kind: :instance)
+    ActiveMutator::Mutation.new(
+      subject: subject, original_snippet: ">", line: line,
+      edit: ActiveMutator::Edit.new(range: 3...4, replacement: ">=", description: "replace > with >="),
+      mutated_file_source: nil, mutated_def_source: nil, mutated_def_line: nil
+    )
   end
 
   def scheduler(worker:, jobs: 2, on_result: nil, calibrators: nil)
@@ -760,6 +770,167 @@ RSpec.describe ActiveMutator::Scheduler do
       expect(results.map(&:status)).to eq(%i[killed killed])
       events = File.readlines(log_path).map { |l| l.chomp.to_sym }
       expect(events).to eq(%i[start finish start finish]) # never two concurrent starts
+    end
+  end
+
+  # A killer that reaches the next sibling (same Subject) saves it the slow
+  # groups: the scheduler runs the killer's top-level group first. The plan
+  # itself is never mutated, and no Result field carries the hint.
+  describe "covering group priority" do
+    let(:a1) { "./spec/a_spec.rb[1:1]" }
+    let(:b1) { "./spec/b_spec.rb[1:1]" }
+    let(:c1) { "./spec/c_spec.rb[1:1]" }
+    let(:ids) { [a1, b1, c1] }
+
+    def work(mutation, ids, timeout: 5.0)
+      ActiveMutator::WorkItem.new(mutation: mutation, example_ids: ids, timeout: timeout, lane: :parallel)
+    end
+
+    # Each mutant (picked by line) answers with a scripted payload; the order
+    # the worker was handed travels back in `details`.
+    def scripted(plan)
+      lambda do |m, example_ids, writer|
+        status, killer = plan.fetch(m.line)
+        sleep 5 if status == "hang"
+        writer.puts("not json{") if status == "garbage"
+        payload = { "status" => status, "details" => example_ids.join(",") }
+        payload["killer"] = killer unless killer.nil?
+        writer.puts(JSON.generate(payload)) unless status == "garbage"
+      end
+    end
+
+    def orders(results) = results.map { |r| r.details&.split(",") }
+
+    def run_jobs1(plan, items, **) = described_class.new(jobs: 1, worker: scripted(plan), **).run(items)
+
+    let(:foo) { mutation_in("/app/foo.rb", line: 1) }
+    let(:foo2) { mutation_in("/app/foo.rb", line: 2) }
+    let(:foo3) { mutation_in("/app/foo.rb", line: 3) }
+
+    it "runs the killer's group first for the next sibling of the same subject" do
+      results = run_jobs1({ 1 => ["killed", b1], 2 => ["killed", nil] }, [work(foo, ids), work(foo2, ids)])
+      expect(orders(results)).to eq([ids, [b1, a1, c1]])
+    end
+
+    it "promotes the whole group, keeping the rest in plan order" do
+      grouped = %w[./spec/a_spec.rb[1:1] ./spec/a_spec.rb[2:1] ./spec/b_spec.rb[1:1] ./spec/b_spec.rb[1:2]]
+      results = run_jobs1({ 1 => ["killed", "./spec/b_spec.rb[1:2]"], 2 => ["killed", nil] },
+                          [work(foo, grouped), work(foo2, grouped)])
+      expect(orders(results).last).to eq(%w[./spec/b_spec.rb[1:1] ./spec/b_spec.rb[1:2] ./spec/a_spec.rb[1:1] ./spec/a_spec.rb[2:1]])
+    end
+
+    it "matches the killer's top-level group, not the exact example" do
+      # The sibling selected only b[1:1]; the killer was b[1:5] of another run.
+      results = run_jobs1({ 1 => ["killed", "./spec/b_spec.rb[1:5]"], 2 => ["killed", nil] },
+                          [work(foo, [a1, b1, "./spec/b_spec.rb[1:5]"]), work(foo2, [a1, c1, b1])])
+      expect(orders(results).last).to eq([b1, a1, c1])
+    end
+
+    it "does not mix two top-level groups of one file" do
+      results = run_jobs1({ 1 => ["killed", "./spec/a_spec.rb[2:1]"], 2 => ["killed", nil] },
+                          [work(foo, ["./spec/a_spec.rb[1:1]", "./spec/a_spec.rb[2:1]"]),
+                           work(foo2, ["./spec/a_spec.rb[1:1]", "./spec/a_spec.rb[2:1]", "./spec/a_spec.rb[2:2]"])])
+      expect(orders(results).last).to eq(%w[./spec/a_spec.rb[2:1] ./spec/a_spec.rb[2:2] ./spec/a_spec.rb[1:1]])
+    end
+
+    it "accepts a killer spelled with an absolute path" do
+      killer = "#{File.expand_path("spec/b_spec.rb")}[1:1]"
+      results = run_jobs1({ 1 => ["killed", killer], 2 => ["killed", nil] }, [work(foo, ids), work(foo2, ids)])
+      expect(orders(results).last).to eq([b1, a1, c1])
+    end
+
+    it "leaves the plan's own item untouched" do
+      first = work(foo, ids)
+      second = work(foo2, ids)
+      run_jobs1({ 1 => ["killed", b1], 2 => ["killed", nil] }, [first, second])
+      expect(second.example_ids).to eq(ids)
+    end
+
+    it "does not touch the result: same statuses and no hint field" do
+      results = run_jobs1({ 1 => ["killed", b1], 2 => ["killed", nil] }, [work(foo, ids), work(foo2, ids)])
+      expect(results.map(&:status)).to eq(%i[killed killed])
+      expect(results.first.members).to eq(ActiveMutator::Result.members)
+      expect(ActiveMutator::Result.members).not_to include(:killer)
+    end
+
+    it "remembers the latest valid killer" do
+      results = run_jobs1({ 1 => ["killed", b1], 2 => ["killed", c1], 3 => ["killed", nil] },
+                          [work(foo, ids), work(foo2, ids), work(foo3, ids)])
+      expect(orders(results)).to eq([ids, [b1, a1, c1], [c1, a1, b1]])
+    end
+
+    it "keeps each subject's killer apart, including the same name in another file" do
+      other_file = mutation_in("/app/other.rb", line: 2)
+      other_name = mutation_in("/app/foo.rb", name: "Foo#baz", line: 3)
+      results = run_jobs1({ 1 => ["killed", b1], 2 => ["killed", nil], 3 => ["killed", nil] },
+                          [work(foo, ids), work(other_file, ids), work(other_name, ids)])
+      expect(orders(results)).to eq([ids, ids, ids])
+    end
+
+    it "keeps the killer through inconclusive outcomes of later siblings" do
+      plan = { 1 => ["killed", b1], 2 => ["survived", nil], 3 => ["error", nil], 4 => ["killed", nil],
+               5 => ["hang", nil], 6 => ["garbage", nil], 7 => ["killed", nil] }
+      items = (1..7).map { |line| work(mutation_in("/app/foo.rb", line: line), ids, timeout: line == 5 ? 0.4 : 5.0) }
+      results = run_jobs1(plan, items)
+      expect(results.map(&:status)).to eq(%i[killed survived error killed timeout error killed])
+      expect(orders(results).values_at(1, 2, 3, 6)).to all(eq([b1, a1, c1]))
+    end
+
+    {
+      "a foreign example" => "./spec/zzz_spec.rb[1:1]",
+      "a malformed id" => "garbage",
+      "an id with no example part" => "./spec/b_spec.rb",
+      "an empty string" => "",
+      "a non-string" => 7,
+      "a hash" => { "id" => "x" }
+    }.each do |label, killer|
+      it "ignores #{label} as a killer" do
+        results = run_jobs1({ 1 => ["killed", killer], 2 => ["killed", nil] }, [work(foo, ids), work(foo2, ids)])
+        expect(orders(results).last).to eq(ids)
+      end
+    end
+
+    it "ignores a killer on a result that is not a kill" do
+      %w[survived error skipped].each do |status|
+        results = run_jobs1({ 1 => [status, b1], 2 => ["killed", nil] }, [work(foo, ids), work(foo2, ids)])
+        expect(orders(results).last).to eq(ids), status
+      end
+    end
+
+    it "does not learn from a payload whose stats line is unusable" do
+      worker = lambda do |m, example_ids, writer|
+        if m.line == 1
+          writer.puts(JSON.generate("status" => "killed", "details" => nil, "killer" => b1))
+          writer.puts("")
+          writer.puts("not json{") # the scheduler's own stats line follows, but this one is read as stats
+        else
+          writer.puts(JSON.generate("status" => "killed", "details" => example_ids.join(",")))
+        end
+      end
+      results = described_class.new(jobs: 1, worker: worker).run([work(foo, ids), work(foo2, ids)])
+      expect(results.first.status).to eq(:error)
+      expect(orders(results).last).to eq(ids)
+    end
+
+    it "does not change siblings already running when a kill lands" do
+      results = described_class.new(jobs: 2, worker: scripted({ 1 => ["killed", b1], 2 => ["killed", nil] }))
+                               .run([work(foo, ids), work(foo2, ids)])
+      expect(orders(results)).to match_array([ids, ids])
+    end
+
+    it "forgets everything between runs of one scheduler" do
+      sched = described_class.new(jobs: 1, worker: scripted({ 1 => ["killed", b1], 2 => ["killed", nil] }))
+      sched.run([work(foo, ids)])
+      expect(orders(sched.run([work(foo2, ids)]))).to eq([ids])
+    end
+
+    it "hands a custom worker exactly the mutation, ids, and writer" do
+      arities = []
+      worker = lambda do |*args|
+        args.last.puts(JSON.generate("status" => "killed", "details" => args.size.to_s))
+      end
+      arities = described_class.new(jobs: 1, worker: worker).run([work(foo, ids)]).map(&:details)
+      expect(arities).to eq(["3"])
     end
   end
 end

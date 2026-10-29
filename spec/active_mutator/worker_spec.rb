@@ -160,6 +160,145 @@ RSpec.describe ActiveMutator::Worker do
     expect(ran_groups).to eq([covering])
   end
 
+  describe "covering group priority" do
+    def group(file, scoped_id = nil)
+      class_double(RSpec::Core::ExampleGroup,
+                   metadata: { absolute_file_path: File.expand_path(file), scoped_id: scoped_id })
+    end
+
+    def worker_for(ids) = described_class.new(mutation, ids, writer)
+
+    it "loads spec files in sorted order, whatever the run priority is" do
+      loaded = nil
+      allow(RSpec::Core::ConfigurationOptions).to receive(:new) { |args| loaded = args.dup }
+      allow(rspec_runner).to receive(:run_specs).and_return(0)
+      worker_for(%w[spec/z_spec.rb[1:1] spec/a_spec.rb[1:1] spec/m_spec.rb[1:1]]).run
+      expect(loaded).to eq(%w[spec/a_spec.rb[1:1] spec/m_spec.rb[1:1] spec/z_spec.rb[1:1]])
+    end
+
+    it "does not reorder the plan's own array while sorting the load arguments" do
+      ids = %w[spec/z_spec.rb[1:1] spec/a_spec.rb[1:1]]
+      allow(rspec_runner).to receive(:run_specs).and_return(0)
+      worker_for(ids).run
+      expect(ids).to eq(%w[spec/z_spec.rb[1:1] spec/a_spec.rb[1:1]])
+    end
+
+    it "runs top-level groups in priority order, not load order" do
+      a, b, c = group("spec/a_spec.rb", "1"), group("spec/b_spec.rb", "1"), group("spec/c_spec.rb", "1")
+      allow(RSpec.world).to receive(:ordered_example_groups).and_return([a, b, c])
+      ran = nil
+      allow(rspec_runner).to receive(:run_specs) { |groups| ran = groups; 0 }
+      worker_for(%w[spec/c_spec.rb[1:1] spec/a_spec.rb[1:1] spec/b_spec.rb[1:1]]).run
+      expect(ran).to eq([c, a, b])
+    end
+
+    it "ranks several top-level groups of one file and the nested ids inside them" do
+      a1, a2, b1 = group("spec/a_spec.rb", "1"), group("spec/a_spec.rb", "2"), group("spec/b_spec.rb", "1")
+      allow(RSpec.world).to receive(:ordered_example_groups).and_return([a1, a2, b1])
+      ran = nil
+      allow(rspec_runner).to receive(:run_specs) { |groups| ran = groups; 0 }
+      worker_for(%w[./spec/a_spec.rb[2:1:3] ./spec/b_spec.rb[1:1] ./spec/a_spec.rb[1:4]]).run
+      expect(ran).to eq([a2, b1, a1])
+    end
+
+    it "keeps host order for groups with equal or unknown rank" do
+      known = group("spec/a_spec.rb", "1")
+      other_one = group("spec/a_spec.rb", "7")
+      other_two = group("spec/a_spec.rb", "8")
+      allow(RSpec.world).to receive(:ordered_example_groups).and_return([other_two, other_one, known])
+      ran = nil
+      allow(rspec_runner).to receive(:run_specs) { |groups| ran = groups; 0 }
+      worker_for(%w[spec/a_spec.rb[1:1]]).run
+      expect(ran).to eq([known, other_two, other_one])
+    end
+
+    it "still drops groups leaked from a preloaded helper while ranking" do
+      leaked = group("spec/support/leaky.rb", "1")
+      a, b = group("spec/a_spec.rb", "1"), group("spec/b_spec.rb", "1")
+      allow(RSpec.world).to receive(:ordered_example_groups).and_return([leaked, a, b])
+      ran = nil
+      allow(rspec_runner).to receive(:run_specs) { |groups| ran = groups; 0 }
+      worker_for(%w[spec/b_spec.rb[1:1] spec/a_spec.rb[1:1]]).run
+      expect(ran).to eq([b, a])
+    end
+
+    it "copes with a malformed id among the selection" do
+      a = group("spec/a_spec.rb", "1")
+      allow(RSpec.world).to receive(:ordered_example_groups).and_return([a])
+      ran = nil
+      allow(rspec_runner).to receive(:run_specs) { |groups| ran = groups; 0 }
+      expect { worker_for(%w[nonsense spec/a_spec.rb[1:1]]).run }.not_to raise_error
+      expect(ran).to eq([a])
+    end
+  end
+
+  describe "reporting the killing example" do
+    let(:reporter) { instance_double(RSpec::Core::Reporter) }
+    let(:failed) { [] }
+
+    def example(id) = instance_double(RSpec::Core::Example, id: id)
+
+    before do
+      allow(RSpec.configuration).to receive(:reporter).and_return(reporter)
+      allow(reporter).to receive(:failed_examples) { failed }
+    end
+
+    def run_with(ids, code: 1, &failing)
+      allow(rspec_runner).to receive(:run_specs) do
+        failing&.call
+        code
+      end
+      described_class.new(mutation, ids, writer).run
+    end
+
+    it "names the first fresh failure that is one of the selected examples" do
+      run_with(%w[./spec/x_spec.rb[1:1] ./spec/y_spec.rb[1:2]]) do
+        failed.push(example("./spec/y_spec.rb[1:2]"), example("./spec/x_spec.rb[1:1]"))
+      end
+      expect(emitted).to eq("status" => "killed", "details" => nil, "killer" => "./spec/y_spec.rb[1:2]")
+    end
+
+    it "matches the failure to a selection spelled differently" do
+      run_with(%w[spec/x_spec.rb[1:1]]) { failed << example("./spec/x_spec.rb[1:1]") }
+      expect(emitted["killer"]).to eq("./spec/x_spec.rb[1:1]")
+    end
+
+    it "skips failures outside the selection and reports none when nothing matches" do
+      run_with(%w[./spec/x_spec.rb[1:1]]) { failed << example("./spec/leaked_spec.rb[1:1]") }
+      expect(emitted).to eq("status" => "killed", "details" => nil)
+    end
+
+    it "ignores failures that were already recorded before this run" do
+      failed << example("./spec/x_spec.rb[1:1]")
+      run_with(%w[./spec/x_spec.rb[1:1] ./spec/x_spec.rb[1:2]]) { failed << example("./spec/x_spec.rb[1:2]") }
+      expect(emitted["killer"]).to eq("./spec/x_spec.rb[1:2]")
+    end
+
+    it "reports no killer when the run failed without failed examples" do
+      run_with(%w[./spec/x_spec.rb[1:1]])
+      expect(emitted).to eq("status" => "killed", "details" => nil)
+    end
+
+    it "reports no killer for a survivor, even with an old failure around" do
+      failed << example("./spec/x_spec.rb[1:1]")
+      run_with(%w[./spec/x_spec.rb[1:1]], code: 0)
+      expect(emitted).to eq("status" => "survived", "details" => nil)
+    end
+
+    it "reports no killer when the mutated class fails to load" do
+      allow(rspec_runner).to receive(:setup).and_raise(ActiveMutator::ClosureReload::MutantLoadError, "boom")
+      described_class.new(mutation, %w[./spec/x_spec.rb[1:1]], writer).run
+      expect(emitted).to eq("status" => "killed", "details" => "mutated class failed to load: boom")
+    end
+
+    it "reports no killer for an error or a skip" do
+      allow(rspec_runner).to receive(:run_specs).and_raise(StandardError, "bang")
+      described_class.new(mutation, %w[./spec/x_spec.rb[1:1]], writer).run
+      expect(emitted.keys).to eq(%w[status details])
+      expect(emitted["status"]).to eq("error")
+    end
+  end
+
   describe "class-body mutants" do
     let(:mutation) do
       subject = ActiveMutator::Subject.new(

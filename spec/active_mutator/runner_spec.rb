@@ -1808,11 +1808,10 @@ RSpec.describe ActiveMutator::Runner do
       runner = described_class.new(config.with(root: root))
       items, pre = runner.plan_work([class_body_mutation(file)], map)
       expect(pre).to be_empty
-      # Union of both sets, sorted so scheduling is deterministic. The
-      # convention-spec example sorts between the two file-covering ones,
-      # so the ordering distinguishes sort from reverse.
+      # Union of both sets, sorted so scheduling is deterministic, with the
+      # convention spec moved to the front. The rest keep sorted order.
       expect(items.first.example_ids).to eq(
-        ["./spec/controllers/a_spec.rb[1:1]", "./spec/models/user_spec.rb[1:1]", "./spec/workers/z_spec.rb[1:1]"]
+        ["./spec/models/user_spec.rb[1:1]", "./spec/controllers/a_spec.rb[1:1]", "./spec/workers/z_spec.rb[1:1]"]
       )
     end
 

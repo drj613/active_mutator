@@ -42,7 +42,9 @@ module ActiveMutator
     def run
       require "rspec/core"
       devnull = File.open(File::NULL, "w")
-      runner = RSpec::Core::Runner.new(RSpec::Core::ConfigurationOptions.new(@example_ids))
+      # Sorted so spec files load in the same order whatever the run priority:
+      # load order decides constant definitions and shared setup.
+      runner = RSpec::Core::Runner.new(RSpec::Core::ConfigurationOptions.new(@example_ids.sort))
       if @mutation.subject.reload?
         require @mutation.subject.file # no-op if already loaded; guarantees the constant exists
         insert_mutation                # BEFORE setup: groups bind described_class to the mutated object
@@ -56,8 +58,13 @@ module ActiveMutator
       # is pure waste inside the fork.
       RSpec.configuration.fail_fast = 1
       after_fork_hygiene
+      failed_before = failed_examples.dup
       code = runner.run_specs(covering_groups)
-      emit(code.zero? ? "survived" : "killed")
+      if code.zero?
+        emit("survived")
+      else
+        emit("killed", killer: killer(failed_examples - failed_before))
+      end
     rescue ClosureReload::Skip => e
       emit("skipped", details: e.message)
     rescue ClosureReload::MutantLoadError => e
@@ -88,8 +95,10 @@ module ActiveMutator
       end
     end
 
-    def emit(status, details: nil)
-      @writer.puts(JSON.generate("status" => status, "details" => details))
+    def emit(status, details: nil, killer: nil)
+      report = { "status" => status, "details" => details }
+      report["killer"] = killer if killer
+      @writer.puts(JSON.generate(report))
       @writer.flush if @writer.respond_to?(:flush)
     end
 
@@ -97,14 +106,28 @@ module ActiveMutator
     # top-level groups evaluated while the PARENT preloaded the spec helper
     # (spec/support files with RSpec.describe at load time are common). Those
     # leak into the fork; running them would report their failures as false
-    # kills. Run only groups that belong to the covering spec files.
+    # kills. Run only groups that belong to the covering spec files, in the
+    # priority order of @example_ids; groups it does not name keep host order.
     def covering_groups
-      covering = @example_ids
-                 .map { |id| File.expand_path(id[/\A(.+?)\[/, 1]) }
-                 .to_set
-      RSpec.world.ordered_example_groups.select do |group|
+      covering = @example_ids.filter_map { |id| ExampleId.group_key(id)&.first }.to_set
+      rank = {}
+      @example_ids.each { |id| rank[ExampleId.group_key(id)] ||= rank.size }
+      groups = RSpec.world.ordered_example_groups.each_with_index.select do |group, _|
         covering.include?(group.metadata[:absolute_file_path])
       end
+      groups.sort_by do |group, host_index|
+        key = [group.metadata[:absolute_file_path], group.metadata[:scoped_id]]
+        [rank.fetch(key, rank.size), host_index]
+      end.map(&:first)
+    end
+
+    def failed_examples = RSpec.configuration.reporter.failed_examples
+
+    # The first fresh failure that is one of the examples this mutant ran
+    # against, spelled as RSpec reports it; nil when there is none.
+    def killer(failures)
+      selected = @example_ids.filter_map { |id| ExampleId.normalize(id) }.to_set
+      failures.map(&:id).find { |id| selected.include?(ExampleId.normalize(id)) }
     end
   end
 end
