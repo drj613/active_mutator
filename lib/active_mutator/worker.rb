@@ -40,9 +40,20 @@ module ActiveMutator
     end
 
     def run
+      # The mutant lands in THIS process, so a mutant of the id parser or of
+      # these methods could rewrite the very code that selects the groups and
+      # reports the verdict, before the specs that kill it have run. Bind the
+      # originals first. A Worker built later (by a spec) sees the mutant.
+      @emit = method(:emit)
+      @covering_groups = method(:covering_groups)
+      @killer = method(:killer)
+      @normalize = ExampleId.method(:normalize)
+      @group_keys = @example_ids.filter_map { |id| ExampleId.group_key(id) }
       require "rspec/core"
       devnull = File.open(File::NULL, "w")
-      runner = RSpec::Core::Runner.new(RSpec::Core::ConfigurationOptions.new(@example_ids))
+      # Sorted so spec files load in the same order whatever the run priority:
+      # load order decides constant definitions and shared setup.
+      runner = RSpec::Core::Runner.new(RSpec::Core::ConfigurationOptions.new(@example_ids.sort))
       if @mutation.subject.reload?
         require @mutation.subject.file # no-op if already loaded; guarantees the constant exists
         insert_mutation                # BEFORE setup: groups bind described_class to the mutated object
@@ -56,15 +67,20 @@ module ActiveMutator
       # is pure waste inside the fork.
       RSpec.configuration.fail_fast = 1
       after_fork_hygiene
-      code = runner.run_specs(covering_groups)
-      emit(code.zero? ? "survived" : "killed")
+      failed_before = failed_examples.dup
+      code = runner.run_specs(@covering_groups.call)
+      if code.zero?
+        @emit.call("survived")
+      else
+        @emit.call("killed", killer: @killer.call(failed_examples - failed_before))
+      end
     rescue ClosureReload::Skip => e
-      emit("skipped", details: e.message)
+      @emit.call("skipped", details: e.message)
     rescue ClosureReload::MutantLoadError => e
       # The mutation made the class unloadable; a real suite would fail on it.
-      emit("killed", details: "mutated class failed to load: #{e.message}")
+      @emit.call("killed", details: "mutated class failed to load: #{e.message}")
     rescue StandardError, ScriptError => e
-      emit("error", details: "#{e.class}: #{e.message}")
+      @emit.call("error", details: "#{e.class}: #{e.message}")
     end
 
     private
@@ -88,8 +104,10 @@ module ActiveMutator
       end
     end
 
-    def emit(status, details: nil)
-      @writer.puts(JSON.generate("status" => status, "details" => details))
+    def emit(status, details: nil, killer: nil)
+      report = { "status" => status, "details" => details }
+      report["killer"] = killer if killer
+      @writer.puts(JSON.generate(report))
       @writer.flush if @writer.respond_to?(:flush)
     end
 
@@ -97,14 +115,28 @@ module ActiveMutator
     # top-level groups evaluated while the PARENT preloaded the spec helper
     # (spec/support files with RSpec.describe at load time are common). Those
     # leak into the fork; running them would report their failures as false
-    # kills. Run only groups that belong to the covering spec files.
+    # kills. Run only groups that belong to the covering spec files, in the
+    # priority order of @example_ids; groups it does not name keep host order.
     def covering_groups
-      covering = @example_ids
-                 .map { |id| File.expand_path(id[/\A(.+?)\[/, 1]) }
-                 .to_set
-      RSpec.world.ordered_example_groups.select do |group|
+      covering = @group_keys.map(&:first).to_set
+      rank = {}
+      @group_keys.each { |key| rank[key] ||= rank.size }
+      groups = RSpec.world.ordered_example_groups.each_with_index.select do |group, _|
         covering.include?(group.metadata[:absolute_file_path])
       end
+      groups.sort_by do |group, host_index|
+        key = [group.metadata[:absolute_file_path], group.metadata[:scoped_id]]
+        [rank.fetch(key, rank.size), host_index]
+      end.map(&:first)
+    end
+
+    def failed_examples = RSpec.configuration.reporter.failed_examples
+
+    # The first fresh failure that is one of the examples this mutant ran
+    # against, spelled as RSpec reports it; nil when there is none.
+    def killer(failures)
+      selected = @example_ids.filter_map { |id| @normalize.call(id) }.to_set
+      failures.map(&:id).find { |id| selected.include?(@normalize.call(id)) }
     end
   end
 end

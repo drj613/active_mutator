@@ -263,6 +263,33 @@ every single fork. A failure in one of them would report as a false
 files. Nothing else runs. (`RSpec.shared_examples` is a separate registry
 and is unaffected either way.)
 
+**Group order.** `fail_fast = 1` ends a fork at its first failure, so the
+order of the top-level groups decides how much work a kill costs. The
+Runner puts the covering set in run priority: the subject's convention spec
+(`app/models/user.rb` → `spec/models/user_spec.rb`) first, then the
+top-level groups by the baseline time of their *selected* examples, cheapest
+first (ties keep sorted order; examples inside a group keep theirs). The
+Scheduler then learns from kills: when a worker's report names the failing
+example (`"killer"`, one of the examples it was given), the next mutant of
+the *same subject* starts with that example's whole top-level group. The
+hint lives only in the Scheduler, for that run; it is not part of `Result`.
+A hint applies only to mutants that have not started yet. With parallel
+workers, the first wave of siblings runs before a killer is known.
+A timeout, error, survivor, or a hint that does not match the mutant's
+selected examples leaves the last killer in place.
+The worker still loads spec files in sorted order, so constants and shared
+setup load as before; only the run order of the top-level groups moves. The
+selected examples, lane, and timeout budget do not change.
+
+Two side effects. A spec that only passes because an earlier top-level group
+changed shared state (a global, a database row, a stubbed constant) can
+behave differently when a different group runs first. Such order
+dependence is already a bug under `--order random`, but it now shows up as
+a kill or a survivor here. And a fork that dies on its first group finishes
+sooner, so the adaptive timeout calibrator sees lower utilization and may
+settle at a smaller scale than before; it never goes below the static
+budget. A survivor under load may receive less extra time than before.
+
 **Per-fork worker lifecycle** (`Worker#run`):
 1. `require` the subject's file: guarantees the target constant is defined
    before insertion, regardless of preload. Preloaded projects
@@ -291,7 +318,9 @@ and is unaffected either way.)
    inherit the parent's file descriptors, including DB sockets, and
    sharing a connection across processes corrupts it.
 5. `runner.run_specs(covering_groups)`: run only the filtered groups from
-   above, in-process.
+   above, in-process, top-level groups in the priority order described
+   under "Group order". On a kill, the worker reports the first failing
+   example it was given.
 6. Emit a JSON status line over the pipe back to the parent and exit.
 
 Fork gives correctness for free. There is no "un-mutate between

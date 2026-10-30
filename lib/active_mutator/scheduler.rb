@@ -29,6 +29,7 @@ module ActiveMutator
     def run(items)
       running = {}
       results = []
+      @killers = {} # Subject => [file, top-level group] of its latest killer
       @abort.deferred do
         # Browser-covered mutants each boot Chrome + an app server; running
         # them concurrently melts CPUs and manufactures false timeouts.
@@ -92,6 +93,7 @@ module ActiveMutator
     STDERR_TAIL_LINES = 20
 
     def spawn(item, running)
+      item = prioritized(item)
       calibrator = calibrator_for(item)
       budget = calibrator ? calibrator.budget_for(item) : item.timeout
       log_scale(calibrator, item.lane)
@@ -162,6 +164,29 @@ module ActiveMutator
       end
     end
 
+    # A sibling mutant of the same subject (the plan is built per mutant, so
+    # the covering set is the same or close) most likely dies to the same
+    # spec: run the group that killed the last one first. The set is unchanged.
+    def prioritized(item)
+      key = @killers[item.mutation.subject]
+      return item unless key
+
+      first, rest = item.example_ids.partition { |id| ExampleId.group_key(id) == key }
+      item.with(example_ids: first + rest)
+    end
+
+    # Only a kill that names one of the examples it was given counts. Anything
+    # else (missing, malformed, foreign, or on another status) leaves the last
+    # killer alone.
+    def learn_killer(item, status, killer)
+      return unless status == :killed
+
+      selected = item.example_ids.filter_map { |id| ExampleId.normalize(id) }
+      return unless selected.include?(ExampleId.normalize(killer))
+
+      @killers[item.mutation.subject] = ExampleId.group_key(killer)
+    end
+
     def finish(entry)
       seconds = now - entry[:started]
       report_line, stats_line = entry[:payload].lines.map(&:strip).reject(&:empty?)
@@ -179,6 +204,8 @@ module ActiveMutator
       Result.new(mutation: entry[:item].mutation, status: :error,
                  details: "worker emitted unparseable payload", seconds: seconds)
     else
+      # Learned only once the whole payload (report and stats) has parsed.
+      learn_killer(entry[:item], status, data["killer"]) if reported
       Result.new(mutation: entry[:item].mutation, status: status, details: details,
                  seconds: seconds, peak_rss_kb: peak)
     end

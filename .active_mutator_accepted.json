@@ -98,27 +98,6 @@
     "ordinal": 0
   },
   {
-    "file": "lib/active_mutator/worker.rb",
-    "subject": "ActiveMutator::Worker#covering_groups",
-    "description": "replace `.map` with `.each`",
-    "original_snippet": "map",
-    "ordinal": 0
-  },
-  {
-    "file": "lib/active_mutator/worker.rb",
-    "subject": "ActiveMutator::Worker#covering_groups",
-    "description": "replace `1` with `0`",
-    "original_snippet": "1",
-    "ordinal": 0
-  },
-  {
-    "file": "lib/active_mutator/worker.rb",
-    "subject": "ActiveMutator::Worker#covering_groups",
-    "description": "replace `.select` with `.reject`",
-    "original_snippet": "select",
-    "ordinal": 0
-  },
-  {
     "file": "lib/active_mutator/scheduler.rb",
     "subject": "ActiveMutator::Scheduler#spawn",
     "description": "replace `0` with `1`",
@@ -382,6 +361,27 @@
     "subject": "ActiveMutator::Scheduler#reap",
     "description": "replace `65536` with `65537`",
     "original_snippet": "65_536",
+    "ordinal": 0
+  },
+  {
+    "file": "lib/active_mutator/runner.rb",
+    "subject": "ActiveMutator::Runner#prioritize",
+    "description": "replace `.first` with `.last`",
+    "original_snippet": "first",
+    "ordinal": 0
+  },
+  {
+    "file": "lib/active_mutator/runner.rb",
+    "subject": "ActiveMutator::Runner#prioritize",
+    "description": "replace `1` with `2`",
+    "original_snippet": "1",
+    "ordinal": 0
+  },
+  {
+    "file": "lib/active_mutator/scheduler.rb",
+    "subject": "ActiveMutator::Scheduler#spawn",
+    "description": "force condition to `true`",
+    "original_snippet": "@events.listening?",
     "ordinal": 0
   }
 ]
