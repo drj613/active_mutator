@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [0.7.1] - 2026-10-30
+
 - A mutant's covering top-level groups now run in priority order: the
   subject's convention spec first, then the cheapest groups by baseline time
   of the selected examples. The worker reports the example that killed a
@@ -17,6 +19,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   first can now behave differently. Faster kills also feed the adaptive
   timeout calibrator lower utilization samples, so its scale may settle lower
   (it never drops below the static budget).
+- Self-mutation runs preserve the worker's group-selection and reporting
+  helpers before inserting a mutant. Mutations of those helpers now run
+  their killing specs and report their results correctly.
 
 ## [0.7.0] - 2026-10-05
 
