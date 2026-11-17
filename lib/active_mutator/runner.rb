@@ -146,7 +146,7 @@ module ActiveMutator
     rescue Aborted => e
       # The verdicts are final and the kills seen are real; the flags need
       # a finished audit, so they go.
-      raise e.with_results(with_audit_kills(results, audit ? audit.kills : {}))
+      raise e.with_results(with_audit_kills(results, audit.kills))
     end
 
     def with_audit_kills(results, kills)
