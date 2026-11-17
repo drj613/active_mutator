@@ -1,0 +1,168 @@
+RSpec.describe ActiveMutator::Runner do
+  let(:config) { ActiveMutator::CLI.parse([]).with(root: "/project", jobs: 3, audit_tests: true) }
+  let(:subject_) do
+    ActiveMutator::Subject.new(name: "A#x", file: "/project/lib/a.rb", byte_range: 0...10, line_range: 1..3,
+                               constant_scope: "A", kind: :instance)
+  end
+  let(:a) { "./spec/a_spec.rb[1:1]" }
+  let(:b) { "./spec/a_spec.rb[1:2]" }
+  let(:browser) { "./spec/system/a_spec.rb[1:1]" }
+  let(:map) { instance_double(ActiveMutator::CoverageMap, time_for: 0.5) }
+
+  def mutation(line)
+    ActiveMutator::Mutation.new(
+      subject: subject_, edit: ActiveMutator::Edit.new(range: 5...6, replacement: ">=", description: "d"),
+      original_snippet: ">", line: line, mutated_file_source: "", mutated_def_source: "def x = 1", mutated_def_line: 1
+    )
+  end
+
+  def result(mutation, status, **fields)
+    ActiveMutator::Result.new(mutation: mutation, status: status, details: nil, **fields)
+  end
+
+  describe "#audit_tests" do
+    let(:m1) { mutation(2) }
+    let(:m2) { mutation(3) }
+
+    it "runs killed mutants again against their suspects and adds the audit's kills to killed_by" do
+      scheduler = instance_double(ActiveMutator::Scheduler)
+      allow(scheduler).to receive(:run) { [result(m1, :killed, killed_by: [b])] }
+      results = [result(m1, :killed, killed_by: [a]), result(m2, :survived)]
+
+      merged, report = described_class.new(config).audit_tests(results, scheduler, map,
+                                                               phase1_ids: { m1 => [a, b, browser], m2 => [a] })
+
+      expect(scheduler).to have_received(:run) do |items|
+        expect(items.map(&:example_ids)).to eq([[b, browser]])
+        # Built like any work item: the lane and budget come from the suspects.
+        expect(items.first.lane).to eq(:serial)
+        expect(items.first.timeout).to eq(0.5 * config.timeout_factor + config.timeout_floor +
+                                          config.browser_boot_seconds)
+      end
+      expect(merged.map(&:killed_by)).to eq([[a, b], []])
+      expect(merged.last).to be(results.last)
+      expect(report.kills).to eq(m1 => [b])
+      expect(report.not_judged).to eq([browser])
+    end
+
+    it "builds rounds as wide as --jobs" do
+      mutants = (2..5).map { |line| mutation(line) }
+      scheduler = instance_double(ActiveMutator::Scheduler)
+      rounds = []
+      allow(scheduler).to receive(:run) do |items|
+        rounds << items.size
+        items.map { |i| result(i.mutation, :survived) }
+      end
+      results = mutants.map { |m| result(m, :killed, killed_by: [a]) }
+
+      described_class.new(config).audit_tests(results, scheduler, map, phase1_ids: mutants.to_h { |m| [m, [a, b]] })
+
+      expect(rounds).to eq([3, 1])
+    end
+
+    it "runs in its own phase, on a scheduler of audit workers" do
+      seen = []
+      bus = ActiveMutator::Events.new.subscribe { |e| seen << [e.type, e.fields] }
+      allow(ActiveMutator::Scheduler).to receive(:new).and_return(instance_double(ActiveMutator::Scheduler, run: []))
+      runner = described_class.new(config, events: bus)
+
+      runner.audit_tests([], nil, map, phase1_ids: { m1 => [a], m2 => [a] })
+
+      expect(ActiveMutator::Scheduler).to have_received(:new)
+        .with(jobs: 3, worker: described_class::AUDIT_WORKER, events: bus, first_seq: 3,
+              abort: runner.instance_variable_get(:@abort))
+      expect(seen).to eq([[:phase_start, { phase: :auditing }], [:phase_end, { phase: :auditing }]])
+    end
+
+    it "re-raises an aborted audit with the verdicts it was given, which are all final" do
+      scheduler = instance_double(ActiveMutator::Scheduler)
+      in_flight = [{ seq: 4 }]
+      allow(scheduler).to receive(:run).and_raise(ActiveMutator::Aborted.new(:sigterm, results: [], in_flight: in_flight))
+      results = [result(m1, :killed, killed_by: [a])]
+
+      expect do
+        described_class.new(config).audit_tests(results, scheduler, map, phase1_ids: { m1 => [a, b] })
+      end.to raise_error(ActiveMutator::Aborted) { |e| expect([e.reason, e.results, e.in_flight]).to eq([:sigterm, results, in_flight]) }
+    end
+  end
+
+  describe "AUDIT_WORKER" do
+    it "runs the worker with fail-fast off" do
+      writer = StringIO.new
+      allow(ActiveMutator::Worker).to receive(:run)
+      described_class::AUDIT_WORKER.call(:mutation, [:ids], writer)
+      expect(ActiveMutator::Worker).to have_received(:run).with(:mutation, [:ids], writer, audit: true)
+    end
+  end
+
+  describe "a run with --audit-tests" do
+    let(:seen) { [] }
+    let(:bus) { ActiveMutator::Events.new.subscribe { |e| seen << [e.type, e.fields[:phase]] } }
+    let(:reporter) do
+      r = Object.new
+      def r.coverage_map=(_); end
+      def r.on_result(_); end
+      def r.summary(*, **); end
+      r
+    end
+
+    def run_with(cfg)
+      runner = described_class.new(cfg, reporter: reporter, events: bus)
+      allow(runner).to receive(:preload!)
+      allow(runner).to receive(:preload_spec_helper!)
+      allow(runner).to receive(:discover).and_return(
+        described_class::Discovery.new(subjects: [], scanned_files: [], since_candidates: [],
+                                       since_matched_all: [], since_filter: nil)
+      )
+      allow(ActiveMutator::Baseline).to receive(:new).and_return(instance_double(ActiveMutator::Baseline, coverage_map: map))
+      allow(ActiveMutator::Scheduler).to receive(:new).and_return(instance_double(ActiveMutator::Scheduler, run: []))
+      runner.call
+    end
+
+    def phases = seen.select { |(type, _)| type == :phase_start }.map(&:last)
+
+    it "audits after escalation, before the report" do
+      expect { run_with(config) }.not_to output.to_stderr
+      expect(phases).to eq(%i[boot planning mutating auditing reporting])
+    end
+
+    it "does not audit without the flag" do
+      run_with(config.with(audit_tests: false))
+      expect(phases).not_to include(:auditing)
+    end
+
+    it "does not audit a run narrowed by path arguments, and says so" do
+      expect { run_with(config.with(paths: ["lib"])) }
+        .to output("active_mutator: --audit-tests needs a full run; skipping the audit (narrowed by path arguments)\n")
+        .to_stderr
+      expect(phases).not_to include(:auditing)
+    end
+
+    it "audits with --no-class-level, which leaves every def mutant in" do
+      run_with(config.with(class_level: false))
+      expect(phases).to include(:auditing)
+    end
+  end
+
+  describe "the full-run check" do
+    def check(**fields)
+      described_class.new(config.with(**fields)).send(:full_run_for_audit?)
+    end
+
+    it "names every flag that narrows the run" do
+      expect { expect(check(since: "main", subject_filter: "A", max_mutants: 3, paths: ["lib"])).to be(false) }
+        .to output("active_mutator: --audit-tests needs a full run; skipping the audit " \
+                   "(narrowed by --since/--changed, --subject, --max-mutants, path arguments)\n").to_stderr
+    end
+
+    { since: "HEAD", subject_filter: "A#x", max_mutants: 1 }.each do |field, value|
+      it "fails on #{field} alone" do
+        expect { expect(check(field => value)).to be(false) }.to output(/skipping the audit/).to_stderr
+      end
+    end
+
+    it "passes a full run" do
+      expect { expect(check).to be(true) }.not_to output.to_stderr
+    end
+  end
+end

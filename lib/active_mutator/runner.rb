@@ -10,6 +10,9 @@ module ActiveMutator
     # without --since). The last three feed the --allow-empty verdict (#46).
     Discovery = Data.define(:subjects, :scanned_files, :since_candidates, :since_matched_all, :since_filter)
 
+    # --audit-tests runs each killed mutant again with fail-fast off (#54).
+    AUDIT_WORKER = ->(mutation, example_ids, writer) { Worker.run(mutation, example_ids, writer, audit: true) }
+
     SIGNALS = { "INT" => :sigint, "TERM" => :sigterm }.freeze
     # An aborted run never passes, whatever --fail-at says.
     EXIT_CODES = { sigint: 130, sigterm: 143, memory_ceiling: 3 }.freeze
@@ -19,6 +22,7 @@ module ActiveMutator
       @reporter = reporter || build_reporter
       @events = events || build_events
       @abort = AbortFlag.new
+      @escalated = 0 # phase-2 forks, so audit forks number after them
     end
 
     # The traps go in first so boot, planning, and the baseline are covered
@@ -94,6 +98,7 @@ module ActiveMutator
       end
       return results if items.empty?
 
+      @escalated = items.size
       # Numbered after phase 1's mutants, so seq stays unique across the run.
       scheduler ||= Scheduler.new(jobs: @config.jobs, events: @events, first_seq: phase1_ids.size + 1, abort: @abort)
       escalated = begin
@@ -124,6 +129,28 @@ module ActiveMutator
           r
         end
       end
+    end
+
+    # The --audit-tests pass (public for unit testing); returns the results,
+    # with the audit's kills added to killed_by, and the TestAudit::Report.
+    # `scheduler` is injectable like escalation's; nil builds one that runs
+    # audit workers, with no on_result: no mutant gets a second status char.
+    def audit_tests(results, scheduler, map, phase1_ids:)
+      scheduler ||= Scheduler.new(jobs: @config.jobs, worker: AUDIT_WORKER, events: @events,
+                                  first_seq: phase1_ids.size + @escalated + 1, abort: @abort)
+      report = @events.phase(:auditing) do
+        TestAudit.new(results: results, example_ids: phase1_ids, width: @config.jobs,
+                      build: ->(mutation, ids) { build_work_item(mutation, ids, map) },
+                      run: scheduler.method(:run)).call
+      end
+      merged = results.map do |r|
+        extra = report.kills[r.mutation]
+        extra ? r.with(killed_by: r.killed_by + extra) : r
+      end
+      [merged, report]
+    rescue Aborted => e
+      # The verdicts are final; a half-done audit proves nothing.
+      raise e.with_results(results)
     end
 
     def exit_code(results)
@@ -169,6 +196,7 @@ module ActiveMutator
 
       items, pre_results, phase1_ids = plan_work(mutations, map, ledger: ledger, fingerprints: fingerprints)
       return debug_plan(items, pre_results) if @config.debug_plan
+      audit = @config.audit_tests && full_run_for_audit?
 
       # From here on a trip only records its reason. Raised at once, it could
       # land between two steps (the sample as mutating ends, the spec reads
@@ -179,6 +207,8 @@ module ActiveMutator
         stop_if_tripped!(done)
         # Phase 2 runs on its own scheduler (built lazily inside), so pass nil.
         done = escalate_class_body_survivors(done, nil, map, phase1_ids: phase1_ids)
+        stop_if_tripped!(done)
+        done, = audit_tests(done, nil, map, phase1_ids: phase1_ids) if audit
         stop_if_tripped!(done)
 
         reporting(done) do
@@ -571,9 +601,29 @@ module ActiveMutator
     # file's class-body fingerprint is absent even though the file is scanned;
     # without this guard its accepted ledger entry looks stale and gets pruned.
     def prune_scope(subjects)
-      return nil if @config.subject_filter || @config.since || @config.max_mutants || !@config.class_level
+      return nil if narrowing_flags.any? || !@config.class_level
 
       subjects.map { |s| s.file.delete_prefix("#{@config.root}/") }.uniq
+    end
+
+    def narrowing_flags
+      flags = []
+      flags << "--since/--changed" if @config.since
+      flags << "--subject" if @config.subject_filter
+      flags << "--max-mutants" if @config.max_mutants
+      flags
+    end
+
+    # The audit judges a test by every mutant it covers, so v1 needs a full
+    # run: prune_scope's narrowing flags, plus path arguments.
+    # --no-class-level is fine, since the audit judges def mutants only.
+    def full_run_for_audit?
+      narrowed = narrowing_flags
+      narrowed << "path arguments" unless @config.paths.empty?
+      return true if narrowed.empty?
+
+      warn "active_mutator: --audit-tests needs a full run; skipping the audit (narrowed by #{narrowed.join(", ")})"
+      false
     end
 
     def accept_survivors!(ledger, results, fingerprints, scanned_files)

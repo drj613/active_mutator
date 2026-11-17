@@ -989,4 +989,38 @@ RSpec.describe ActiveMutator::Scheduler do
       expect(killed_by("killer" => b1)).to eq([])
     end
   end
+
+  describe "the passes a result keeps" do
+    let(:a1) { "./spec/a_spec.rb[1:1]" }
+    let(:b1) { "./spec/b_spec.rb[1:1]" }
+    let(:foo) { mutation_in("/app/foo.rb", line: 1) }
+
+    def passed(payload)
+      worker = ->(_m, _ids, writer) { writer.puts(JSON.generate({ "status" => "survived", "details" => nil }.merge(payload))) }
+      item = ActiveMutator::WorkItem.new(mutation: foo, example_ids: [a1, b1], timeout: 5.0, lane: :parallel)
+      described_class.new(jobs: 1, worker: worker).run([item]).first.passed
+    end
+
+    it "keeps the passes an audit worker reported, with their locations" do
+      expect(passed("passed" => { a1 => "./spec/a_spec.rb:3" })).to eq(a1 => "./spec/a_spec.rb:3")
+    end
+
+    it "keeps none when the worker reported none" do
+      expect(passed({})).to eq({})
+    end
+
+    it "keeps none when the report is not a map" do
+      expect(passed("passed" => [a1])).to eq({})
+    end
+
+    it "drops passes without a location string or outside the examples it was given" do
+      payload = { "passed" => { a1 => 3, b1 => "./spec/b_spec.rb:1", "./spec/zzz_spec.rb[1:1]" => "./spec/zzz_spec.rb:1",
+                                "garbage" => "x:1" } }
+      expect(passed(payload)).to eq(b1 => "./spec/b_spec.rb:1")
+    end
+
+    it "keeps passes on a kill too" do
+      expect(passed("status" => "killed", "killers" => [a1], "passed" => { b1 => "b:1" })).to eq(b1 => "b:1")
+    end
+  end
 end

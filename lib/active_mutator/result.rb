@@ -5,8 +5,10 @@ module ActiveMutator
   # killed_by: the example ids that killed it, as RSpec spells them. The
   # normal run stops at the first failure, so it names at most one; empty
   # when no example is to blame (e.g. the mutated class failed to load).
-  Result = Data.define(:mutation, :status, :details, :seconds, :peak_rss_kb, :killed_by) do
-    def initialize(mutation:, status:, details:, seconds: nil, peak_rss_kb: nil, killed_by: [])
+  # passed: id => location for each example that passed; only audit workers
+  # report it (#54), so it is empty everywhere else.
+  Result = Data.define(:mutation, :status, :details, :seconds, :peak_rss_kb, :killed_by, :passed) do
+    def initialize(mutation:, status:, details:, seconds: nil, peak_rss_kb: nil, killed_by: [], passed: {})
       super
     end
 

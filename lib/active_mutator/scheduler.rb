@@ -181,9 +181,20 @@ module ActiveMutator
     def verified_killers(item, status, data)
       return [] unless status == :killed
 
-      selected = item.example_ids.filter_map { |id| ExampleId.normalize(id) }
+      selected = selected(item)
       Array(data["killers"] || data["killer"]).select { |id| selected.include?(ExampleId.normalize(id)) }
     end
+
+    # An audit worker's passes, held to the same rule: only selected examples.
+    def verified_passes(item, data)
+      passes = data["passed"]
+      return {} unless passes.is_a?(Hash)
+
+      selected = selected(item)
+      passes.select { |id, location| location.is_a?(String) && selected.include?(ExampleId.normalize(id)) }
+    end
+
+    def selected(item) = item.example_ids.filter_map { |id| ExampleId.normalize(id) }
 
     def learn_killer(item, killer)
       @killers[item.mutation.subject] = ExampleId.group_key(killer) if killer
@@ -210,7 +221,8 @@ module ActiveMutator
       killed_by = reported ? verified_killers(entry[:item], status, data) : []
       learn_killer(entry[:item], killed_by.first)
       Result.new(mutation: entry[:item].mutation, status: status, details: details,
-                 seconds: seconds, peak_rss_kb: peak, killed_by: killed_by)
+                 seconds: seconds, peak_rss_kb: peak, killed_by: killed_by,
+                 passed: reported ? verified_passes(entry[:item], data) : {})
     end
 
     def complete(pid, entry, result)

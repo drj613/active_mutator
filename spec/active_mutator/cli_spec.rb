@@ -186,6 +186,11 @@ RSpec.describe ActiveMutator::CLI do
       expect(described_class.parse([]).exclude).to eq([])
     end
 
+    it "parses --audit-tests, off by default" do
+      expect(described_class.parse([]).audit_tests).to be(false)
+      expect(described_class.parse(["--audit-tests"]).audit_tests).to be(true)
+    end
+
     it "parses --max-mutants" do
       expect(described_class.parse(["--max-mutants", "50"]).max_mutants).to eq(50)
     end
