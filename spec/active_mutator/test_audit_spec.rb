@@ -38,6 +38,7 @@ RSpec.describe ActiveMutator::TestAudit do
     expect(report.flagged).to eq([described_class::Flag.new(id: b, location: "./spec/a_spec.rb:7", killable: 1)])
     expect(report.cleared).to eq(1)
     expect(report.not_judged).to eq([])
+    expect(report.kills).to eq({})
     expect(report.mutants_run).to eq(1)
   end
 
@@ -200,10 +201,11 @@ RSpec.describe ActiveMutator::TestAudit do
 
   it "lists flagged and unjudged examples sorted by id" do
     results = [result(m1, :killed, killed_by: [a]), result(m2, :survived)]
-    report = audit(results, { m1 => [a, d, b], m2 => [c, "./spec/b_spec.rb[1:1]"] },
-                   { m1 => ->(_) { result(m1, :survived, passed: passes(d, b)) } })
+    e = "./spec/e_spec.rb[1:1]"
+    report = audit(results, { m1 => [a, b, e, d], m2 => [c, "./spec/b_spec.rb[1:1]"] },
+                   { m1 => ->(_) { result(m1, :survived, passed: passes(d, b, e)) } })
 
-    expect(report.flagged.map(&:id)).to eq([b, d])
+    expect(report.flagged.map(&:id)).to eq([b, d, e])
     expect(report.not_judged).to eq(["./spec/b_spec.rb[1:1]", c])
   end
 end

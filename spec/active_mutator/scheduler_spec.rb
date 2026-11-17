@@ -863,6 +863,16 @@ RSpec.describe ActiveMutator::Scheduler do
       expect(results.map(&:status)).to eq(%i[killed killed])
     end
 
+    it "runs the first of an audit worker's killers first" do
+      worker = lambda do |m, example_ids, writer|
+        payload = { "status" => "killed", "details" => example_ids.join(",") }
+        payload["killers"] = [c1, b1] if m.line == 1
+        writer.puts(JSON.generate(payload))
+      end
+      results = described_class.new(jobs: 1, worker: worker).run([work(foo, ids), work(foo2, ids)])
+      expect(orders(results).last).to eq([c1, a1, b1])
+    end
+
     it "remembers the latest valid killer" do
       results = run_jobs1({ 1 => ["killed", b1], 2 => ["killed", c1], 3 => ["killed", nil] },
                           [work(foo, ids), work(foo2, ids), work(foo3, ids)])

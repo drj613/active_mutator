@@ -190,7 +190,7 @@ RSpec.describe ActiveMutator::Reporter::Terminal do
 
     it "lists each test with no kills observed, then a count line" do
       reporter.summary([result(:killed)], invalid_count: 0, test_audit: report)
-      expect(out.string).to end_with(<<~TEXT)
+      expect(out.string).to end_with(<<~TEXT.prepend("\n"))
 
         Tests with no kills observed (they pass against mutants other tests kill):
           ./spec/a_spec.rb:7 (./spec/a_spec.rb[1:2])
@@ -203,7 +203,7 @@ RSpec.describe ActiveMutator::Reporter::Terminal do
     it "prints only the count line when nothing was flagged" do
       reporter.summary([result(:killed)], invalid_count: 0, test_audit: report.with(flagged: []))
       expect(out.string).not_to include("Tests with no kills observed")
-      expect(out.string).to end_with("Test audit: 0 with no kills observed, 12 killed a mutant, 1 not judged (9 audit runs)\n")
+      expect(out.string).to end_with("\n\nTest audit: 0 with no kills observed, 12 killed a mutant, 1 not judged (9 audit runs)\n")
     end
 
     it "prints nothing about an audit that did not run" do

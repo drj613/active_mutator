@@ -150,6 +150,11 @@ RSpec.describe ActiveMutator::Reporter::StrykerJson do
       expect(report.dig("testFiles", "spec/other_spec.rb", "tests")).to eq([{ "id" => other, "name" => other }])
     end
 
+    it "keeps the killer as reported without a coverage map" do
+      mutant, = mutant_after(build_result(:killed, file: @file, killed_by: [a1]))
+      expect(mutant["killedBy"]).to eq([a1])
+    end
+
     it "is left out when no killer is known" do
       mutant, = mutant_after(build_result(:killed, file: @file))
       expect(mutant).not_to have_key("killedBy")

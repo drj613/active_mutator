@@ -218,7 +218,7 @@ module ActiveMutator
                  details: "worker emitted unparseable payload", seconds: seconds)
     else
       # Learned only once the whole payload (report and stats) has parsed.
-      killed_by = reported ? verified_killers(entry[:item], status, data) : []
+      killed_by = verified_killers(entry[:item], status, data) # [] unless reported as a kill
       learn_killer(entry[:item], killed_by.first)
       Result.new(mutation: entry[:item].mutation, status: status, details: details,
                  seconds: seconds, peak_rss_kb: peak, killed_by: killed_by,

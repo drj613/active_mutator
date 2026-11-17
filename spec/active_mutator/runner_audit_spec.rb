@@ -110,6 +110,7 @@ RSpec.describe ActiveMutator::Runner do
 
     def run_with(cfg)
       runner = described_class.new(cfg, reporter: reporter, events: bus)
+      yield runner if block_given?
       allow(runner).to receive(:preload!)
       allow(runner).to receive(:preload_spec_helper!)
       allow(runner).to receive(:discover).and_return(
@@ -126,6 +127,29 @@ RSpec.describe ActiveMutator::Runner do
     it "audits after escalation, before the report" do
       expect { run_with(config) }.not_to output.to_stderr
       expect(phases).to eq(%i[boot planning mutating auditing reporting])
+    end
+
+    # A trip inside the run's deferred block only records the reason.
+    def trip(runner, value)
+      runner.instance_variable_get(:@abort).trip!(:sigterm)
+      value
+    end
+
+    it "does not start the audit after a stop during escalation" do
+      code = run_with(config) do |runner|
+        allow(runner).to receive(:escalate_class_body_survivors) { |done, *| trip(runner, done) }
+        allow(runner).to receive(:audit_tests)
+      end
+      expect(code).to eq(143)
+      expect(phases).not_to include(:auditing)
+    end
+
+    it "does not report a full summary after a stop during the audit" do
+      code = run_with(config) do |runner|
+        allow(runner).to receive(:audit_tests) { |done, *| trip(runner, [done, nil]) }
+      end
+      expect(code).to eq(143)
+      expect(summaries.last).to include(:aborted)
     end
 
     it "hands the audit report to the reporter" do

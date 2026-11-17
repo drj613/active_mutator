@@ -40,7 +40,8 @@ module ActiveMutator
 
     def call
       defs = @results.reject { |r| r.mutation.subject.class_body? }
-      killable = defs.select { |r| r.status == :killed && r.killed_by.any? }
+      # Only kills carry killers (Scheduler#verified_killers).
+      killable = defs.select { |r| r.killed_by.any? }
       # A kill of any mutant, class-body included, clears its killer.
       @cleared = @results.flat_map(&:killed_by).to_set { |id| key(id) }
       @passes = {}

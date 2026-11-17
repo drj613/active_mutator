@@ -117,11 +117,12 @@ module ActiveMutator
 
       # Spelled as in coveredBy where the two match, so the viewer links
       # them. A phase-2 killer may not be in coveredBy; it keeps its spelling.
+      # The scheduler keeps only killers that normalize, and baseline ids do.
       def killed_by(result)
-        return [] if result.killed_by.empty?
-
-        covered = (covered_by(result) || []).to_h { |id| [ExampleId.normalize(id) || id, id] }
-        result.killed_by.map { |id| covered.fetch(ExampleId.normalize(id) || id, id) }.uniq
+        covered = covered_by(result) || []
+        result.killed_by.map do |id|
+          covered.find { |c| ExampleId.normalize(c) == ExampleId.normalize(id) } || id
+        end.uniq
       end
 
       def referenced_examples(results)
