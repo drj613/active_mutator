@@ -28,15 +28,21 @@ module ActiveMutator
   # $LOADED_FEATURES so it's a no-op, while non-preloaded projects (plain
   # gems whose spec files require the lib themselves, or --no-preload-helper)
   # get it loaded rather than relying on spec-load to define it.
+  #
+  # `audit: true` is the --audit-tests pass: fail-fast goes off so every
+  # selected example runs, and the report adds every fresh failure in the
+  # selection ("killers") and every example that passed ("passed", id =>
+  # location). Pending and skipped examples are in neither list.
   class Worker
-    def self.run(mutation, example_ids, writer)
-      new(mutation, example_ids, writer).run
+    def self.run(mutation, example_ids, writer, audit: false)
+      new(mutation, example_ids, writer, audit: audit).run
     end
 
-    def initialize(mutation, example_ids, writer)
+    def initialize(mutation, example_ids, writer, audit: false)
       @mutation = mutation
       @example_ids = example_ids
       @writer = writer
+      @audit = audit
     end
 
     def run
@@ -47,6 +53,8 @@ module ActiveMutator
       @emit = method(:emit)
       @covering_groups = method(:covering_groups)
       @killer = method(:killer)
+      @in_selection = method(:in_selection)
+      @audit_verdicts = method(:audit_verdicts)
       @normalize = ExampleId.method(:normalize)
       @group_keys = @example_ids.filter_map { |id| ExampleId.group_key(id) }
       require "rspec/core"
@@ -64,15 +72,18 @@ module ActiveMutator
         insert_mutation                # AFTER load: nothing left can redefine the method back
       end
       # One failure kills the mutant; running the rest of the covering set
-      # is pure waste inside the fork.
-      RSpec.configuration.fail_fast = 1
+      # is pure waste inside the fork. The audit needs every verdict instead.
+      RSpec.configuration.fail_fast = @audit ? false : 1
       after_fork_hygiene
       failed_before = failed_examples.dup
+      examples_before = all_examples.dup
       code = runner.run_specs(@covering_groups.call)
+      failures = failed_examples - failed_before
+      verdicts = @audit ? @audit_verdicts.call(failures, all_examples - examples_before) : {}
       if code.zero?
-        @emit.call("survived")
+        @emit.call("survived", **verdicts)
       else
-        @emit.call("killed", killer: @killer.call(failed_examples - failed_before))
+        @emit.call("killed", killer: @killer.call(failures), **verdicts)
       end
     rescue ClosureReload::Skip => e
       @emit.call("skipped", details: e.message)
@@ -104,9 +115,10 @@ module ActiveMutator
       end
     end
 
-    def emit(status, details: nil, killer: nil)
+    def emit(status, details: nil, killer: nil, **verdicts)
       report = { "status" => status, "details" => details }
       report["killer"] = killer if killer
+      report.merge!(verdicts.transform_keys(&:to_s))
       @writer.puts(JSON.generate(report))
       @writer.flush if @writer.respond_to?(:flush)
     end
@@ -132,11 +144,24 @@ module ActiveMutator
 
     def failed_examples = RSpec.configuration.reporter.failed_examples
 
+    def all_examples = RSpec.configuration.reporter.examples
+
     # The first fresh failure that is one of the examples this mutant ran
     # against, spelled as RSpec reports it; nil when there is none.
-    def killer(failures)
+    def killer(failures) = @in_selection.call(failures).first
+
+    # The ids of `examples` that this mutant ran against, spelled as RSpec
+    # reports them, in run order.
+    def in_selection(examples)
       selected = @example_ids.filter_map { |id| @normalize.call(id) }.to_set
-      failures.map(&:id).find { |id| selected.include?(@normalize.call(id)) }
+      examples.map(&:id).select { |id| selected.include?(@normalize.call(id)) }
+    end
+
+    def audit_verdicts(failures, ran)
+      passed = ran.select { |example| example.execution_result.status == :passed }
+      locations = passed.to_h { |example| [example.id, example.location] }
+      { killers: @in_selection.call(failures),
+        passed: @in_selection.call(passed).to_h { |id| [id, locations.fetch(id)] } }
     end
   end
 end
