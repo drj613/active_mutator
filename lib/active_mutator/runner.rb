@@ -208,12 +208,14 @@ module ActiveMutator
         # Phase 2 runs on its own scheduler (built lazily inside), so pass nil.
         done = escalate_class_body_survivors(done, nil, map, phase1_ids: phase1_ids)
         stop_if_tripped!(done)
-        done, = audit_tests(done, nil, map, phase1_ids: phase1_ids) if audit
+        done, test_audit = audit_tests(done, nil, map, phase1_ids: phase1_ids) if audit
         stop_if_tripped!(done)
 
         reporting(done) do
           accept_survivors!(ledger, done, fingerprints, scanned_files) if @config.accept_survivors
-          @reporter.summary(done, invalid_count: @invalid_count)
+          # Only when it ran, so an injected reporter without the keyword still works.
+          extra = test_audit ? { test_audit: test_audit } : {}
+          @reporter.summary(done, invalid_count: @invalid_count, **extra)
         end
         done
       end

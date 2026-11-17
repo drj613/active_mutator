@@ -207,4 +207,10 @@ RSpec.describe ActiveMutator::Reporter::StrykerJson do
     reporter.summary([build_result(:killed, file: @file)], invalid_count: 0)
     expect(out.string).to eq(".\n\nStryker report written to .active_mutator/mutation-report.json\n")
   end
+
+  it "accepts a test audit and leaves it out of the report" do
+    report = ActiveMutator::TestAudit::Report.new(flagged: [], cleared: 0, not_judged: [], kills: {}, mutants_run: 0)
+    reporter.summary([build_result(:killed, file: @file)], invalid_count: 0, test_audit: report)
+    expect(JSON.parse(File.read(report_path))).not_to have_key("test_audit")
+  end
 end

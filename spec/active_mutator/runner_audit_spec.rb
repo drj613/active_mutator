@@ -98,11 +98,13 @@ RSpec.describe ActiveMutator::Runner do
   describe "a run with --audit-tests" do
     let(:seen) { [] }
     let(:bus) { ActiveMutator::Events.new.subscribe { |e| seen << [e.type, e.fields[:phase]] } }
+    let(:summaries) { [] }
     let(:reporter) do
       r = Object.new
+      calls = summaries
       def r.coverage_map=(_); end
       def r.on_result(_); end
-      def r.summary(*, **); end
+      r.define_singleton_method(:summary) { |_results, **kwargs| calls << kwargs }
       r
     end
 
@@ -126,9 +128,15 @@ RSpec.describe ActiveMutator::Runner do
       expect(phases).to eq(%i[boot planning mutating auditing reporting])
     end
 
-    it "does not audit without the flag" do
+    it "hands the audit report to the reporter" do
+      run_with(config)
+      expect(summaries.last[:test_audit]).to be_a(ActiveMutator::TestAudit::Report)
+    end
+
+    it "does not audit without the flag, or pass the reporter a test_audit keyword" do
       run_with(config.with(audit_tests: false))
       expect(phases).not_to include(:auditing)
+      expect(summaries.last).not_to have_key(:test_audit)
     end
 
     it "does not audit a run narrowed by path arguments, and says so" do

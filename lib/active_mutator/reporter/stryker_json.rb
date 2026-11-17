@@ -36,7 +36,8 @@ module ActiveMutator
       # same file with no files/mutants; the flag is accepted for contract parity.
       # An aborted run reports the finished mutants only: the schema has no
       # "didn't finish" status that wouldn't skew the score.
-      def summary(results, invalid_count:, empty_plan: false, aborted: nil)
+      # The test audit has no place in the Stryker schema; use --format json.
+      def summary(results, invalid_count:, empty_plan: false, aborted: nil, test_audit: nil)
         report = build_report(results, invalid_count)
         path = File.join(@root, REPORT_PATH)
         # An empty plan skips the baseline, which used to create this dir.

@@ -12,8 +12,9 @@ module ActiveMutator
 
       def on_result(result) = @terminal.on_result(result)
 
-      def summary(results, invalid_count:, empty_plan: false, aborted: nil)
-        @terminal.summary(results, invalid_count: invalid_count, empty_plan: empty_plan, aborted: aborted)
+      def summary(results, invalid_count:, empty_plan: false, aborted: nil, test_audit: nil)
+        @terminal.summary(results, invalid_count: invalid_count, empty_plan: empty_plan, aborted: aborted,
+                                   test_audit: test_audit)
         results.select { |r| r.status == :survived }.each { |r| annotate(r) }
         annotate_abort(aborted, results) if aborted
       end

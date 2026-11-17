@@ -71,7 +71,8 @@ RSpec.describe ActiveMutator::Reporter::Json do
       "results" => [],
       "in_flight" => [],
       "planned" => 0,
-      "exit_reason" => "empty_plan"
+      "exit_reason" => "empty_plan",
+      "test_audit" => nil
     )
   end
 
@@ -150,5 +151,31 @@ RSpec.describe ActiveMutator::Reporter::Json do
   it "ranks survivors over errors in exit_reason" do
     reporter.summary([result_with(:survived, nil), result_with(:error, "boom")], invalid_count: 0)
     expect(JSON.parse(out.string)["exit_reason"]).to eq("unaccepted_survivors")
+  end
+
+  describe "the test_audit key" do
+    let(:report) do
+      ActiveMutator::TestAudit::Report.new(
+        flagged: [ActiveMutator::TestAudit::Flag.new(id: "./spec/a_spec.rb[1:2]", location: "./spec/a_spec.rb:7",
+                                                     killable: 3)],
+        cleared: 12, not_judged: ["./spec/b_spec.rb[1:1]"], kills: {}, mutants_run: 9
+      )
+    end
+
+    it "is null when the audit did not run" do
+      reporter.summary([], invalid_count: 0)
+      expect(JSON.parse(out.string)).to include("test_audit" => nil)
+    end
+
+    it "carries the audit report" do
+      reporter.summary([], invalid_count: 0, test_audit: report)
+      expect(JSON.parse(out.string)["test_audit"]).to eq(
+        "mutants_run" => 9,
+        "cleared" => 12,
+        "no_kills_observed" => [{ "id" => "./spec/a_spec.rb[1:2]", "location" => "./spec/a_spec.rb:7",
+                                  "killable_mutants" => 3, "kills" => 0 }],
+        "not_judged" => ["./spec/b_spec.rb[1:1]"]
+      )
+    end
   end
 end
