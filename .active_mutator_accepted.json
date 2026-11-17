@@ -383,5 +383,12 @@
     "description": "force condition to `true`",
     "original_snippet": "@events.listening?",
     "ordinal": 0
+  },
+  {
+    "file": "lib/active_mutator/test_audit.rb",
+    "subject": "ActiveMutator::TestAudit (class body)",
+    "description": "delete `private`",
+    "original_snippet": "private",
+    "ordinal": 0
   }
 ]
