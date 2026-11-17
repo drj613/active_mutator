@@ -179,6 +179,8 @@ module ActiveMutator
       mutations = mutations.first(@config.max_mutants) if @config.max_mutants
       @planned = mutations.size
       @invalid_count = analyses.sum(&:invalid_count)
+      # Before the empty-plan exit, so a scoped run that plans nothing warns too.
+      audit = @config.audit_tests && full_run_for_audit?
       # Decide emptiness before the baseline: a scoped run that plans nothing
       # has no use for a coverage map, and building one spawns the whole spec
       # suite (#47).
@@ -199,7 +201,6 @@ module ActiveMutator
 
       items, pre_results, phase1_ids = plan_work(mutations, map, ledger: ledger, fingerprints: fingerprints)
       return debug_plan(items, pre_results) if @config.debug_plan
-      audit = @config.audit_tests && full_run_for_audit?
 
       # From here on a trip only records its reason. Raised at once, it could
       # land between two steps (the sample as mutating ends, the spec reads

@@ -188,6 +188,11 @@ RSpec.describe ActiveMutator::Runner do
       expect(phases).not_to include(:auditing)
     end
 
+    it "warns that it skips the audit even when a scoped run plans nothing" do
+      expect { run_with(config.with(since: "main", allow_empty: true)) }
+        .to output(/--audit-tests needs a full run; skipping the audit \(narrowed by --since/).to_stderr
+    end
+
     it "audits with --no-class-level, which leaves every def mutant in" do
       run_with(config.with(class_level: false))
       expect(phases).to include(:auditing)
