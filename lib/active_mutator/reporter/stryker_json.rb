@@ -88,6 +88,8 @@ module ActiveMutator
         entry["statusReason"] = reason if reason
         covered = covered_by(result)
         entry["coveredBy"] = covered if covered
+        killers = killed_by(result)
+        entry["killedBy"] = killers unless killers.empty?
         entry
       end
 
@@ -113,8 +115,17 @@ module ActiveMutator
         @coverage_map.examples_for(subject.file, result.mutation.lines)
       end
 
+      # Spelled as in coveredBy where the two match, so the viewer links
+      # them. A phase-2 killer may not be in coveredBy; it keeps its spelling.
+      def killed_by(result)
+        return [] if result.killed_by.empty?
+
+        covered = (covered_by(result) || []).to_h { |id| [ExampleId.normalize(id) || id, id] }
+        result.killed_by.map { |id| covered.fetch(ExampleId.normalize(id) || id, id) }.uniq
+      end
+
       def referenced_examples(results)
-        results.flat_map { |r| covered_by(r) || [] }.uniq.sort
+        results.flat_map { |r| (covered_by(r) || []) + killed_by(r) }.uniq.sort
       end
 
       # Group example ids by spec path (the id up to the trailing "[...]")
