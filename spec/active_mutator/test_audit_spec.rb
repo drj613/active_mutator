@@ -182,6 +182,18 @@ RSpec.describe ActiveMutator::TestAudit do
     expect(report.cleared).to eq(1)
   end
 
+  it "lists an example once when mutants spell it two ways" do
+    absolute = b.sub("./", "#{Dir.pwd}/")
+    results = [result(m1, :killed, killed_by: [a]), result(m2, :killed, killed_by: [a]), result(m3, :survived)]
+    answers = { m1 => ->(_) { result(m1, :survived, passed: passes(b)) },
+                m2 => ->(_) { result(m2, :survived, passed: { absolute => "./spec/a_spec.rb:2" }) } }
+    report = audit(results, { m1 => [a, b], m2 => [absolute, a], m3 => [c, c.sub("./", "#{Dir.pwd}/")] }, answers)
+
+    expect(report.flagged.map(&:id)).to eq([b])
+    expect(report.not_judged).to eq([c])
+    expect(report.cleared).to eq(1)
+  end
+
   it "keeps the first location seen for an example" do
     results = [result(m1, :killed, killed_by: [a]), result(m2, :killed, killed_by: [a])]
     answers = { m1 => ->(_) { result(m1, :survived, passed: { b => "first:1" }) },

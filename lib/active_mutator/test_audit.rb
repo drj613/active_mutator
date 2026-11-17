@@ -47,7 +47,7 @@ module ActiveMutator
       @passes = {}
       @kills = {}
       runs = audit(killable.to_h { |r| [r.mutation, @example_ids.fetch(r.mutation, [])] })
-      universe = defs.flat_map { |r| @example_ids.fetch(r.mutation, []) }.uniq
+      universe = defs.flat_map { |r| @example_ids.fetch(r.mutation, []) }.uniq { |id| key(id) }
       report(universe, killable, runs)
     end
 
