@@ -396,6 +396,17 @@ RSpec.describe ActiveMutator::Worker do
       audit_run(worker: worker) { [example("./spec/x_spec.rb[1:1]", :failed)] }
       expect(emitted).to include("killers" => ["./spec/x_spec.rb[1:1]"], "passed" => {})
     end
+
+    it "reads the examples that ran with the original readers when the mutant rewrites them" do
+      worker = described_class.new(mutation, ids, writer, audit: true)
+      allow_any_instance_of(ActiveMutator::Inserter).to receive(:insert) do
+        worker.define_singleton_method(:all_examples) { [] }
+        worker.define_singleton_method(:failed_examples) { [] }
+      end
+      audit_run(worker: worker) { [example("./spec/x_spec.rb[1:1]", :failed), example("./spec/x_spec.rb[1:2]", :passed)] }
+      expect(emitted).to include("killer" => "./spec/x_spec.rb[1:1]", "killers" => ["./spec/x_spec.rb[1:1]"],
+                                 "passed" => { "./spec/x_spec.rb[1:2]" => "./spec/x_spec.rb:1" })
+    end
   end
 
   # The mutant is inserted into the very process that is still running this

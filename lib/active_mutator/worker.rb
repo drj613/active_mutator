@@ -55,6 +55,8 @@ module ActiveMutator
       @killer = method(:killer)
       @in_selection = method(:in_selection)
       @audit_verdicts = method(:audit_verdicts)
+      @failed_examples = method(:failed_examples)
+      @all_examples = method(:all_examples)
       @normalize = ExampleId.method(:normalize)
       @group_keys = @example_ids.filter_map { |id| ExampleId.group_key(id) }
       require "rspec/core"
@@ -75,11 +77,11 @@ module ActiveMutator
       # is pure waste inside the fork. The audit needs every verdict instead.
       RSpec.configuration.fail_fast = @audit ? false : 1
       after_fork_hygiene
-      failed_before = failed_examples.dup
-      examples_before = all_examples.dup
+      failed_before = @failed_examples.call.dup
+      examples_before = @all_examples.call.dup
       code = runner.run_specs(@covering_groups.call)
-      failures = failed_examples - failed_before
-      verdicts = @audit ? @audit_verdicts.call(failures, all_examples - examples_before) : {}
+      failures = @failed_examples.call - failed_before
+      verdicts = @audit ? @audit_verdicts.call(failures, @all_examples.call - examples_before) : {}
       if code.zero?
         @emit.call("survived", **verdicts)
       else
