@@ -414,9 +414,10 @@ worker with fail-fast off that reports every failing example and every
 passing one. A suspect is cleared the first time it kills anything.
 Mutants go in rounds as wide as `--jobs`, the ones with the most suspects
 first, so each round can clear suspects before the next is built. Each
-mutant runs at most once. A suspect still standing that passed at least
-once is listed as having no kills observed; one that never passed (it was
-pending, or every fork it ran in timed out or errored) is not judged.
+mutant runs at most once. A suspect still standing that passed against
+every killed mutant it covers is listed as having no kills observed. One
+with any gap (it was pending or skipped in a fork, or a fork it ran in
+timed out or errored) is not judged.
 
 Class-body mutants are left out: they run against every spec that loads
 their file, so passing one says nothing about a test. A kill of one still

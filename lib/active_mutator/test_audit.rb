@@ -19,10 +19,12 @@ module ActiveMutator
   # that loads its file (and phase 2 adds every spec naming the constant), so
   # passing one says nothing about a test. A kill with no killer (the mutated
   # class failed to load) and a timed-out, errored, or skipped audit fork
-  # blame nobody. Pending and skipped examples never count as passes.
+  # blame nobody. Pending and skipped examples never count as passes. A
+  # suspect is flagged only if it passed against every killed mutant it
+  # covers; one gap (an inconclusive fork, a skip) leaves it not judged.
   class TestAudit
     # flagged: Flags, by id. cleared: how many examples were seen to kill.
-    # not_judged: ids that never passed against a killable mutant. kills:
+    # not_judged: ids with no pass against some killable mutant. kills:
     # mutation => ids the audit saw kill it. mutants_run: audit forks spent.
     Report = Data.define(:flagged, :cleared, :not_judged, :kills, :mutants_run)
     # killable: how many killed def mutants the example covers.
@@ -79,7 +81,9 @@ module ActiveMutator
 
       result.killed_by.each { |id| @cleared << key(id) }
       (@kills[result.mutation] ||= []).concat(result.killed_by) if result.killed_by.any?
-      result.passed.each { |id, location| @passes[key(id)] ||= location }
+      result.passed.each do |id, location|
+        (@passes[key(id)] ||= [location, Set.new]).last << result.mutation
+      end
     end
 
     def conclusive?(result)
@@ -94,8 +98,8 @@ module ActiveMutator
       covering = Hash.new(0)
       killable.each { |r| @example_ids.fetch(r.mutation, []).map { |id| key(id) }.uniq.each { |k| covering[k] += 1 } }
       cleared, rest = universe.partition { |id| @cleared.include?(key(id)) }
-      flagged, not_judged = rest.partition { |id| @passes.key?(key(id)) }
-      flags = flagged.sort.map { |id| Flag.new(id: id, location: @passes.fetch(key(id)), killable: covering[key(id)]) }
+      flagged, not_judged = rest.partition { |id| @passes.dig(key(id), 1)&.size == covering[key(id)] }
+      flags = flagged.sort.map { |id| Flag.new(id: id, location: @passes.dig(key(id), 0), killable: covering[key(id)]) }
       Report.new(flagged: flags, cleared: cleared.size, not_judged: not_judged.sort, kills: @kills, mutants_run: runs)
     end
 

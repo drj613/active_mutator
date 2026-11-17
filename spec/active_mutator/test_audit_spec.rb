@@ -74,7 +74,7 @@ RSpec.describe ActiveMutator::TestAudit do
   it "rebuilds each round from the suspects still standing" do
     results = [m1, m2, m3].map { |m| result(m, :killed, killed_by: [a]) }
     answers = { m1 => ->(_) { result(m1, :killed, killed_by: [c]) },
-                m2 => ->(_) { result(m2, :killed, killed_by: [b]) },
+                m2 => ->(_) { result(m2, :killed, killed_by: [b], passed: passes(d)) },
                 m3 => ->(_) { result(m3, :survived, passed: passes(d)) } }
     report = audit(results, { m1 => [a, b, c], m2 => [a, b, d], m3 => [a, b, c, d] }, answers, width: 2)
 
@@ -152,6 +152,16 @@ RSpec.describe ActiveMutator::TestAudit do
       expect(report.flagged).to eq([])
       expect(report.not_judged).to eq([b])
     end
+  end
+
+  it "does not flag an example that passed one killed mutant when another's fork was inconclusive" do
+    results = [result(m1, :killed, killed_by: [a]), result(m2, :killed, killed_by: [a])]
+    answers = { m1 => ->(_) { result(m1, :survived, passed: passes(b)) },
+                m2 => ->(_) { result(m2, :timeout) } }
+    report = audit(results, { m1 => [a, b], m2 => [a, b] }, answers)
+
+    expect(report.flagged).to eq([])
+    expect(report.not_judged).to eq([b])
   end
 
   it "blames nobody when the audit fork failed without naming a killer" do

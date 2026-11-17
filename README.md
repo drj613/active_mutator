@@ -290,7 +290,8 @@ test may guard behavior no mutant touched.
   `--max-mutants`, or path arguments print a warning and skip it.
 - It judges tests by method-level mutants only. Tests that cover only
   survivors, or only accepted, skipped, timed-out, or errored mutants, are
-  counted as not judged. Pending and skipped examples never count.
+  counted as not judged, and so is a test with any fork that didn't finish
+  cleanly. Pending and skipped examples never count.
 - It doesn't change the exit code. The JSON report gets a `test_audit` key
   (`null` without the flag); the Stryker report doesn't carry it.
 - The cost is one extra fork per killed mutant at most, and often far
