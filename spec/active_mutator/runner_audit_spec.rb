@@ -104,7 +104,7 @@ RSpec.describe ActiveMutator::Runner do
       calls = summaries
       def r.coverage_map=(_); end
       def r.on_result(_); end
-      r.define_singleton_method(:summary) { |_results, **kwargs| calls << kwargs }
+      r.define_singleton_method(:summary) { |results, **kwargs| calls << kwargs.merge(results: results) }
       r
     end
 
@@ -144,12 +144,13 @@ RSpec.describe ActiveMutator::Runner do
       expect(phases).not_to include(:auditing)
     end
 
-    it "does not report a full summary after a stop during the audit" do
+    it "reports a stop during the audit with every finished verdict" do
+      finished = [result(mutation(2), :killed)]
       code = run_with(config) do |runner|
-        allow(runner).to receive(:audit_tests) { |done, *| trip(runner, [done, nil]) }
+        allow(runner).to receive(:audit_tests) { trip(runner, [finished, nil]) }
       end
       expect(code).to eq(143)
-      expect(summaries.last).to include(:aborted)
+      expect(summaries.last).to include(:aborted, results: finished)
     end
 
     it "hands the audit report to the reporter" do
