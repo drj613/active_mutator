@@ -289,9 +289,10 @@ test may guard behavior no mutant touched.
 - It runs only on a full run. `--since`, `--changed`, `--subject`,
   `--max-mutants`, or path arguments print a warning and skip it.
 - It judges tests by method-level mutants only. Tests that cover only
-  survivors, or only accepted, skipped, timed-out, or errored mutants, are
-  counted as not judged, and so is a test with any fork that didn't finish
-  cleanly. Pending and skipped examples never count.
+  survivors, or only skipped, timed-out, or errored mutants, are counted as
+  not judged, and so is a test with any fork that didn't finish
+  cleanly. Pending and skipped examples never count. Accepted mutants are
+  never run, so a test that covers only those isn't listed at all.
 - It doesn't change the exit code. The JSON report gets a `test_audit` key
   (`null` without the flag); the Stryker report doesn't carry it.
 - The cost is one extra fork per killed mutant at most, and often far
