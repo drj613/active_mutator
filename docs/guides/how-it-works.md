@@ -403,6 +403,25 @@ class-body subjects:
   shot. If escalation kills it, the kill wins; if it still survives, the
   result is annotated `escalated (+N spec files)`.
 
+### The test audit (`--audit-tests`)
+
+A worker stops at the first failing example, so a test never named as a
+killer may just never have run first. The audit (`TestAudit`) runs after
+phase 2 on a full run. Its suspects are the examples that covered a killed
+method-level mutant and were never named as a killer. Each killed mutant
+with suspects left runs once more, against those suspects only, on a
+worker with fail-fast off that reports every failing example and every
+passing one. A suspect is cleared the first time it kills anything.
+Mutants go in rounds as wide as `--jobs`, the ones with the most suspects
+first, so each round can clear suspects before the next is built. Each
+mutant runs at most once. A suspect still standing that passed at least
+once is listed as having no kills observed; one that never passed (it was
+pending, or every fork it ran in timed out or errored) is not judged.
+
+Class-body mutants are left out: they run against every spec that loads
+their file, so passing one says nothing about a test. A kill of one still
+clears its killer.
+
 ## 5. Serial lane for browser-covered mutants
 
 System and feature specs boot a browser and an app server per fork. That

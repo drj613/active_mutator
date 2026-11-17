@@ -6,6 +6,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+- `--audit-tests` lists tests that cover killed mutants but never kill one,
+  such as a test with no `expect`. After a full run, each killed method-level
+  mutant runs once more against the covering tests not yet seen to kill,
+  with fail-fast off; a test is cleared the first time it kills. The terminal
+  and GitHub reports add a "Tests with no kills observed" section, and the
+  JSON report adds a `test_audit` key (`null` without the flag). Scoped runs
+  warn and skip the audit. The exit code doesn't change. Part of #54.
+- The Stryker report adds `killedBy` to each killed mutant whose killer is
+  known.
+
 ## [0.7.1] - 2026-10-30
 
 - A mutant's covering top-level groups now run in priority order: the

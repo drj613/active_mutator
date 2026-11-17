@@ -267,7 +267,34 @@ survivors show inline on the PR diff. Pairs with the CI recipe:
   survivors annotate the PR diff)
 - Nightly: `active_mutator --force-baseline` (full run; also recovers the
   residual blind spot — constant-reference detection handles the common
-  newly-covering-example case since 0.2)
+  newly-covering-example case since 0.2). Add `--audit-tests` to also list
+  tests that never kill a mutant (below).
+
+### Tests with no kills observed
+
+A test can run a method, pass, and check nothing: a missing `expect`, or a
+matcher too loose to fail. Mutation scores don't show it, because another
+test kills the same mutants. `--audit-tests` finds these tests.
+
+After a full run, each killed mutant runs once more against the covering
+tests that were never seen to kill anything, with fail-fast off. A test is
+cleared the first time it kills a mutant, so good tests drop out after a
+fork or two. A test that passes against every killed mutant it covers is
+listed under "Tests with no kills observed", with its location and how many
+killed mutants it covers. "No kills observed" is a lead, not a verdict: the
+test may guard behavior no mutant touched.
+
+    bundle exec active_mutator --force-baseline --audit-tests
+
+- It runs only on a full run. `--since`, `--changed`, `--subject`,
+  `--max-mutants`, or path arguments print a warning and skip it.
+- It judges tests by method-level mutants only. Tests that cover only
+  survivors, or only accepted, skipped, timed-out, or errored mutants, are
+  counted as not judged. Pending and skipped examples never count.
+- It doesn't change the exit code. The JSON report gets a `test_audit` key
+  (`null` without the flag); the Stryker report doesn't carry it.
+- The cost is one extra fork per killed mutant at most, and often far
+  fewer, since cleared tests drop out.
 
 ### Empty plans in CI
 
@@ -314,6 +341,7 @@ projects used to tell a docs-only PR from a broken `--since` range.
 | `--format terminal\|json\|stryker-json\|github` | terminal | report format |
 | `--accept-survivors` | off | record survivors to the acceptance ledger |
 | `--force-baseline` | off | ignore cached coverage map |
+| `--audit-tests` | off | after a full run, list tests that cover killed mutants but never kill one (see [Tests with no kills observed](#tests-with-no-kills-observed)) |
 | `--preload-helper FILE` / `--no-preload-helper` | auto-detect | parent spec-helper preload |
 | `--serial-pattern PAT` | `spec/system/`, `spec/features/` | covering-path prefixes forced serial |
 | `--spec-path DIR` | `spec/` | where spec files live, relative to the project root (repeatable; the first use replaces the default `spec/`), e.g. `--spec-path engines/billing/spec --spec-path spec` |

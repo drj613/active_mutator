@@ -118,6 +118,7 @@ are what survives.
 | `coverage_load` | the parent reading the coverage file back (`bytes` before the read, `examples` after) |
 | `mutating` | the fork pool running mutants (`mutants` is the planned count) |
 | `escalating` | phase-2 reruns of class-body survivors against more spec files |
+| `auditing` | `--audit-tests` reruns of killed mutants with fail-fast off |
 | `reporting` | the reporter's summary, and `--accept-survivors` |
 
 A cached run has no `baseline` phase, only `coverage_load`. A partial
@@ -183,7 +184,7 @@ New fields may be added under `v: 1`. Renaming or removing a field bumps
 | Field | Meaning |
 |---|---|
 | `reason` | `sigint`, `sigterm`, or `memory_ceiling` |
-| `in_flight` | `[{seq, pid, subject, file, line, description}]`, the mutants killed mid-run; empty outside the `mutating` and `escalating` phases |
+| `in_flight` | `[{seq, pid, subject, file, line, description}]`, the mutants killed mid-run; empty outside the `mutating`, `escalating`, and `auditing` phases |
 | `planned` | how many mutants the run planned, or `null` if it stopped before planning finished |
 | `counts` | finished mutants by status, the same keys as the reporter's counts |
 | `score` | the score over finished mutants only (0 to 1), or `null` if none finished |
