@@ -775,7 +775,7 @@ RSpec.describe ActiveMutator::Scheduler do
 
   # A killer that reaches the next sibling (same Subject) saves it the slow
   # groups: the scheduler runs the killer's top-level group first. The plan
-  # itself is never mutated, and no Result field carries the hint.
+  # itself is never mutated.
   describe "covering group priority" do
     let(:a1) { "./spec/a_spec.rb[1:1]" }
     let(:b1) { "./spec/b_spec.rb[1:1]" }
@@ -858,11 +858,9 @@ RSpec.describe ActiveMutator::Scheduler do
       expect(second.example_ids).to eq(ids)
     end
 
-    it "does not touch the result: same statuses and no hint field" do
+    it "does not touch the statuses" do
       results = run_jobs1({ 1 => ["killed", b1], 2 => ["killed", nil] }, [work(foo, ids), work(foo2, ids)])
       expect(results.map(&:status)).to eq(%i[killed killed])
-      expect(results.first.members).to eq(ActiveMutator::Result.members)
-      expect(ActiveMutator::Result.members).not_to include(:killer)
     end
 
     it "remembers the latest valid killer" do
@@ -943,6 +941,52 @@ RSpec.describe ActiveMutator::Scheduler do
       end
       arities = described_class.new(jobs: 1, worker: worker).run([work(foo, ids)]).map(&:details)
       expect(arities).to eq(["3"])
+    end
+  end
+
+  describe "the killers a result keeps" do
+    let(:a1) { "./spec/a_spec.rb[1:1]" }
+    let(:b1) { "./spec/b_spec.rb[1:1]" }
+    let(:ids) { [a1, b1] }
+    let(:foo) { mutation_in("/app/foo.rb", line: 1) }
+
+    def killed_by(payload)
+      worker = ->(_m, _ids, writer) { writer.puts(JSON.generate({ "details" => nil }.merge(payload))) }
+      item = ActiveMutator::WorkItem.new(mutation: foo, example_ids: ids, timeout: 5.0, lane: :parallel)
+      described_class.new(jobs: 1, worker: worker).run([item]).first.killed_by
+    end
+
+    it "keeps the killer the worker named, spelled as it was reported" do
+      killer = "#{File.expand_path("spec/b_spec.rb")}[1:1]"
+      expect(killed_by("status" => "killed", "killer" => killer)).to eq([killer])
+    end
+
+    it "keeps none when the worker named none" do
+      expect(killed_by("status" => "killed")).to eq([])
+    end
+
+    it "keeps every killer an audit worker named, in its order, over the single killer" do
+      payload = { "status" => "killed", "killer" => a1, "killers" => [b1, a1] }
+      expect(killed_by(payload)).to eq([b1, a1])
+    end
+
+    it "keeps none when an audit worker named an empty list" do
+      expect(killed_by("status" => "killed", "killer" => a1, "killers" => [])).to eq([])
+    end
+
+    it "drops killers that are not among the examples it was given" do
+      payload = { "status" => "killed", "killers" => ["./spec/zzz_spec.rb[1:1]", b1, "garbage", 7] }
+      expect(killed_by(payload)).to eq([b1])
+    end
+
+    it "keeps none for a result that is not a kill" do
+      %w[survived error skipped].each do |status|
+        expect(killed_by("status" => status, "killer" => b1, "killers" => [b1])).to eq([]), status
+      end
+    end
+
+    it "keeps none for a report without a status" do
+      expect(killed_by("killer" => b1)).to eq([])
     end
   end
 end

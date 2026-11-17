@@ -176,15 +176,17 @@ module ActiveMutator
     end
 
     # Only a kill that names one of the examples it was given counts. Anything
-    # else (missing, malformed, foreign, or on another status) leaves the last
-    # killer alone.
-    def learn_killer(item, status, killer)
-      return unless status == :killed
+    # else (missing, malformed, foreign, or on another status) is dropped, and
+    # leaves the last killer alone. An audit worker names every killer.
+    def verified_killers(item, status, data)
+      return [] unless status == :killed
 
       selected = item.example_ids.filter_map { |id| ExampleId.normalize(id) }
-      return unless selected.include?(ExampleId.normalize(killer))
+      Array(data["killers"] || data["killer"]).select { |id| selected.include?(ExampleId.normalize(id)) }
+    end
 
-      @killers[item.mutation.subject] = ExampleId.group_key(killer)
+    def learn_killer(item, killer)
+      @killers[item.mutation.subject] = ExampleId.group_key(killer) if killer
     end
 
     def finish(entry)
@@ -205,9 +207,10 @@ module ActiveMutator
                  details: "worker emitted unparseable payload", seconds: seconds)
     else
       # Learned only once the whole payload (report and stats) has parsed.
-      learn_killer(entry[:item], status, data["killer"]) if reported
+      killed_by = reported ? verified_killers(entry[:item], status, data) : []
+      learn_killer(entry[:item], killed_by.first)
       Result.new(mutation: entry[:item].mutation, status: status, details: details,
-                 seconds: seconds, peak_rss_kb: peak)
+                 seconds: seconds, peak_rss_kb: peak, killed_by: killed_by)
     end
 
     def complete(pid, entry, result)
