@@ -138,19 +138,22 @@ module ActiveMutator
     def audit_tests(results, scheduler, map, phase1_ids:)
       scheduler ||= Scheduler.new(jobs: @config.jobs, worker: AUDIT_WORKER, events: @events,
                                   first_seq: phase1_ids.size + @escalated + 1, abort: @abort)
-      report = @events.phase(:auditing) do
-        TestAudit.new(results: results, example_ids: phase1_ids, width: @config.jobs,
-                      build: ->(mutation, ids) { build_work_item(mutation, ids, map) },
-                      run: scheduler.method(:run)).call
-      end
-      merged = results.map do |r|
-        extra = report.kills[r.mutation]
+      audit = TestAudit.new(results: results, example_ids: phase1_ids, width: @config.jobs,
+                            build: ->(mutation, ids) { build_work_item(mutation, ids, map) },
+                            run: scheduler.method(:run))
+      report = @events.phase(:auditing) { audit.call }
+      [with_audit_kills(results, report.kills), report]
+    rescue Aborted => e
+      # The verdicts are final and the kills seen are real; the flags need
+      # a finished audit, so they go.
+      raise e.with_results(with_audit_kills(results, audit ? audit.kills : {}))
+    end
+
+    def with_audit_kills(results, kills)
+      results.map do |r|
+        extra = kills[r.mutation]
         extra ? r.with(killed_by: r.killed_by + extra) : r
       end
-      [merged, report]
-    rescue Aborted => e
-      # The verdicts are final; a half-done audit proves nothing.
-      raise e.with_results(results)
     end
 
     def exit_code(results)

@@ -30,6 +30,9 @@ module ActiveMutator
     # killable: how many killed def mutants the example covers.
     Flag = Data.define(:id, :location, :killable)
 
+    # mutation => ids the audit saw kill it so far; on a stop, what to keep.
+    attr_reader :kills
+
     # example_ids: mutation => the ids it ran against in phase 1.
     # build: ->(mutation, ids) { WorkItem }; run: ->(items) { results }.
     def initialize(results:, example_ids:, width:, build:, run:)
@@ -38,6 +41,7 @@ module ActiveMutator
       @width = width
       @build = build
       @run = run
+      @kills = {}
     end
 
     def call
@@ -47,7 +51,6 @@ module ActiveMutator
       # A kill of any mutant, class-body included, clears its killer.
       @cleared = @results.flat_map(&:killed_by).to_set { |id| key(id) }
       @passes = {}
-      @kills = {}
       runs = audit(killable.to_h { |r| [r.mutation, @example_ids.fetch(r.mutation, [])] })
       universe = defs.flat_map { |r| @example_ids.fetch(r.mutation, []) }.uniq { |id| key(id) }
       report(universe, killable, runs)
@@ -65,8 +68,16 @@ module ActiveMutator
 
         round.each { |mutation, _| pending.delete(mutation) }
         runs += round.size
-        @run.call(round.map { |mutation, ids| @build.call(mutation, ids) }).each { |r| learn(r) }
+        run_round(round).each { |r| learn(r) }
       end
+    end
+
+    # A stop mid-round still learns from the forks that finished.
+    def run_round(round)
+      @run.call(round.map { |mutation, ids| @build.call(mutation, ids) })
+    rescue Aborted => e
+      e.results.each { |r| learn(r) }
+      raise
     end
 
     def next_round(pending)

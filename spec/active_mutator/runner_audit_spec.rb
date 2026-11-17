@@ -84,6 +84,23 @@ RSpec.describe ActiveMutator::Runner do
         described_class.new(config).audit_tests(results, scheduler, map, phase1_ids: { m1 => [a, b] })
       end.to raise_error(ActiveMutator::Aborted) { |e| expect([e.reason, e.results, e.in_flight]).to eq([:sigterm, results, in_flight]) }
     end
+    it "keeps the killers the audit already saw when it is stopped" do
+      scheduler = instance_double(ActiveMutator::Scheduler)
+      c = "./spec/c_spec.rb[1:1]"
+      calls = 0
+      allow(scheduler).to receive(:run) do
+        calls += 1
+        next [result(m1, :killed, killed_by: [b])] if calls == 1
+
+        raise ActiveMutator::Aborted.new(:sigterm, results: [result(m2, :killed, killed_by: [c])])
+      end
+      results = [result(m1, :killed, killed_by: [a]), result(m2, :killed, killed_by: [a])]
+
+      expect do
+        described_class.new(config.with(jobs: 1)).audit_tests(results, scheduler, map,
+                                                              phase1_ids: { m1 => [a, b], m2 => [a, c] })
+      end.to raise_error(ActiveMutator::Aborted) { |e| expect(e.results.map(&:killed_by)).to eq([[a, b], [a, c]]) }
+    end
   end
 
   describe "AUDIT_WORKER" do
