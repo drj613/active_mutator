@@ -320,8 +320,8 @@ RSpec.describe ActiveMutator::Worker do
     let(:ran) { [] }
     let(:ids) { %w[./spec/x_spec.rb[1:1] ./spec/x_spec.rb[1:2] ./spec/x_spec.rb[1:3] ./spec/x_spec.rb[1:4]] }
 
-    def example(id, status, line: 1)
-      instance_double(RSpec::Core::Example, id: id, location: "./spec/x_spec.rb:#{line}",
+    def example(id, status, line: 1, metadata: {})
+      instance_double(RSpec::Core::Example, id: id, location: "./spec/x_spec.rb:#{line}", metadata: metadata,
                                             execution_result: instance_double(
                                               RSpec::Core::Example::ExecutionResult, status: status
                                             ))
@@ -364,14 +364,26 @@ RSpec.describe ActiveMutator::Worker do
       end
       expect(emitted).to eq("status" => "killed", "details" => nil, "killer" => "./spec/x_spec.rb[1:2]",
                             "killers" => %w[./spec/x_spec.rb[1:2] ./spec/x_spec.rb[1:4]],
-                            "passed" => { "./spec/x_spec.rb[1:1]" => "./spec/x_spec.rb:3" })
+                            "passed" => { "./spec/x_spec.rb[1:1]" => "./spec/x_spec.rb:3" }, "ignored" => [])
     end
 
     it "reports the passes of a survivor" do
       audit_run(code: 0) { [example("./spec/x_spec.rb[1:1]", :passed), example("./spec/x_spec.rb[1:2]", :passed, line: 5)] }
       expect(emitted).to eq("status" => "survived", "details" => nil, "killers" => [],
                             "passed" => { "./spec/x_spec.rb[1:1]" => "./spec/x_spec.rb:1",
-                                          "./spec/x_spec.rb[1:2]" => "./spec/x_spec.rb:5" })
+                                          "./spec/x_spec.rb[1:2]" => "./spec/x_spec.rb:5" }, "ignored" => [])
+    end
+
+    it "reports a passing example tagged no_kill_ok as ignored, not passed, and still credits a tagged killer" do
+      tag = { active_mutator: :no_kill_ok }
+      audit_run do
+        [example("./spec/x_spec.rb[1:1]", :passed, metadata: tag), example("./spec/x_spec.rb[1:2]", :failed, metadata: tag),
+         example("./spec/x_spec.rb[1:3]", :pending, metadata: tag), example("./spec/x_spec.rb[1:4]", :passed, line: 9),
+         example("./spec/leaked_spec.rb[1:1]", :passed, metadata: tag)]
+      end
+      expect(emitted).to include("killers" => ["./spec/x_spec.rb[1:2]"],
+                                 "passed" => { "./spec/x_spec.rb[1:4]" => "./spec/x_spec.rb:9" },
+                                 "ignored" => ["./spec/x_spec.rb[1:1]"])
     end
 
     it "leaves out examples that ran before this run" do

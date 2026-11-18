@@ -32,7 +32,8 @@ module ActiveMutator
   # `audit: true` is the --audit-tests pass: fail-fast goes off so every
   # selected example runs, and the report adds every fresh failure in the
   # selection ("killers") and every example that passed ("passed", id =>
-  # location). Pending and skipped examples are in neither list.
+  # location), except that passes tagged `active_mutator: :no_kill_ok` go in
+  # "ignored". Pending and skipped examples are in none of the lists.
   class Worker
     def self.run(mutation, example_ids, writer, audit: false)
       new(mutation, example_ids, writer, audit: audit).run
@@ -159,11 +160,16 @@ module ActiveMutator
       examples.map(&:id).select { |id| selected.include?(@normalize.call(id)) }
     end
 
+    # A passing example tagged `active_mutator: :no_kill_ok` goes in
+    # "ignored", not "passed": its owner says it is fine that it kills
+    # nothing. A tagged example that fails is still a killer.
     def audit_verdicts(failures, ran)
       passed = ran.select { |example| example.execution_result.status == :passed }
+      ignored, passed = passed.partition { |example| example.metadata[:active_mutator] == :no_kill_ok }
       locations = passed.to_h { |example| [example.id, example.location] }
       { killers: @in_selection.call(failures),
-        passed: @in_selection.call(passed).to_h { |id| [id, locations.fetch(id)] } }
+        passed: @in_selection.call(passed).to_h { |id| [id, locations.fetch(id)] },
+        ignored: @in_selection.call(ignored) }
     end
   end
 end

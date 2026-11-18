@@ -1066,4 +1066,25 @@ RSpec.describe ActiveMutator::Scheduler do
       expect(passed("status" => "killed", "killers" => [a1], "passed" => { b1 => "b:1" })).to eq(b1 => "b:1")
     end
   end
+
+  describe "the ignored examples a result keeps" do
+    let(:a1) { "./spec/a_spec.rb[1:1]" }
+    let(:b1) { "./spec/b_spec.rb[1:1]" }
+
+    def ignored(payload)
+      worker = ->(_m, _ids, writer) { writer.puts(JSON.generate({ "status" => "survived", "details" => nil }.merge(payload))) }
+      item = ActiveMutator::WorkItem.new(mutation: mutation_in("/app/foo.rb", line: 1), example_ids: [a1, b1],
+                                         timeout: 5.0, lane: :parallel)
+      described_class.new(jobs: 1, worker: worker).run([item]).first.ignored
+    end
+
+    it "keeps the tagged examples an audit worker reported, if it was given them" do
+      expect(ignored("ignored" => [b1, "./spec/zzz_spec.rb[1:1]", 3, "garbage"])).to eq([b1])
+    end
+
+    it "keeps none when the worker reported none, or not a list" do
+      expect(ignored({})).to eq([])
+      expect(ignored("ignored" => { a1 => "a:1" })).to eq([])
+    end
+  end
 end

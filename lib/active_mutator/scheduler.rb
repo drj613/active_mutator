@@ -204,6 +204,15 @@ module ActiveMutator
       passes.select { |id, location| location.is_a?(String) && selected.include?(ExampleId.normalize(id)) }
     end
 
+    # The tagged examples an audit worker ran, by the same rule.
+    def verified_ignored(item, data)
+      ignored = data["ignored"]
+      return [] unless ignored.is_a?(Array)
+
+      selected = selected(item)
+      ignored.select { |id| id.is_a?(String) && selected.include?(ExampleId.normalize(id)) }
+    end
+
     def selected(item) = item.example_ids.filter_map { |id| ExampleId.normalize(id) }
 
     def learn_killer(item, killer)
@@ -232,7 +241,8 @@ module ActiveMutator
       learn_killer(entry[:item], killed_by.first)
       Result.new(mutation: entry[:item].mutation, status: status, details: details,
                  seconds: seconds, peak_rss_kb: peak, killed_by: killed_by,
-                 passed: reported ? verified_passes(entry[:item], data) : {})
+                 passed: reported ? verified_passes(entry[:item], data) : {},
+                 ignored: reported ? verified_ignored(entry[:item], data) : [])
     end
 
     def complete(pid, entry, result)
