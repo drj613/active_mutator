@@ -18,6 +18,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Workers now run the `at_exit` hooks the tests register, so a test that
   starts a server and stops it in `at_exit` no longer leaves one running per
   mutant. Hooks inherited from the parent process still never run.
+- A run whose parent is already pid 1 when it starts, such as one started
+  detached or under a container's init, no longer aborts at once with
+  "parent process died". The run now aborts when its parent changes.
 
 ## [0.7.1] - 2026-10-30
 

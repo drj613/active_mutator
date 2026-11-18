@@ -8,10 +8,17 @@ module ActiveMutator
   class Scheduler
     OrphanedError = Class.new(Error)
 
+    # A detached run can start with pid 1 as its parent, so compare against
+    # the parent seen at start rather than against 1.
+    def self.parent_changed
+      start = Process.ppid
+      -> { Process.ppid != start }
+    end
+
     # first_seq: phase-2 escalation runs on its own scheduler; starting its
     # sequence after phase 1's keeps mutant numbers unique across the run.
     def initialize(jobs:, worker: Worker.method(:run), on_result: nil,
-                   calibrators: nil, orphaned: -> { Process.ppid == 1 },
+                   calibrators: nil, orphaned: Scheduler.parent_changed,
                    events: Events.new, first_seq: 1, abort: AbortFlag.new)
       @abort = abort
       @jobs = jobs
@@ -71,7 +78,7 @@ module ActiveMutator
     # SIGKILL on the parent (or a closed terminal, or CI teardown) cannot be
     # trapped, so a killed run would otherwise keep forking through the whole
     # queue with nobody supervising it. Orphaned processes get reparented to
-    # init/launchd (ppid 1); when that happens, stop everything and bail.
+    # init/launchd; when the parent changes, stop everything and bail.
     def abort_if_orphaned!(running)
       return unless @orphaned.call
 

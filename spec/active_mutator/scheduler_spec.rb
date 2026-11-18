@@ -414,6 +414,21 @@ RSpec.describe ActiveMutator::Scheduler do
     expect(elapsed).to be < 5 # workers were killed, not waited out
   end
 
+  it "runs normally when its parent is already pid 1 at start, as a detached run's is" do
+    allow(Process).to receive(:ppid).and_return(1)
+    worker = ->(_m, _e, writer) { writer.puts(JSON.generate("status" => "killed", "details" => nil)) }
+    results = described_class.new(jobs: 1, worker: worker).run([item])
+    expect(results.map(&:status)).to eq([:killed])
+  end
+
+  it "aborts by default once its parent changes" do
+    allow(Process).to receive(:ppid).and_return(4242)
+    worker = ->(_m, _e, _w) { sleep 30 }
+    sched = described_class.new(jobs: 1, worker: worker)
+    allow(Process).to receive(:ppid).and_return(1)
+    expect { run_bounded(sched, [item]) }.to raise_error(ActiveMutator::Scheduler::OrphanedError)
+  end
+
   it "leaves no live worker processes behind after an orphaned abort" do
     Tempfile.create("pids") do |file|
       pid_file = file.path
