@@ -298,6 +298,22 @@ test may guard behavior no mutant touched.
 - The cost is one extra fork per killed mutant at most, and often far
   fewer, since cleared tests drop out.
 
+Most flags are fine to keep: a happy-path test whose siblings already kill
+the same mutants, or a guard no mutant can break. Tag those so the audit
+stops listing them:
+
+```ruby
+it "returns nil for a blank name", active_mutator: :no_kill_ok do
+  expect(parse("")).to be_nil
+end
+```
+
+The tag works on a `describe` or `context` too, since RSpec passes group
+metadata down to its examples. A tagged test is counted as ignored instead
+of flagged, and it drops out after its first audit fork. If it does kill a
+mutant, it's cleared as usual. The tag lives on the test, not in a file of
+example ids, because ids like `[1:2:3]` shift when tests move.
+
 ### Empty plans in CI
 
 A `--since` PR run that plans zero mutants skips the baseline, prints the

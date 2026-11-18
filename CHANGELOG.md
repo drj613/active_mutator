@@ -13,6 +13,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   and GitHub reports add a "Tests with no kills observed" section, and the
   JSON report adds a `test_audit` key (`null` without the flag). Scoped runs
   warn and skip the audit. The exit code doesn't change. Part of #54.
+- Tag a test `active_mutator: :no_kill_ok` (on the example or its group) to
+  keep it off the audit's list. It's counted as ignored instead, in the
+  terminal count line and in a new `test_audit.ignored` JSON list.
 - The Stryker report adds `killedBy` to each killed mutant whose killer is
   known.
 - Workers now run the `at_exit` hooks the tests register, so a test that

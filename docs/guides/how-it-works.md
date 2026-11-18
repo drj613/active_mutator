@@ -419,6 +419,11 @@ every killed mutant it covers is listed as having no kills observed. One
 with any gap (it was pending or skipped in a fork, or a fork it ran in
 timed out or errored) is not judged.
 
+A passing example tagged `active_mutator: :no_kill_ok` goes in the worker's
+`ignored` list instead of `passed`. The audit then drops it from later
+forks and lists it as ignored. A tagged example that fails still counts as
+a killer, so a tagged test that kills is cleared like any other.
+
 Class-body mutants are left out: they run against every spec that loads
 their file, so passing one says nothing about a test. A kill of one still
 clears its killer.
