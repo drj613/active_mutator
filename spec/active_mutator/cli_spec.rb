@@ -192,6 +192,12 @@ RSpec.describe ActiveMutator::CLI do
       expect(described_class.parse(["--audit-tests"]).audit_tests).to be(true)
     end
 
+    it "parses --fail-on-no-kills, which turns the audit on" do
+      expect(described_class.parse([]).fail_on_no_kills).to be(false)
+      config = described_class.parse(["--fail-on-no-kills"])
+      expect([config.fail_on_no_kills, config.audit_tests]).to eq([true, true])
+    end
+
     it "parses --max-mutants" do
       expect(described_class.parse(["--max-mutants", "50"]).max_mutants).to eq(50)
     end
