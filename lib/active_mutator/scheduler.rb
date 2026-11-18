@@ -116,14 +116,14 @@ module ActiveMutator
         # harmless everywhere else.
         ENV["PGGSSENCMODE"] ||= "disable"
         # at_exit hooks run newest first: the worker's own (a test server's
-        # shutdown) run, then this one stops before the parent's inherited ones.
+        # shutdown) run, then this one stops before the parent's inherited
+        # ones. It exits 0 for the block's normal exit below.
         at_exit { Process.exit!(0) }
         @worker.call(item.mutation, item.example_ids, writer)
         # A second line, after the worker's own report: the worker can exit
         # between two memory samples, so it reports its peak itself.
         writer.puts("", JSON.generate("peak_rss_kb" => MemoryProbe.peak_rss_kb))
         writer.close
-        exit(0)
       end
       writer.close
       started = now
@@ -210,7 +210,7 @@ module ActiveMutator
       return [] unless ignored.is_a?(Array)
 
       selected = selected(item)
-      ignored.select { |id| id.is_a?(String) && selected.include?(ExampleId.normalize(id)) }
+      ignored.select { |id| selected.include?(ExampleId.normalize(id)) } # normalize: nil for a non-String
     end
 
     def selected(item) = item.example_ids.filter_map { |id| ExampleId.normalize(id) }
