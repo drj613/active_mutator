@@ -16,6 +16,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Tag a test `active_mutator: :no_kill_ok` (on the example or its group) to
   keep it off the audit's list. It's counted as ignored instead, in the
   terminal count line and in a new `test_audit.ignored` JSON list.
+- `--fail-on-no-kills` turns on `--audit-tests` and exits `1` if the audit
+  flags any untagged test. The JSON `exit_reason` is `no_kills_observed`
+  when that's the only reason the run fails.
 - The Stryker report adds `killedBy` to each killed mutant whose killer is
   known.
 - Workers now run the `at_exit` hooks the tests register, so a test that

@@ -424,6 +424,10 @@ A passing example tagged `active_mutator: :no_kill_ok` goes in the worker's
 forks and lists it as ignored. A tagged example that fails still counts as
 a killer, so a tagged test that kills is cleared like any other.
 
+`--fail-on-no-kills` sets `fail_on_flags` on the report, and the runner
+exits `1` when that's set and anything is flagged. Survivors and worker
+errors still come first in the JSON `exit_reason`.
+
 Class-body mutants are left out: they run against every spec that loads
 their file, so passing one says nothing about a test. A kill of one still
 clears its killer.
