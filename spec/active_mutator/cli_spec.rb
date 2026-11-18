@@ -99,6 +99,7 @@ RSpec.describe ActiveMutator::CLI do
         "Exit 0 if mutation score >= SCORE even with survivors (default: any survivor fails)",
         "Ignore cached coverage map",
         "After a full run, find tests that cover killed mutants but never kill one (slower; meant for nightly runs)",
+        "Run the audit (--audit-tests) and exit 1 if it flags any test",
         "Timeout = baseline time * F + floor",
         "Minimum timeout seconds",
         "Spec helper to preload in the parent (default: auto-detect)",
