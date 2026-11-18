@@ -108,12 +108,15 @@ module ActiveMutator
         # frameworks and segfaults the child on macOS; disabling it is
         # harmless everywhere else.
         ENV["PGGSSENCMODE"] ||= "disable"
+        # at_exit hooks run newest first: the worker's own (a test server's
+        # shutdown) run, then this one stops before the parent's inherited ones.
+        at_exit { Process.exit!(0) }
         @worker.call(item.mutation, item.example_ids, writer)
         # A second line, after the worker's own report: the worker can exit
         # between two memory samples, so it reports its peak itself.
         writer.puts("", JSON.generate("peak_rss_kb" => MemoryProbe.peak_rss_kb))
         writer.close
-        Process.exit!(0)
+        exit(0)
       end
       writer.close
       started = now

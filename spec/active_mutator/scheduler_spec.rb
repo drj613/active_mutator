@@ -233,14 +233,32 @@ RSpec.describe ActiveMutator::Scheduler do
     end
   end
 
-  it "terminates workers with exit! so child at_exit hooks never run" do
+  it "runs at_exit hooks the worker registers, so a test's own cleanup still happens" do
     Dir.mktmpdir do |dir|
       flag = File.join(dir, "flag")
       worker = lambda do |_m, _e, writer|
         at_exit { File.write(flag, "ran") }
         writer.puts(JSON.generate("status" => "killed", "details" => nil))
       end
-      scheduler(worker: worker).run([item])
+      results = scheduler(worker: worker).run([item])
+      expect(results.map(&:status)).to eq([:killed])
+      expect(File.read(flag)).to eq("ran")
+    end
+  end
+
+  it "skips at_exit hooks inherited from the parent" do
+    Dir.mktmpdir do |dir|
+      flag = File.join(dir, "flag")
+      done = File.join(dir, "done")
+      # A throwaway parent, so the hook never reaches this test process.
+      parent = fork do
+        at_exit { File.write(flag, "ran") }
+        worker = ->(_m, _e, writer) { writer.puts(JSON.generate("status" => "killed", "details" => nil)) }
+        File.write(done, scheduler(worker: worker).run([item]).map(&:status).inspect)
+        Process.exit!(0)
+      end
+      Process.waitpid(parent)
+      expect(File.read(done)).to eq("[:killed]")
       expect(File.exist?(flag)).to be(false)
     end
   end

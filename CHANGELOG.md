@@ -15,6 +15,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   warn and skip the audit. The exit code doesn't change. Part of #54.
 - The Stryker report adds `killedBy` to each killed mutant whose killer is
   known.
+- Workers now run the `at_exit` hooks the tests register, so a test that
+  starts a server and stops it in `at_exit` no longer leaves one running per
+  mutant. Hooks inherited from the parent process still never run.
 
 ## [0.7.1] - 2026-10-30
 
