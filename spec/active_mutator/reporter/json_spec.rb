@@ -163,6 +163,20 @@ RSpec.describe ActiveMutator::Reporter::Json do
       )
     end
 
+    it "names no_kills_observed as the exit reason when the flags fail the run" do
+      reporter.summary([], invalid_count: 0, test_audit: report.with(fail_on_flags: true))
+      expect(JSON.parse(out.string)["exit_reason"]).to eq("no_kills_observed")
+    end
+
+    it "keeps the count-based exit reason when the flags don't fail the run, or nothing is flagged" do
+      reporter.summary([], invalid_count: 0, test_audit: report)
+      expect(JSON.parse(out.string)["exit_reason"]).to eq("clean")
+      out.truncate(0)
+      out.rewind
+      reporter.summary([], invalid_count: 0, test_audit: report.with(fail_on_flags: true, flagged: []))
+      expect(JSON.parse(out.string)["exit_reason"]).to eq("clean")
+    end
+
     it "is null when the audit did not run" do
       reporter.summary([], invalid_count: 0)
       expect(JSON.parse(out.string)).to include("test_audit" => nil)

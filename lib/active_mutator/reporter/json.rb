@@ -25,7 +25,7 @@ module ActiveMutator
           "results" => results.map { |r| serialize(r) },
           "in_flight" => aborted ? aborted[:in_flight] : [],
           "planned" => aborted ? aborted[:planned] : results.size,
-          "exit_reason" => exit_reason(counts, empty_plan, aborted),
+          "exit_reason" => exit_reason(counts, empty_plan, aborted, test_audit),
           "test_audit" => test_audit && serialize_audit(test_audit)
         )
       end
@@ -38,11 +38,12 @@ module ActiveMutator
         Terminal.score(counts)
       end
 
-      def exit_reason(counts, empty_plan, aborted)
+      def exit_reason(counts, empty_plan, aborted, test_audit)
         return aborted[:reason] == :memory_ceiling ? "memory_ceiling" : "interrupted" if aborted
         return "empty_plan" if empty_plan
         return "unaccepted_survivors" if counts[:survived].positive?
         return "worker_errors" if counts[:error].positive?
+        return "no_kills_observed" if test_audit&.failing?
 
         "clean"
       end

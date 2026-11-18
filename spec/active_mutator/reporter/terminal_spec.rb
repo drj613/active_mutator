@@ -201,6 +201,11 @@ RSpec.describe ActiveMutator::Reporter::Terminal do
       TEXT
     end
 
+    it "says when the flags fail the run" do
+      reporter.summary([result(:killed)], invalid_count: 0, test_audit: report.with(fail_on_flags: true))
+      expect(out.string).to end_with("(9 audit runs)\n--fail-on-no-kills: failing the run\n")
+    end
+
     it "prints only the count line when nothing was flagged" do
       reporter.summary([result(:killed)], invalid_count: 0, test_audit: report.with(flagged: []))
       expect(out.string).not_to include("Tests with no kills observed")
