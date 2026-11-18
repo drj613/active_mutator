@@ -175,6 +175,33 @@ RSpec.describe ActiveMutator::Runner do
       expect(summaries.last[:test_audit]).to be_a(ActiveMutator::TestAudit::Report)
     end
 
+    def flagged_report
+      ActiveMutator::TestAudit::Report.new(
+        flagged: [ActiveMutator::TestAudit::Flag.new(id: a, location: "./spec/a_spec.rb:1", killable: 1)],
+        cleared: 0, not_judged: [], kills: {}, mutants_run: 1
+      )
+    end
+
+    it "exits 1 with --fail-on-no-kills when the audit flags a test, and tells the reporter" do
+      code = run_with(config.with(fail_on_no_kills: true)) do |runner|
+        allow(runner).to receive(:audit_tests) { |done, *| [done, flagged_report] }
+      end
+      expect(code).to eq(1)
+      expect(summaries.last[:test_audit].fail_on_flags).to be(true)
+    end
+
+    it "exits 0 with --fail-on-no-kills when nothing is flagged" do
+      expect(run_with(config.with(fail_on_no_kills: true))).to eq(0)
+    end
+
+    it "does not fail the run on flags without --fail-on-no-kills" do
+      code = run_with(config) do |runner|
+        allow(runner).to receive(:audit_tests) { |done, *| [done, flagged_report] }
+      end
+      expect(code).to eq(0)
+      expect(summaries.last[:test_audit].fail_on_flags).to be(false)
+    end
+
     it "does not audit without the flag, or pass the reporter a test_audit keyword" do
       run_with(config.with(audit_tests: false))
       expect(phases).not_to include(:auditing)

@@ -28,11 +28,14 @@ module ActiveMutator
     # flagged: Flags, by id. cleared: how many examples were seen to kill.
     # ignored: ids of tagged examples that never killed. not_judged: ids
     # with no pass against some killable mutant. kills: mutation => ids the
-    # audit saw kill it. mutants_run: audit forks spent.
-    Report = Data.define(:flagged, :cleared, :ignored, :not_judged, :kills, :mutants_run) do
-      def initialize(flagged:, cleared:, not_judged:, kills:, mutants_run:, ignored: [])
+    # audit saw kill it. mutants_run: audit forks spent. fail_on_flags: set
+    # by the runner under --fail-on-no-kills.
+    Report = Data.define(:flagged, :cleared, :ignored, :not_judged, :kills, :mutants_run, :fail_on_flags) do
+      def initialize(flagged:, cleared:, not_judged:, kills:, mutants_run:, ignored: [], fail_on_flags: false)
         super
       end
+
+      def failing? = fail_on_flags && !flagged.empty?
     end
     # killable: how many killed def mutants the example covers.
     Flag = Data.define(:id, :location, :killable)

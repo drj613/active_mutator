@@ -206,6 +206,7 @@ module ActiveMutator
       # land between two steps (the sample as mutating ends, the spec reads
       # before escalation) and drop every finished verdict. Each step checks
       # the flag instead and raises with the results it has.
+      test_audit = nil # read after the block, for the exit code
       results = @abort.deferred do
         done = @events.phase(:mutating, mutants: items.size) { mutate(items, pre_results) }
         stop_if_tripped!(done)
@@ -214,6 +215,7 @@ module ActiveMutator
         stop_if_tripped!(done)
         done, test_audit = audit_tests(done, nil, map, phase1_ids: phase1_ids) if audit
         stop_if_tripped!(done)
+        test_audit = test_audit&.with(fail_on_flags: @config.fail_on_no_kills)
 
         reporting(done) do
           accept_survivors!(ledger, done, fingerprints, scanned_files) if @config.accept_survivors
@@ -223,7 +225,7 @@ module ActiveMutator
         end
         done
       end
-      exit_code(results)
+      test_audit&.failing? ? 1 : exit_code(results)
     end
 
     def mutate(items, pre_results)
