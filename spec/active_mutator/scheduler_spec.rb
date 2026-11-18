@@ -249,17 +249,17 @@ RSpec.describe ActiveMutator::Scheduler do
   it "skips at_exit hooks inherited from the parent" do
     Dir.mktmpdir do |dir|
       flag = File.join(dir, "flag")
-      done = File.join(dir, "done")
-      # A throwaway parent, so the hook never reaches this test process.
-      parent = fork do
-        at_exit { File.write(flag, "ran") }
-        worker = ->(_m, _e, writer) { writer.puts(JSON.generate("status" => "killed", "details" => nil)) }
-        File.write(done, scheduler(worker: worker).run([item]).map(&:status).inspect)
-        Process.exit!(0)
-      end
-      Process.waitpid(parent)
-      expect(File.read(done)).to eq("[:killed]")
+      test_pid = Process.pid
+      armed = true
+      # Registered in this process, so the run happens here, where coverage
+      # sees it. The hook never fires here, and forks made after this test
+      # inherit armed = false.
+      at_exit { File.write(flag, "ran") if armed && Process.pid != test_pid }
+      worker = ->(_m, _e, writer) { writer.puts(JSON.generate("status" => "killed", "details" => nil)) }
+      expect(scheduler(worker: worker).run([item]).map(&:status)).to eq([:killed])
       expect(File.exist?(flag)).to be(false)
+    ensure
+      armed = false
     end
   end
 
