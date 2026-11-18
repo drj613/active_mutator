@@ -8,8 +8,9 @@ RSpec.describe ActiveMutator::TestAudit do
     double(name, subject: double(class_body?: class_body))
   end
 
-  def result(mutation, status, killed_by: [], passed: {})
-    ActiveMutator::Result.new(mutation: mutation, status: status, details: nil, killed_by: killed_by, passed: passed)
+  def result(mutation, status, killed_by: [], passed: {}, ignored: [])
+    ActiveMutator::Result.new(mutation: mutation, status: status, details: nil, killed_by: killed_by, passed: passed,
+                              ignored: ignored)
   end
 
   def passes(*ids) = ids.to_h { |id| [id, "#{id.sub(/\[.*/, "")}:#{ids.index(id) + 1}"] }
@@ -230,6 +231,36 @@ RSpec.describe ActiveMutator::TestAudit do
 
     expect(report.kills).to eq(m1 => [b, c])
     expect(report.cleared).to eq(3)
+  end
+
+  it "drops a tagged example from later forks and lists it as ignored, not flagged" do
+    results = [result(m1, :killed, killed_by: [a]), result(m2, :killed, killed_by: [a])]
+    answers = { m1 => ->(_) { result(m1, :survived, passed: passes(c), ignored: [b]) },
+                m2 => ->(_) { result(m2, :survived, passed: passes(c)) } }
+    report = audit(results, { m1 => [a, b, c], m2 => [a, b, c] }, answers, width: 1)
+
+    expect(@rounds.map { |round| round.map(&:last) }).to eq([[[b, c]], [[c]]])
+    expect(report.ignored).to eq([b])
+    expect(report.flagged.map(&:id)).to eq([c])
+    expect(report.not_judged).to eq([])
+  end
+
+  it "counts a tagged example that kills as cleared, not ignored" do
+    results = [result(m1, :killed, killed_by: [a]), result(m2, :killed, killed_by: [a])]
+    answers = { m1 => ->(_) { result(m1, :survived, ignored: [b]) },
+                m2 => ->(_) { result(m2, :killed, killed_by: [b]) } }
+    report = audit(results, { m1 => [a, b], m2 => [a, b] }, answers, width: 2)
+
+    expect(report.ignored).to eq([])
+    expect(report.cleared).to eq(2)
+  end
+
+  it "learns a tag even from a fork that errored after reporting it" do
+    results = [result(m1, :killed, killed_by: [a])]
+    report = audit(results, { m1 => [a, b] }, { m1 => ->(_) { result(m1, :error, ignored: [b]) } })
+
+    expect(report.ignored).to eq([b])
+    expect(report.not_judged).to eq([])
   end
 
   it "lists flagged and unjudged examples sorted by id" do

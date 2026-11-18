@@ -184,7 +184,8 @@ RSpec.describe ActiveMutator::Reporter::Terminal do
       ActiveMutator::TestAudit::Report.new(
         flagged: [ActiveMutator::TestAudit::Flag.new(id: "./spec/a_spec.rb[1:2]", location: "./spec/a_spec.rb:7",
                                                      killable: 3)],
-        cleared: 12, not_judged: ["./spec/b_spec.rb[1:1]"], kills: {}, mutants_run: 9
+        cleared: 12, ignored: %w[./spec/c_spec.rb[1:1] ./spec/c_spec.rb[1:2]],
+        not_judged: ["./spec/b_spec.rb[1:1]"], kills: {}, mutants_run: 9
       )
     end
 
@@ -196,14 +197,14 @@ RSpec.describe ActiveMutator::Reporter::Terminal do
           ./spec/a_spec.rb:7 (./spec/a_spec.rb[1:2])
             killable mutants covered: 3, kills: 0
 
-        Test audit: 1 with no kills observed, 12 killed a mutant, 1 not judged (9 audit runs)
+        Test audit: 1 with no kills observed, 12 killed a mutant, 2 ignored, 1 not judged (9 audit runs)
       TEXT
     end
 
     it "prints only the count line when nothing was flagged" do
       reporter.summary([result(:killed)], invalid_count: 0, test_audit: report.with(flagged: []))
       expect(out.string).not_to include("Tests with no kills observed")
-      expect(out.string).to end_with("\n\nTest audit: 0 with no kills observed, 12 killed a mutant, 1 not judged (9 audit runs)\n")
+      expect(out.string).to end_with("\n\nTest audit: 0 with no kills observed, 12 killed a mutant, 2 ignored, 1 not judged (9 audit runs)\n")
     end
 
     it "prints nothing about an audit that did not run" do

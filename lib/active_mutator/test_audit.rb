@@ -21,12 +21,19 @@ module ActiveMutator
   # class failed to load) and a timed-out, errored, or skipped audit fork
   # blame nobody. Pending and skipped examples never count as passes. A
   # suspect is flagged only if it passed against every killed mutant it
-  # covers; one gap (an inconclusive fork, a skip) leaves it not judged.
+  # covers; one gap (an inconclusive fork, a skip) leaves it not judged. A
+  # passing example tagged `active_mutator: :no_kill_ok` drops out of later
+  # forks and is listed as ignored, unless it kills something.
   class TestAudit
     # flagged: Flags, by id. cleared: how many examples were seen to kill.
-    # not_judged: ids with no pass against some killable mutant. kills:
-    # mutation => ids the audit saw kill it. mutants_run: audit forks spent.
-    Report = Data.define(:flagged, :cleared, :not_judged, :kills, :mutants_run)
+    # ignored: ids of tagged examples that never killed. not_judged: ids
+    # with no pass against some killable mutant. kills: mutation => ids the
+    # audit saw kill it. mutants_run: audit forks spent.
+    Report = Data.define(:flagged, :cleared, :ignored, :not_judged, :kills, :mutants_run) do
+      def initialize(flagged:, cleared:, not_judged:, kills:, mutants_run:, ignored: [])
+        super
+      end
+    end
     # killable: how many killed def mutants the example covers.
     Flag = Data.define(:id, :location, :killable)
 
@@ -52,6 +59,7 @@ module ActiveMutator
       # A kill of any mutant, class-body included, clears its killer.
       @cleared = @results.flat_map(&:killed_by).to_set { |id| key(id) }
       @passes = {}
+      @ignored = Set.new
       runs = audit(killable.to_h { |r| [r.mutation, @example_ids.fetch(r.mutation, [])] })
       universe = defs.flat_map { |r| @example_ids.fetch(r.mutation, []) }.uniq { |id| key(id) }
       report(universe, killable, runs)
@@ -84,12 +92,16 @@ module ActiveMutator
     # Suspects only ever drop out, so each round keeps what is left and
     # forgets mutants with none.
     def next_round(pending)
-      pending.transform_values! { |ids| ids.reject { |id| @cleared.include?(key(id)) } }
+      pending.transform_values! { |ids| ids.reject { |id| dropped?(key(id)) } }
       pending.reject! { |_, suspects| suspects.empty? }
       pending.each_with_index.sort_by { |(_, suspects), i| [-suspects.size, i] }.first(@width).map(&:first)
     end
 
+    def dropped?(key) = @cleared.include?(key) || @ignored.include?(key)
+
     def learn(result)
+      # A tag is a fact about the example, whatever the verdict.
+      result.ignored.each { |id| @ignored << key(id) }
       return unless conclusive?(result)
 
       result.killed_by.each { |id| @cleared << key(id) }
@@ -111,9 +123,11 @@ module ActiveMutator
       covering = Hash.new(0)
       killable.each { |r| @example_ids.fetch(r.mutation, []).map { |id| key(id) }.uniq.each { |k| covering[k] += 1 } }
       cleared, rest = universe.partition { |id| @cleared.include?(key(id)) }
+      ignored, rest = rest.partition { |id| @ignored.include?(key(id)) }
       flagged, not_judged = rest.partition { |id| @passes.dig(key(id), 1)&.size == covering[key(id)] }
       flags = flagged.sort.map { |id| Flag.new(id: id, location: @passes.dig(key(id), 0), killable: covering[key(id)]) }
-      Report.new(flagged: flags, cleared: cleared.size, not_judged: not_judged.sort, kills: @kills, mutants_run: runs)
+      Report.new(flagged: flags, cleared: cleared.size, ignored: ignored.sort, not_judged: not_judged.sort,
+                 kills: @kills, mutants_run: runs)
     end
 
     # ./spec/a_spec.rb[1:1] and its absolute spelling are one example.

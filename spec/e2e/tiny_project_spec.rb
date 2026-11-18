@@ -100,12 +100,13 @@ RSpec.describe "tiny_project end-to-end", :e2e do
     end
   end
 
-  it "flags a test that covers killed mutants but never kills one, with --audit-tests" do
+  it "flags a test that covers killed mutants but never kills one, and ignores a tagged one, with --audit-tests" do
     with_fixture_copy do |copy|
       spec = File.join(copy, "spec", "calculator_spec.rb")
       File.write(spec, File.read(spec).sub(
         %(    it { expect(calc.eligible?(10)).to eq("no") }\n),
-        %(    it { expect(calc.eligible?(10)).to eq("no") }\n    it("only calls it") { calc.eligible?(18) }\n)
+        %(    it { expect(calc.eligible?(10)).to eq("no") }\n    it("only calls it") { calc.eligible?(18) }\n) +
+        %(    it("calls it on purpose", active_mutator: :no_kill_ok) { calc.eligible?(19) }\n)
       ))
 
       stdout, stderr, status = Bundler.with_unbundled_env do
@@ -128,6 +129,7 @@ RSpec.describe "tiny_project end-to-end", :e2e do
       expect(flagged.map { |f| f["id"] }).to eq(["./spec/calculator_spec.rb[1:1:4]"]), stderr
       expect(flagged.first).to include("location" => "./spec/calculator_spec.rb:8", "kills" => 0)
       expect(flagged.first["killable_mutants"]).to be_positive
+      expect(audit["ignored"]).to eq(["./spec/calculator_spec.rb[1:1:5]"]), stderr
       expect(audit["mutants_run"]).to be_positive
       expect(status.exitstatus).to eq(1) # unchanged: the planted survivors still fail the run
     end

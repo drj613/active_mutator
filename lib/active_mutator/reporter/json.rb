@@ -54,6 +54,7 @@ module ActiveMutator
           "no_kills_observed" => report.flagged.map do |flag|
             { "id" => flag.id, "location" => flag.location, "killable_mutants" => flag.killable, "kills" => 0 }
           end,
+          "ignored" => report.ignored,
           "not_judged" => report.not_judged
         }
       end

@@ -116,7 +116,7 @@ module ActiveMutator
           end
         end
         @out.puts "", "Test audit: #{report.flagged.size} with no kills observed, #{report.cleared} killed a mutant, " \
-                      "#{report.not_judged.size} not judged (#{report.mutants_run} audit runs)"
+                      "#{report.ignored.size} ignored, #{report.not_judged.size} not judged (#{report.mutants_run} audit runs)"
       end
 
       def print_skipped(skipped)

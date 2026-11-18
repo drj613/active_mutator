@@ -158,7 +158,8 @@ RSpec.describe ActiveMutator::Reporter::Json do
       ActiveMutator::TestAudit::Report.new(
         flagged: [ActiveMutator::TestAudit::Flag.new(id: "./spec/a_spec.rb[1:2]", location: "./spec/a_spec.rb:7",
                                                      killable: 3)],
-        cleared: 12, not_judged: ["./spec/b_spec.rb[1:1]"], kills: {}, mutants_run: 9
+        cleared: 12, ignored: ["./spec/c_spec.rb[1:1]"], not_judged: ["./spec/b_spec.rb[1:1]"], kills: {},
+        mutants_run: 9
       )
     end
 
@@ -174,6 +175,7 @@ RSpec.describe ActiveMutator::Reporter::Json do
         "cleared" => 12,
         "no_kills_observed" => [{ "id" => "./spec/a_spec.rb[1:2]", "location" => "./spec/a_spec.rb:7",
                                   "killable_mutants" => 3, "kills" => 0 }],
+        "ignored" => ["./spec/c_spec.rb[1:1]"],
         "not_judged" => ["./spec/b_spec.rb[1:1]"]
       )
     end
