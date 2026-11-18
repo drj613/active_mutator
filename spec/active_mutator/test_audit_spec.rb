@@ -245,6 +245,13 @@ RSpec.describe ActiveMutator::TestAudit do
     expect(report.not_judged).to eq([])
   end
 
+  it "lists the ignored examples sorted by id" do
+    results = [result(m1, :killed, killed_by: [a])]
+    report = audit(results, { m1 => [a, d, b, c] }, { m1 => ->(_) { result(m1, :survived, ignored: [d, b, c]) } })
+
+    expect(report.ignored).to eq([b, c, d])
+  end
+
   it "counts a tagged example that kills as cleared, not ignored" do
     results = [result(m1, :killed, killed_by: [a]), result(m2, :killed, killed_by: [a])]
     answers = { m1 => ->(_) { result(m1, :survived, ignored: [b]) },
