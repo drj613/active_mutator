@@ -181,6 +181,17 @@ RSpec.describe ActiveMutator::TestAudit do
     expect(report.not_judged).to eq([c])
   end
 
+  it "normalizes each example id once, however many rounds the audit takes" do
+    mutants = Array.new(6) { |i| mutant("m#{i}") }
+    results = mutants.map { |m| result(m, :killed, killed_by: [a]) }
+    answers = mutants.to_h { |m| [m, ->(_) { result(m, :survived, passed: passes(c, d)) }] }
+    allow(ActiveMutator::ExampleId).to receive(:normalize).and_call_original
+    audit(results, mutants.to_h { |m| [m, [a, c, d]] }, answers, width: 1)
+
+    expect(@rounds.size).to eq(6)
+    [a, c, d].each { |id| expect(ActiveMutator::ExampleId).to have_received(:normalize).with(id).once }
+  end
+
   it "treats two spellings of one example as the same example" do
     absolute = ->(id) { id.sub("./", "#{Dir.pwd}/") }
     results = [result(m1, :killed, killed_by: [absolute.call(a)])]

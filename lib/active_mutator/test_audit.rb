@@ -42,6 +42,7 @@ module ActiveMutator
       @build = build
       @run = run
       @kills = {}
+      @keys = {}
     end
 
     def call
@@ -80,11 +81,12 @@ module ActiveMutator
       raise
     end
 
+    # Suspects only ever drop out, so each round keeps what is left and
+    # forgets mutants with none.
     def next_round(pending)
-      pending.filter_map do |mutation, ids|
-        suspects = ids.reject { |id| @cleared.include?(key(id)) }
-        [mutation, suspects] unless suspects.empty?
-      end.each_with_index.sort_by { |(_, suspects), i| [-suspects.size, i] }.first(@width).map(&:first)
+      pending.transform_values! { |ids| ids.reject { |id| @cleared.include?(key(id)) } }
+      pending.reject! { |_, suspects| suspects.empty? }
+      pending.each_with_index.sort_by { |(_, suspects), i| [-suspects.size, i] }.first(@width).map(&:first)
     end
 
     def learn(result)
@@ -115,6 +117,7 @@ module ActiveMutator
     end
 
     # ./spec/a_spec.rb[1:1] and its absolute spelling are one example.
-    def key(id) = ExampleId.normalize(id) || id
+    # Memoized: a large suite has millions of mutant-example pairs.
+    def key(id) = @keys[id] ||= ExampleId.normalize(id) || id
   end
 end
