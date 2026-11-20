@@ -422,7 +422,8 @@ timed out or errored) is not judged.
 A passing example tagged `active_mutator: :no_kill_ok` goes in the worker's
 `ignored` list instead of `passed`. The audit then drops it from later
 forks and lists it as ignored. A tagged example that fails still counts as
-a killer, so a tagged test that kills is cleared like any other.
+a killer, so one that kills in a fork it ran in (its first, or another in
+the same round) is cleared like any other.
 
 `--fail-on-no-kills` sets `fail_on_flags` on the report, and the runner
 exits `1` when that's set and anything is flagged. Survivors and worker

@@ -295,7 +295,8 @@ test may guard behavior no mutant touched.
   never run, so a test that covers only those isn't listed at all.
 - It doesn't change the exit code unless you pass `--fail-on-no-kills`,
   which turns on the audit and exits `1` if it flags any untagged test
-  (JSON `exit_reason`: `no_kills_observed`). Use it once the list is clean
+  (JSON `exit_reason`: `no_kills_observed`, unless survivors or worker
+  errors come first). Use it once the list is clean
   or tagged, not as a first gate. The JSON report gets a `test_audit` key
   (`null` without the flag); the Stryker report doesn't carry it.
 - The cost is one extra fork per killed mutant at most, and often far
@@ -313,8 +314,8 @@ end
 
 The tag works on a `describe` or `context` too, since RSpec passes group
 metadata down to its examples. A tagged test is counted as ignored instead
-of flagged, and it drops out after its first audit fork. If it does kill a
-mutant, it's cleared as usual. The tag lives on the test, not in a file of
+of flagged, and it drops out after its first audit fork. If it kills a
+mutant in a fork it ran in, it's cleared as usual. The tag lives on the test, not in a file of
 example ids, because ids like `[1:2:3]` shift when tests move.
 
 ### Empty plans in CI
