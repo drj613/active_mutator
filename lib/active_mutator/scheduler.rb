@@ -3,10 +3,15 @@ require "tempfile"
 
 module ActiveMutator
   # Fork pool: one fork per WorkItem, capped at `jobs` concurrent forks.
-  # Parent enforces per-item deadlines with SIGKILL (worker-side timeouts
-  # cannot interrupt all infinite loops).
+  # The parent enforces per-item deadlines (worker-side timeouts cannot
+  # interrupt all infinite loops): SIGTERM to the worker's process group,
+  # then SIGKILL if it is still there after a short grace.
   class Scheduler
     OrphanedError = Class.new(Error)
+
+    # Long enough for a test server's at_exit shutdown, short enough that a
+    # stuck worker doesn't hold its slot for long.
+    TERM_GRACE = 3.0
 
     # A detached run can start with pid 1 as its parent, so compare against
     # the parent seen at start rather than against 1.
@@ -19,8 +24,9 @@ module ActiveMutator
     # sequence after phase 1's keeps mutant numbers unique across the run.
     def initialize(jobs:, worker: Worker.method(:run), on_result: nil,
                    calibrators: nil, orphaned: Scheduler.parent_changed,
-                   events: Events.new, first_seq: 1, abort: AbortFlag.new)
+                   events: Events.new, first_seq: 1, abort: AbortFlag.new, term_grace: TERM_GRACE)
       @abort = abort
+      @term_grace = term_grace
       @jobs = jobs
       @worker = worker
       @on_result = on_result
@@ -66,7 +72,10 @@ module ActiveMutator
     # CI allows only seconds between SIGTERM and SIGKILL, so kill every
     # worker group and move on without waiting for any of them.
     def abort!(running, results)
-      in_flight = running.map do |pid, entry|
+      # A worker past its deadline already has its verdict; it isn't in flight.
+      stopping, live = running.partition { |_, entry| entry[:stopping] }
+      stopping.each { |pid, entry| results << complete(pid, entry, timeout_result(entry)) }
+      in_flight = live.map do |pid, entry|
         m = entry[:item].mutation
         { seq: entry[:seq], pid: pid, subject: m.subject.name, file: m.subject.file, line: m.line,
           description: m.description }
@@ -109,6 +118,9 @@ module ActiveMutator
       pid = fork do
         reader.close
         Process.setpgid(0, 0)          # own process group: deadline kill reaps grandchildren too
+        # Forks inherit the Runner's TERM trap, which only trips the abort
+        # flag. Ruby's own handler raises, so the worker's at_exit hooks run.
+        trap("TERM", "DEFAULT")
         $stdout.reopen(File::NULL)     # app code that prints must not corrupt parent's report
         $stderr.reopen(stderr_file.path, "w") # kept for the crash report, never shown otherwise
         # After fork(), libpq's GSS encryption negotiation touches Apple
@@ -164,22 +176,32 @@ module ActiveMutator
         entry[:payload] << chunk if chunk.is_a?(String)
         entry[:eof] = true if chunk.nil?
         entry[:exited] ||= Process.waitpid(pid, Process::WNOHANG)
-        if entry[:exited] && entry[:eof]
+        if entry[:stopping]
+          next unless entry[:exited] || now > entry[:stopping][:kill_at]
+
+          kill(pid) # whatever is left of the group, a descendant holding the pipe included
+          entry[:reader].close
+          entry[:stderr_file].close!
+          results << complete(pid, entry, timeout_result(entry))
+          running.delete(pid)
+        elsif entry[:exited] && entry[:eof]
           result = finish(entry)
           calibrator_for(entry[:item])&.record(result.seconds, entry[:budget]) if result.status == :killed
           results << complete(pid, entry, result)
           running.delete(pid)
         elsif now > entry[:deadline]
-          kill(pid)
-          entry[:reader].close
-          entry[:stderr_file].close!
-          seconds = now - entry[:started]
-          details = format("timed out after %.1fs (budget %.1fs)", seconds, entry[:budget])
-          results << complete(pid, entry, Result.new(mutation: entry[:item].mutation, status: :timeout,
-                                                     details: details, seconds: seconds))
-          running.delete(pid)
+          # TERM first, so the worker's own cleanup (a test server's
+          # shutdown) runs; the verdict is already a timeout either way.
+          signal_group(pid, "TERM")
+          entry[:stopping] = { seconds: now - entry[:started], kill_at: now + @term_grace }
         end
       end
+    end
+
+    def timeout_result(entry)
+      seconds = entry[:stopping][:seconds]
+      details = format("timed out after %.1fs (budget %.1fs)", seconds, entry[:budget])
+      Result.new(mutation: entry[:item].mutation, status: :timeout, details: details, seconds: seconds)
     end
 
     # A sibling mutant of the same subject (the plan is built per mutant, so
@@ -288,12 +310,12 @@ module ActiveMutator
       end
     end
 
-    def signal_group(pid)
-      Process.kill("KILL", -pid) # negative pid = whole process group
+    def signal_group(pid, signal = "KILL")
+      Process.kill(signal, -pid) # negative pid = whole process group
     rescue Errno::ESRCH, Errno::EPERM
       # Group not established yet (setpgid race) or already gone: direct kill.
       begin
-        Process.kill("KILL", pid)
+        Process.kill(signal, pid)
       rescue Errno::ESRCH
         nil
       end

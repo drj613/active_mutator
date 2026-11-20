@@ -536,6 +536,65 @@ RSpec.describe ActiveMutator::Scheduler do
     expect(elapsed).to be < 5
   end
 
+  describe "the TERM grace before a timed-out worker is killed" do
+    def now = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+
+    it "lets the worker run its own at_exit cleanup, even under an inherited TERM trap" do
+      previous = trap("TERM") {} # like the Runner's trap, which forks inherit
+      begin
+        Dir.mktmpdir do |dir|
+          marker = File.join(dir, "cleaned")
+          worker = lambda do |_m, _e, _w|
+            at_exit { File.write(marker, "yes") }
+            sleep 30
+          end
+          results = run_bounded(scheduler(worker: worker), [item(timeout: 0.2)])
+          expect(results.map(&:status)).to eq([:timeout])
+          expect(File.read(marker)).to eq("yes")
+        end
+      ensure
+        trap("TERM", previous)
+      end
+    end
+
+    it "kills a worker that ignores TERM once the grace runs out, timed from the deadline" do
+      Tempfile.create("pid") do |file|
+        worker = lambda do |_m, _e, _w|
+          trap("TERM") {}
+          File.write(file.path, Process.pid.to_s)
+          sleep 30
+        end
+        started = now
+        results = run_bounded(described_class.new(jobs: 1, worker: worker, term_grace: 0.5), [item(timeout: 0.2)])
+        expect(now - started).to be >= 0.7
+        expect(results.map(&:status)).to eq([:timeout])
+        expect(results.first.details).to match(/\Atimed out after 0\.[2-4]s \(budget 0\.2s\)\z/)
+        expect_process_gone(File.read(file.path).to_i)
+      end
+    end
+
+    it "keeps the timeout verdict when an abort lands during the grace" do
+      flag = ActiveMutator::AbortFlag.new
+      worker = lambda do |_m, _e, _w|
+        trap("TERM") {}
+        sleep 30
+      end
+      sched = described_class.new(jobs: 1, worker: worker, term_grace: 30, abort: flag)
+      pid = nil
+      allow(sched).to receive(:signal_group).and_wrap_original do |orig, target, *sig|
+        pid ||= target
+        orig.call(target, *sig).tap { flag.trip!(:sigterm) if sig == ["TERM"] }
+      end
+      error = nil
+      expect { run_bounded(sched, [item(timeout: 0.2)]) }.to raise_error(ActiveMutator::Aborted) { |e| error = e }
+      expect(error.results.map(&:status)).to eq([:timeout])
+      expect(error.in_flight).to eq([])
+    ensure
+      # The abort path killed it without waiting; reap it here.
+      Timeout.timeout(2) { Process.waitpid(pid) } if pid
+    end
+  end
+
   it "actually kills the timed-out worker process and closes its pipe" do
     Tempfile.create("pid") do |file|
       GC.start

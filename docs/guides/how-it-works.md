@@ -464,12 +464,16 @@ absorbs the fork's own boot cost (spec-file loading plus suite hooks; the
 helper itself is already preloaded).
 
 The **parent**, not the worker, enforces the deadline
-(`Scheduler#reap`), using `Process.kill("KILL", -pid)` against the whole
-process group. Each fork calls `Process.setpgid(0, 0)`, so a kill also
-reaps anything it spawned, such as a browser. This matters for
-correctness, not just cleanliness: a worker-side timeout cannot interrupt
-every possible infinite loop, since the mutated code itself might be the
-thing spinning, with no chance to check a deadline.
+(`Scheduler#reap`). At the deadline it sends SIGTERM to the whole process
+group, so the worker's own `at_exit` hooks run (a test server that stops
+itself there gets to stop). If anything in the group is still there 3
+seconds later, it sends SIGKILL. Each fork calls `Process.setpgid(0, 0)`,
+so the signals also reach anything it spawned, such as a browser. The
+mutant is a `timeout` from the deadline on, and its time is the time at
+the deadline. Enforcing it from the parent matters for correctness, not
+just cleanliness: a worker-side timeout cannot interrupt every possible
+infinite loop, since the mutated code itself might be the thing spinning,
+with no chance to check a deadline.
 
 With `--adaptive-timeout` (the default), a per-lane `TimeoutCalibrator`
 scales the *variable* part of each remaining budget from what workers
