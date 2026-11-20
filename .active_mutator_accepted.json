@@ -411,5 +411,12 @@
     "description": "replace `>` with `>=`",
     "original_snippet": ">",
     "ordinal": 1
+  },
+  {
+    "file": "lib/active_mutator/scheduler.rb",
+    "subject": "ActiveMutator::Scheduler#reap",
+    "description": "replace `>` with `>=`",
+    "original_snippet": ">",
+    "ordinal": 2
   }
 ]
