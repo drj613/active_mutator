@@ -71,6 +71,7 @@ module ActiveMutator
           "original" => m.original_snippet,
           "replacement" => m.edit.replacement,
           "details" => result.details,
+          "killed_by" => result.killed_by,
           "seconds" => result.seconds,
           "peak_rss_kb" => result.peak_rss_kb
         }

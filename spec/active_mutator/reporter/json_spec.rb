@@ -34,9 +34,23 @@ RSpec.describe ActiveMutator::Reporter::Json do
       "line" => 11,
       "original" => "<",
       "replacement" => "<=",
-      "details" => nil
+      "details" => nil,
+      "killed_by" => []
     )
     expect(data["exit_reason"]).to eq("unaccepted_survivors")
+  end
+
+  it "lists the examples that killed each mutant" do
+    edit = ActiveMutator::Edit.new(range: 0...1, replacement: "y", description: "d", operator: "CallSwap")
+    subject_ = ActiveMutator::Subject.new(name: "Foo#a", file: "foo.rb", byte_range: 0...10,
+                                          line_range: 1..2, constant_scope: ["Foo"], kind: :instance)
+    mutation = ActiveMutator::Mutation.new(subject: subject_, edit: edit, original_snippet: "x",
+                                           line: 1, mutated_file_source: "", mutated_def_source: "",
+                                           mutated_def_line: 1)
+    killers = %w[./spec/foo_spec.rb[1:1] ./spec/foo_spec.rb[1:3]]
+    reporter.summary([ActiveMutator::Result.new(mutation: mutation, status: :killed, details: nil, killed_by: killers)],
+                     invalid_count: 0)
+    expect(JSON.parse(out.string)["results"].first["killed_by"]).to eq(killers)
   end
 
   it "includes per-operator stats in the summary" do

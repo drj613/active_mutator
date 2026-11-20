@@ -20,7 +20,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   flags any untagged test. The JSON `exit_reason` is `no_kills_observed`
   when the run has no survivors or worker errors.
 - The Stryker report adds `killedBy` to each killed mutant whose killer is
-  known.
+  known, and each JSON result adds a `killed_by` list (empty when no test is
+  known to have killed it).
 - Workers now run the `at_exit` hooks the tests register, so a test that
   starts a server and stops it in `at_exit` no longer leaves one running per
   mutant. Hooks inherited from the parent process still never run.
