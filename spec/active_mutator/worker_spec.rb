@@ -46,7 +46,7 @@ RSpec.describe ActiveMutator::Worker do
   it "emits killed when examples fail" do
     allow(rspec_runner).to receive(:run_specs).and_return(1)
     run_worker
-    expect(emitted).to eq("status" => "killed", "details" => nil)
+    expect(emitted).to eq("status" => "killed", "details" => "no covering example failed, but RSpec exited 1")
   end
 
   it "emits survived when examples pass" do
@@ -280,7 +280,7 @@ RSpec.describe ActiveMutator::Worker do
 
     it "skips failures outside the selection and reports none when nothing matches" do
       run_with(%w[./spec/x_spec.rb[1:1]]) { failed << example("./spec/leaked_spec.rb[1:1]") }
-      expect(emitted).to eq("status" => "killed", "details" => nil)
+      expect(emitted).to eq("status" => "killed", "details" => "no covering example failed, but RSpec exited 1")
     end
 
     it "ignores failures that were already recorded before this run" do
@@ -290,8 +290,16 @@ RSpec.describe ActiveMutator::Worker do
     end
 
     it "reports no killer when the run failed without failed examples" do
+      run_with(%w[./spec/x_spec.rb[1:1]], code: 2)
+      expect(emitted).to eq("status" => "killed", "details" => "no covering example failed, but RSpec exited 2")
+    end
+
+    it "says the run failed outside any example when RSpec recorded such a failure" do
+      allow(RSpec.world).to receive(:non_example_failure).and_return(true)
       run_with(%w[./spec/x_spec.rb[1:1]])
-      expect(emitted).to eq("status" => "killed", "details" => nil)
+      expect(emitted).to eq("status" => "killed",
+                            "details" => "no covering example failed; the run failed outside any example " \
+                                         "(a spec file failed to load, or a suite or context hook raised)")
     end
 
     it "reports no killer for a survivor, even with an old failure around" do
@@ -470,6 +478,13 @@ RSpec.describe ActiveMutator::Worker do
       mutate_on_insert { worker.define_singleton_method(:killer) { |_| raise "mutated killer" } }
       worker.run
       expect(emitted["killer"]).to eq("./spec/x_spec.rb[1:1]")
+    end
+
+    it "explains a kill with no killer with the original explainer" do
+      allow(rspec_runner).to receive(:run_specs).and_return(1)
+      mutate_on_insert { worker.define_singleton_method(:no_killer_details) { |_| raise "mutated explainer" } }
+      worker.run
+      expect(emitted).to eq("status" => "killed", "details" => "no covering example failed, but RSpec exited 1")
     end
 
     it "names the killer with the original id normalizer" do

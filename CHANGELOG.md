@@ -22,6 +22,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - The Stryker report adds `killedBy` to each killed mutant whose killer is
   known, and each JSON result adds a `killed_by` list (empty when no test is
   known to have killed it).
+- A killed mutant with no known killer now says why in its `details`: the
+  run failed outside any example (a spec file that failed to load, or a
+  raising suite or context hook), or RSpec exited nonzero with no covering
+  example failing.
 - Workers now run the `at_exit` hooks the tests register, so a test that
   starts a server and stops it in `at_exit` no longer leaves one running per
   mutant. Hooks inherited from the parent process still never run.

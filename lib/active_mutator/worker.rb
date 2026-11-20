@@ -54,6 +54,7 @@ module ActiveMutator
       @emit = method(:emit)
       @covering_groups = method(:covering_groups)
       @killer = method(:killer)
+      @no_killer_details = method(:no_killer_details)
       @in_selection = method(:in_selection)
       @audit_verdicts = method(:audit_verdicts)
       @failed_examples = method(:failed_examples)
@@ -86,7 +87,8 @@ module ActiveMutator
       if code.zero?
         @emit.call("survived", **verdicts)
       else
-        @emit.call("killed", killer: @killer.call(failures), **verdicts)
+        killer = @killer.call(failures)
+        @emit.call("killed", killer: killer, details: (@no_killer_details.call(code) unless killer), **verdicts)
       end
     rescue ClosureReload::Skip => e
       @emit.call("skipped", details: e.message)
@@ -152,6 +154,16 @@ module ActiveMutator
     # The first fresh failure that is one of the examples this mutant ran
     # against, spelled as RSpec reports it; nil when there is none.
     def killer(failures) = @in_selection.call(failures).first
+
+    # Why a failed run has no killer. RSpec marks a failure outside any
+    # example, like a spec file that raised on load or a raising suite or
+    # after(:context) hook; anything else just exited nonzero.
+    def no_killer_details(code)
+      return "no covering example failed, but RSpec exited #{code}" unless RSpec.world.non_example_failure
+
+      "no covering example failed; the run failed outside any example " \
+        "(a spec file failed to load, or a suite or context hook raised)"
+    end
 
     # The ids of `examples` that this mutant ran against, spelled as RSpec
     # reports them, in run order.
