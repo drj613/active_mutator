@@ -149,8 +149,8 @@ line in place of `Mutation score:`, and never passes, whatever `--fail-at`
 says. See [Run diagnostics](docs/guides/diagnostics.md#aborted-runs).
 
 The JSON report's `exit_reason` field (`unaccepted_survivors`,
-`worker_errors`, `clean`, `empty_plan`, and for a stopped run `interrupted`
-or `memory_ceiling`) is independent of the `--fail-at` gate. `complete` is
+`worker_errors`, `no_kills_observed`, `clean`, `empty_plan`, and for a
+stopped run `interrupted` or `memory_ceiling`) is independent of the `--fail-at` gate. `complete` is
 `false` only for a stopped run. A `--since` or `--subject` run that
 plans zero mutants skips the baseline, prints the usual count block with
 every status at `0` and no `Mutation score:` line (JSON: `score` is `null`,
@@ -267,7 +267,56 @@ survivors show inline on the PR diff. Pairs with the CI recipe:
   survivors annotate the PR diff)
 - Nightly: `active_mutator --force-baseline` (full run; also recovers the
   residual blind spot — constant-reference detection handles the common
-  newly-covering-example case since 0.2)
+  newly-covering-example case since 0.2). Add `--audit-tests` to also list
+  tests that never kill a mutant (below).
+
+### Tests with no kills observed
+
+A test can run a method, pass, and check nothing: a missing `expect`, or a
+matcher too loose to fail. Mutation scores don't show it, because another
+test kills the same mutants. `--audit-tests` finds these tests.
+
+After a full run, each killed mutant runs once more against the covering
+tests that were never seen to kill anything, with fail-fast off. A test is
+cleared the first time it kills a mutant, so good tests drop out after a
+fork or two. A test that passes against every killed mutant it covers is
+listed under "Tests with no kills observed", with its location and how many
+killed mutants it covers. "No kills observed" is a lead, not a verdict: the
+test may guard behavior no mutant touched.
+
+    bundle exec active_mutator --force-baseline --audit-tests
+
+- It runs only on a full run. `--since`, `--changed`, `--subject`,
+  `--max-mutants`, or path arguments print a warning and skip it.
+- It judges tests by method-level mutants only. Tests that cover only
+  survivors, or only skipped, timed-out, or errored mutants, are counted as
+  not judged, and so is a test with any fork that didn't finish
+  cleanly. Pending and skipped examples never count. Accepted mutants are
+  never run, so a test that covers only those isn't listed at all.
+- It doesn't change the exit code unless you pass `--fail-on-no-kills`,
+  which turns on the audit and exits `1` if it flags any untagged test
+  (JSON `exit_reason`: `no_kills_observed`, unless survivors or worker
+  errors come first). Use it once the list is clean
+  or tagged, not as a first gate. The JSON report gets a `test_audit` key
+  (`null` without the flag); the Stryker report doesn't carry it.
+- The cost is one extra fork per killed mutant at most, and often far
+  fewer, since cleared tests drop out.
+
+Most flags are fine to keep: a happy-path test whose siblings already kill
+the same mutants, or a guard no mutant can break. Tag those so the audit
+stops listing them:
+
+```ruby
+it "returns nil for a blank name", active_mutator: :no_kill_ok do
+  expect(parse("")).to be_nil
+end
+```
+
+The tag works on a `describe` or `context` too, since RSpec passes group
+metadata down to its examples. A tagged test is counted as ignored instead
+of flagged, and it drops out after its first audit fork. If it kills a
+mutant in a fork it ran in, it's cleared as usual. The tag lives on the test, not in a file of
+example ids, because ids like `[1:2:3]` shift when tests move.
 
 ### Empty plans in CI
 
@@ -314,6 +363,8 @@ projects used to tell a docs-only PR from a broken `--since` range.
 | `--format terminal\|json\|stryker-json\|github` | terminal | report format |
 | `--accept-survivors` | off | record survivors to the acceptance ledger |
 | `--force-baseline` | off | ignore cached coverage map |
+| `--audit-tests` | off | after a full run, list tests that cover killed mutants but never kill one (see [Tests with no kills observed](#tests-with-no-kills-observed)) |
+| `--fail-on-no-kills` | off | turns on `--audit-tests` and exits `1` if it flags any test |
 | `--preload-helper FILE` / `--no-preload-helper` | auto-detect | parent spec-helper preload |
 | `--serial-pattern PAT` | `spec/system/`, `spec/features/` | covering-path prefixes forced serial |
 | `--spec-path DIR` | `spec/` | where spec files live, relative to the project root (repeatable; the first use replaces the default `spec/`), e.g. `--spec-path engines/billing/spec --spec-path spec` |

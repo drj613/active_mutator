@@ -36,7 +36,8 @@ module ActiveMutator
       # same file with no files/mutants; the flag is accepted for contract parity.
       # An aborted run reports the finished mutants only: the schema has no
       # "didn't finish" status that wouldn't skew the score.
-      def summary(results, invalid_count:, empty_plan: false, aborted: nil)
+      # The test audit has no place in the Stryker schema; use --format json.
+      def summary(results, invalid_count:, empty_plan: false, aborted: nil, test_audit: nil)
         report = build_report(results, invalid_count)
         path = File.join(@root, REPORT_PATH)
         # An empty plan skips the baseline, which used to create this dir.
@@ -87,6 +88,8 @@ module ActiveMutator
         entry["statusReason"] = reason if reason
         covered = covered_by(result)
         entry["coveredBy"] = covered if covered
+        killers = killed_by(result)
+        entry["killedBy"] = killers unless killers.empty?
         entry
       end
 
@@ -112,8 +115,18 @@ module ActiveMutator
         @coverage_map.examples_for(subject.file, result.mutation.lines)
       end
 
+      # Spelled as in coveredBy where the two match, so the viewer links
+      # them. A phase-2 killer may not be in coveredBy; it keeps its spelling.
+      # The scheduler keeps only killers that normalize, and baseline ids do.
+      def killed_by(result)
+        covered = covered_by(result) || []
+        result.killed_by.map do |id|
+          covered.find { |c| ExampleId.normalize(c) == ExampleId.normalize(id) } || id
+        end.uniq
+      end
+
       def referenced_examples(results)
-        results.flat_map { |r| covered_by(r) || [] }.uniq.sort
+        results.flat_map { |r| (covered_by(r) || []) + killed_by(r) }.uniq.sort
       end
 
       # Group example ids by spec path (the id up to the trailing "[...]")

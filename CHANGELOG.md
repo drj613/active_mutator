@@ -6,6 +6,36 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+- `--audit-tests` lists tests that cover killed mutants but never kill one,
+  such as a test with no `expect`. After a full run, each killed method-level
+  mutant runs once more against the covering tests not yet seen to kill,
+  with fail-fast off; a test is cleared the first time it kills. The terminal
+  and GitHub reports add a "Tests with no kills observed" section, and the
+  JSON report adds a `test_audit` key (`null` without the flag). Scoped runs
+  warn and skip the audit. The exit code doesn't change. Part of #54.
+- Tag a test `active_mutator: :no_kill_ok` (on the example or its group) to
+  keep it off the audit's list. It's counted as ignored instead, in the
+  terminal count line and in a new `test_audit.ignored` JSON list.
+- `--fail-on-no-kills` turns on `--audit-tests` and exits `1` if the audit
+  flags any untagged test. The JSON `exit_reason` is `no_kills_observed`
+  when the run has no survivors or worker errors.
+- The Stryker report adds `killedBy` to each killed mutant whose killer is
+  known, and each JSON result adds a `killed_by` list (empty when no test is
+  known to have killed it).
+- A killed mutant with no known killer now says why in its `details`: the
+  run failed outside any example (a spec file that failed to load, or a
+  raising suite or context hook), or RSpec exited nonzero with no covering
+  example failing.
+- Workers now run the `at_exit` hooks the tests register, so a test that
+  starts a server and stops it in `at_exit` no longer leaves one running per
+  mutant. Hooks inherited from the parent process still never run.
+- A worker that runs past its timeout now gets SIGTERM first, so its
+  `at_exit` hooks run, and SIGKILL only if it is still there 3 seconds
+  later. It still counts as a timeout, timed at the deadline.
+- A run whose parent is already pid 1 when it starts, such as one started
+  detached or under a container's init, no longer aborts at once with
+  "parent process died". The run now aborts when its parent changes.
+
 ## [0.7.1] - 2026-10-30
 
 - A mutant's covering top-level groups now run in priority order: the

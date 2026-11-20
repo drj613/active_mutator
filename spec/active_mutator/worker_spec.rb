@@ -46,7 +46,7 @@ RSpec.describe ActiveMutator::Worker do
   it "emits killed when examples fail" do
     allow(rspec_runner).to receive(:run_specs).and_return(1)
     run_worker
-    expect(emitted).to eq("status" => "killed", "details" => nil)
+    expect(emitted).to eq("status" => "killed", "details" => "no covering example failed, but RSpec exited 1")
   end
 
   it "emits survived when examples pass" do
@@ -255,6 +255,7 @@ RSpec.describe ActiveMutator::Worker do
     before do
       allow(RSpec.configuration).to receive(:reporter).and_return(reporter)
       allow(reporter).to receive(:failed_examples) { failed }
+      allow(reporter).to receive(:examples) { [] }
     end
 
     def run_with(ids, code: 1, &failing)
@@ -279,7 +280,7 @@ RSpec.describe ActiveMutator::Worker do
 
     it "skips failures outside the selection and reports none when nothing matches" do
       run_with(%w[./spec/x_spec.rb[1:1]]) { failed << example("./spec/leaked_spec.rb[1:1]") }
-      expect(emitted).to eq("status" => "killed", "details" => nil)
+      expect(emitted).to eq("status" => "killed", "details" => "no covering example failed, but RSpec exited 1")
     end
 
     it "ignores failures that were already recorded before this run" do
@@ -289,8 +290,16 @@ RSpec.describe ActiveMutator::Worker do
     end
 
     it "reports no killer when the run failed without failed examples" do
+      run_with(%w[./spec/x_spec.rb[1:1]], code: 2)
+      expect(emitted).to eq("status" => "killed", "details" => "no covering example failed, but RSpec exited 2")
+    end
+
+    it "says the run failed outside any example when RSpec recorded such a failure" do
+      allow(RSpec.world).to receive(:non_example_failure).and_return(true)
       run_with(%w[./spec/x_spec.rb[1:1]])
-      expect(emitted).to eq("status" => "killed", "details" => nil)
+      expect(emitted).to eq("status" => "killed",
+                            "details" => "no covering example failed; the run failed outside any example " \
+                                         "(a spec file failed to load, or a suite or context hook raised)")
     end
 
     it "reports no killer for a survivor, even with an old failure around" do
@@ -310,6 +319,113 @@ RSpec.describe ActiveMutator::Worker do
       described_class.new(mutation, %w[./spec/x_spec.rb[1:1]], writer).run
       expect(emitted.keys).to eq(%w[status details])
       expect(emitted["status"]).to eq("error")
+    end
+  end
+
+  describe "audit mode" do
+    let(:reporter) { instance_double(RSpec::Core::Reporter) }
+    let(:failed) { [] }
+    let(:ran) { [] }
+    let(:ids) { %w[./spec/x_spec.rb[1:1] ./spec/x_spec.rb[1:2] ./spec/x_spec.rb[1:3] ./spec/x_spec.rb[1:4]] }
+
+    def example(id, status, line: 1, metadata: {})
+      instance_double(RSpec::Core::Example, id: id, location: "./spec/x_spec.rb:#{line}", metadata: metadata,
+                                            execution_result: instance_double(
+                                              RSpec::Core::Example::ExecutionResult, status: status
+                                            ))
+    end
+
+    # Records each example as run, and the failures as failed, as RSpec would.
+    def audit_run(code: 1, selection: ids, worker: nil, &examples)
+      allow(rspec_runner).to receive(:run_specs) do
+        examples.call.each do |e|
+          ran << e
+          failed << e if e.execution_result.status == :failed
+        end
+        code
+      end
+      (worker || described_class.new(mutation, selection, writer, audit: true)).run
+    end
+
+    before do
+      allow(RSpec.configuration).to receive(:reporter).and_return(reporter)
+      allow(reporter).to receive(:failed_examples) { failed }
+      allow(reporter).to receive(:examples) { ran }
+    end
+
+    it "turns fail-fast off, even when the host set it" do
+      RSpec.configuration.fail_fast = 3
+      seen = :unset
+      allow(rspec_runner).to receive(:run_specs) do
+        seen = RSpec.configuration.fail_fast
+        0
+      end
+      described_class.new(mutation, ids, writer, audit: true).run
+      expect(seen).to be(false)
+    end
+
+    it "reports every fresh failure in the selection, and the examples that passed with their locations" do
+      audit_run do
+        [example("./spec/x_spec.rb[1:2]", :failed), example("./spec/x_spec.rb[1:1]", :passed, line: 3),
+         example("./spec/x_spec.rb[1:3]", :pending), example("./spec/x_spec.rb[1:4]", :failed),
+         example("./spec/leaked_spec.rb[1:1]", :failed), example("./spec/leaked_spec.rb[1:2]", :passed)]
+      end
+      expect(emitted).to eq("status" => "killed", "details" => nil, "killer" => "./spec/x_spec.rb[1:2]",
+                            "killers" => %w[./spec/x_spec.rb[1:2] ./spec/x_spec.rb[1:4]],
+                            "passed" => { "./spec/x_spec.rb[1:1]" => "./spec/x_spec.rb:3" }, "ignored" => [])
+    end
+
+    it "reports the passes of a survivor" do
+      audit_run(code: 0) { [example("./spec/x_spec.rb[1:1]", :passed), example("./spec/x_spec.rb[1:2]", :passed, line: 5)] }
+      expect(emitted).to eq("status" => "survived", "details" => nil, "killers" => [],
+                            "passed" => { "./spec/x_spec.rb[1:1]" => "./spec/x_spec.rb:1",
+                                          "./spec/x_spec.rb[1:2]" => "./spec/x_spec.rb:5" }, "ignored" => [])
+    end
+
+    it "reports a passing example tagged no_kill_ok as ignored, not passed, and still credits a tagged killer" do
+      tag = { active_mutator: :no_kill_ok }
+      audit_run do
+        [example("./spec/x_spec.rb[1:1]", :passed, metadata: tag), example("./spec/x_spec.rb[1:2]", :failed, metadata: tag),
+         example("./spec/x_spec.rb[1:3]", :pending, metadata: tag), example("./spec/x_spec.rb[1:4]", :passed, line: 9),
+         example("./spec/leaked_spec.rb[1:1]", :passed, metadata: tag)]
+      end
+      expect(emitted).to include("killers" => ["./spec/x_spec.rb[1:2]"],
+                                 "passed" => { "./spec/x_spec.rb[1:4]" => "./spec/x_spec.rb:9" },
+                                 "ignored" => ["./spec/x_spec.rb[1:1]"])
+    end
+
+    it "leaves out examples that ran before this run" do
+      ran << example("./spec/x_spec.rb[1:1]", :passed)
+      failed << example("./spec/x_spec.rb[1:2]", :failed)
+      audit_run(code: 0) { [example("./spec/x_spec.rb[1:3]", :passed)] }
+      expect(emitted["killers"]).to eq([])
+      expect(emitted["passed"]).to eq("./spec/x_spec.rb[1:3]" => "./spec/x_spec.rb:1")
+    end
+
+    it "keys passes by the id RSpec reports, whatever the selection's spelling" do
+      audit_run(code: 0, selection: %w[spec/x_spec.rb[1:1]]) { [example("./spec/x_spec.rb[1:1]", :passed)] }
+      expect(emitted["passed"]).to eq("./spec/x_spec.rb[1:1]" => "./spec/x_spec.rb:1")
+    end
+
+    it "reports with the original verdict code when the mutant rewrites it" do
+      worker = described_class.new(mutation, ids, writer, audit: true)
+      allow_any_instance_of(ActiveMutator::Inserter).to receive(:insert) do
+        worker.define_singleton_method(:audit_verdicts) { |*| raise "mutated audit_verdicts" }
+        worker.define_singleton_method(:in_selection) { |*| raise "mutated in_selection" }
+      end
+      audit_run(worker: worker) { [example("./spec/x_spec.rb[1:1]", :failed)] }
+      expect(emitted).to include("killers" => ["./spec/x_spec.rb[1:1]"], "passed" => {})
+    end
+
+    it "reads the examples that ran with the original readers when the mutant rewrites them" do
+      worker = described_class.new(mutation, ids, writer, audit: true)
+      allow_any_instance_of(ActiveMutator::Inserter).to receive(:insert) do
+        worker.define_singleton_method(:all_examples) { [] }
+        worker.define_singleton_method(:failed_examples) { [] }
+      end
+      audit_run(worker: worker) { [example("./spec/x_spec.rb[1:1]", :failed), example("./spec/x_spec.rb[1:2]", :passed)] }
+      expect(emitted).to include("killer" => "./spec/x_spec.rb[1:1]", "killers" => ["./spec/x_spec.rb[1:1]"],
+                                 "passed" => { "./spec/x_spec.rb[1:2]" => "./spec/x_spec.rb:1" })
     end
   end
 
@@ -334,6 +450,7 @@ RSpec.describe ActiveMutator::Worker do
     before do
       allow(RSpec.configuration).to receive(:reporter).and_return(reporter)
       allow(reporter).to receive(:failed_examples) { failed }
+      allow(reporter).to receive(:examples) { [] }
     end
 
     it "reports with the original emit" do
@@ -361,6 +478,13 @@ RSpec.describe ActiveMutator::Worker do
       mutate_on_insert { worker.define_singleton_method(:killer) { |_| raise "mutated killer" } }
       worker.run
       expect(emitted["killer"]).to eq("./spec/x_spec.rb[1:1]")
+    end
+
+    it "explains a kill with no killer with the original explainer" do
+      allow(rspec_runner).to receive(:run_specs).and_return(1)
+      mutate_on_insert { worker.define_singleton_method(:no_killer_details) { |_| raise "mutated explainer" } }
+      worker.run
+      expect(emitted).to eq("status" => "killed", "details" => "no covering example failed, but RSpec exited 1")
     end
 
     it "names the killer with the original id normalizer" do

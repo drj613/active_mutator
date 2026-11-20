@@ -233,15 +233,45 @@ RSpec.describe ActiveMutator::Scheduler do
     end
   end
 
-  it "terminates workers with exit! so child at_exit hooks never run" do
+  it "runs at_exit hooks the worker registers, so a test's own cleanup still happens" do
     Dir.mktmpdir do |dir|
       flag = File.join(dir, "flag")
       worker = lambda do |_m, _e, writer|
         at_exit { File.write(flag, "ran") }
         writer.puts(JSON.generate("status" => "killed", "details" => nil))
       end
-      scheduler(worker: worker).run([item])
+      results = scheduler(worker: worker).run([item])
+      expect(results.map(&:status)).to eq([:killed])
+      expect(File.read(flag)).to eq("ran")
+    end
+  end
+
+  it "keeps the error of a worker that raises in the stderr tail" do
+    worker = ->(_m, _e, _writer) { raise "boom from the worker" }
+    result = scheduler(worker: worker).run([item]).first
+    expect(result.status).to eq(:error)
+    expect(result.details).to include("worker exited without reporting", "boom from the worker (RuntimeError)")
+  end
+
+  it "prints nothing for a worker that calls exit" do
+    worker = ->(_m, _e, _writer) { exit(3) }
+    expect(scheduler(worker: worker).run([item]).first.details).to eq("worker exited without reporting")
+  end
+
+  it "skips at_exit hooks inherited from the parent" do
+    Dir.mktmpdir do |dir|
+      flag = File.join(dir, "flag")
+      test_pid = Process.pid
+      armed = true
+      # Registered in this process, so the run happens here, where coverage
+      # sees it. The hook never fires here, and forks made after this test
+      # inherit armed = false.
+      at_exit { File.write(flag, "ran") if armed && Process.pid != test_pid }
+      worker = ->(_m, _e, writer) { writer.puts(JSON.generate("status" => "killed", "details" => nil)) }
+      expect(scheduler(worker: worker).run([item]).map(&:status)).to eq([:killed])
       expect(File.exist?(flag)).to be(false)
+    ensure
+      armed = false
     end
   end
 
@@ -396,6 +426,21 @@ RSpec.describe ActiveMutator::Scheduler do
     expect(elapsed).to be < 5 # workers were killed, not waited out
   end
 
+  it "runs normally when its parent is already pid 1 at start, as a detached run's is" do
+    allow(Process).to receive(:ppid).and_return(1)
+    worker = ->(_m, _e, writer) { writer.puts(JSON.generate("status" => "killed", "details" => nil)) }
+    results = described_class.new(jobs: 1, worker: worker).run([item])
+    expect(results.map(&:status)).to eq([:killed])
+  end
+
+  it "aborts by default once its parent changes" do
+    allow(Process).to receive(:ppid).and_return(4242)
+    worker = ->(_m, _e, _w) { sleep 30 }
+    sched = described_class.new(jobs: 1, worker: worker)
+    allow(Process).to receive(:ppid).and_return(1)
+    expect { run_bounded(sched, [item]) }.to raise_error(ActiveMutator::Scheduler::OrphanedError)
+  end
+
   it "leaves no live worker processes behind after an orphaned abort" do
     Tempfile.create("pids") do |file|
       pid_file = file.path
@@ -489,6 +534,65 @@ RSpec.describe ActiveMutator::Scheduler do
     expect(results.map(&:status)).to eq([:timeout])
     expect(results.first.details).to match(/\Atimed out after \d+\.\ds \(budget 0\.2s\)\z/)
     expect(elapsed).to be < 5
+  end
+
+  describe "the TERM grace before a timed-out worker is killed" do
+    def now = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+
+    it "lets the worker run its own at_exit cleanup, even under an inherited TERM trap" do
+      previous = trap("TERM") {} # like the Runner's trap, which forks inherit
+      begin
+        Dir.mktmpdir do |dir|
+          marker = File.join(dir, "cleaned")
+          worker = lambda do |_m, _e, _w|
+            at_exit { File.write(marker, "yes") }
+            sleep 30
+          end
+          results = run_bounded(scheduler(worker: worker), [item(timeout: 0.2)])
+          expect(results.map(&:status)).to eq([:timeout])
+          expect(File.read(marker)).to eq("yes")
+        end
+      ensure
+        trap("TERM", previous)
+      end
+    end
+
+    it "kills a worker that ignores TERM once the grace runs out, timed from the deadline" do
+      Tempfile.create("pid") do |file|
+        worker = lambda do |_m, _e, _w|
+          trap("TERM") {}
+          File.write(file.path, Process.pid.to_s)
+          sleep 30
+        end
+        started = now
+        results = run_bounded(described_class.new(jobs: 1, worker: worker, term_grace: 0.5), [item(timeout: 0.2)])
+        expect(now - started).to be >= 0.7
+        expect(results.map(&:status)).to eq([:timeout])
+        expect(results.first.details).to match(/\Atimed out after 0\.[2-4]s \(budget 0\.2s\)\z/)
+        expect_process_gone(File.read(file.path).to_i)
+      end
+    end
+
+    it "keeps the timeout verdict when an abort lands during the grace" do
+      flag = ActiveMutator::AbortFlag.new
+      worker = lambda do |_m, _e, _w|
+        trap("TERM") {}
+        sleep 30
+      end
+      sched = described_class.new(jobs: 1, worker: worker, term_grace: 30, abort: flag)
+      pid = nil
+      allow(sched).to receive(:signal_group).and_wrap_original do |orig, target, *sig|
+        pid ||= target
+        orig.call(target, *sig).tap { flag.trip!(:sigterm) if sig == ["TERM"] }
+      end
+      error = nil
+      expect { run_bounded(sched, [item(timeout: 0.2)]) }.to raise_error(ActiveMutator::Aborted) { |e| error = e }
+      expect(error.results.map(&:status)).to eq([:timeout])
+      expect(error.in_flight).to eq([])
+    ensure
+      # The abort path killed it without waiting; reap it here.
+      Timeout.timeout(2) { Process.waitpid(pid) } if pid
+    end
   end
 
   it "actually kills the timed-out worker process and closes its pipe" do
@@ -775,7 +879,7 @@ RSpec.describe ActiveMutator::Scheduler do
 
   # A killer that reaches the next sibling (same Subject) saves it the slow
   # groups: the scheduler runs the killer's top-level group first. The plan
-  # itself is never mutated, and no Result field carries the hint.
+  # itself is never mutated.
   describe "covering group priority" do
     let(:a1) { "./spec/a_spec.rb[1:1]" }
     let(:b1) { "./spec/b_spec.rb[1:1]" }
@@ -858,11 +962,19 @@ RSpec.describe ActiveMutator::Scheduler do
       expect(second.example_ids).to eq(ids)
     end
 
-    it "does not touch the result: same statuses and no hint field" do
+    it "does not touch the statuses" do
       results = run_jobs1({ 1 => ["killed", b1], 2 => ["killed", nil] }, [work(foo, ids), work(foo2, ids)])
       expect(results.map(&:status)).to eq(%i[killed killed])
-      expect(results.first.members).to eq(ActiveMutator::Result.members)
-      expect(ActiveMutator::Result.members).not_to include(:killer)
+    end
+
+    it "runs the first of an audit worker's killers first" do
+      worker = lambda do |m, example_ids, writer|
+        payload = { "status" => "killed", "details" => example_ids.join(",") }
+        payload["killers"] = [c1, b1] if m.line == 1
+        writer.puts(JSON.generate(payload))
+      end
+      results = described_class.new(jobs: 1, worker: worker).run([work(foo, ids), work(foo2, ids)])
+      expect(orders(results).last).to eq([c1, a1, b1])
     end
 
     it "remembers the latest valid killer" do
@@ -943,6 +1055,107 @@ RSpec.describe ActiveMutator::Scheduler do
       end
       arities = described_class.new(jobs: 1, worker: worker).run([work(foo, ids)]).map(&:details)
       expect(arities).to eq(["3"])
+    end
+  end
+
+  describe "the killers a result keeps" do
+    let(:a1) { "./spec/a_spec.rb[1:1]" }
+    let(:b1) { "./spec/b_spec.rb[1:1]" }
+    let(:ids) { [a1, b1] }
+    let(:foo) { mutation_in("/app/foo.rb", line: 1) }
+
+    def killed_by(payload)
+      worker = ->(_m, _ids, writer) { writer.puts(JSON.generate({ "details" => nil }.merge(payload))) }
+      item = ActiveMutator::WorkItem.new(mutation: foo, example_ids: ids, timeout: 5.0, lane: :parallel)
+      described_class.new(jobs: 1, worker: worker).run([item]).first.killed_by
+    end
+
+    it "keeps the killer the worker named, spelled as it was reported" do
+      killer = "#{File.expand_path("spec/b_spec.rb")}[1:1]"
+      expect(killed_by("status" => "killed", "killer" => killer)).to eq([killer])
+    end
+
+    it "keeps none when the worker named none" do
+      expect(killed_by("status" => "killed")).to eq([])
+    end
+
+    it "keeps every killer an audit worker named, in its order, over the single killer" do
+      payload = { "status" => "killed", "killer" => a1, "killers" => [b1, a1] }
+      expect(killed_by(payload)).to eq([b1, a1])
+    end
+
+    it "keeps none when an audit worker named an empty list" do
+      expect(killed_by("status" => "killed", "killer" => a1, "killers" => [])).to eq([])
+    end
+
+    it "drops killers that are not among the examples it was given" do
+      payload = { "status" => "killed", "killers" => ["./spec/zzz_spec.rb[1:1]", b1, "garbage", 7] }
+      expect(killed_by(payload)).to eq([b1])
+    end
+
+    it "keeps none for a result that is not a kill" do
+      %w[survived error skipped].each do |status|
+        expect(killed_by("status" => status, "killer" => b1, "killers" => [b1])).to eq([]), status
+      end
+    end
+
+    it "keeps none for a report without a status" do
+      expect(killed_by("killer" => b1)).to eq([])
+    end
+  end
+
+  describe "the passes a result keeps" do
+    let(:a1) { "./spec/a_spec.rb[1:1]" }
+    let(:b1) { "./spec/b_spec.rb[1:1]" }
+    let(:foo) { mutation_in("/app/foo.rb", line: 1) }
+
+    def passed(payload)
+      worker = ->(_m, _ids, writer) { writer.puts(JSON.generate({ "status" => "survived", "details" => nil }.merge(payload))) }
+      item = ActiveMutator::WorkItem.new(mutation: foo, example_ids: [a1, b1], timeout: 5.0, lane: :parallel)
+      described_class.new(jobs: 1, worker: worker).run([item]).first.passed
+    end
+
+    it "keeps the passes an audit worker reported, with their locations" do
+      expect(passed("passed" => { a1 => "./spec/a_spec.rb:3" })).to eq(a1 => "./spec/a_spec.rb:3")
+    end
+
+    it "keeps none when the worker reported none" do
+      expect(passed({})).to eq({})
+    end
+
+    it "keeps none when the report is not a map" do
+      expect(passed("passed" => [a1])).to eq({})
+    end
+
+    it "drops passes without a location string or outside the examples it was given" do
+      payload = { "passed" => { a1 => 3, b1 => "./spec/b_spec.rb:1", "./spec/zzz_spec.rb[1:1]" => "./spec/zzz_spec.rb:1",
+                                "garbage" => "x:1" } }
+      expect(passed(payload)).to eq(b1 => "./spec/b_spec.rb:1")
+    end
+
+    it "keeps passes on a kill too" do
+      expect(passed("status" => "killed", "killers" => [a1], "passed" => { b1 => "b:1" })).to eq(b1 => "b:1")
+    end
+  end
+
+  describe "the ignored examples a result keeps" do
+    let(:a1) { "./spec/a_spec.rb[1:1]" }
+    let(:b1) { "./spec/b_spec.rb[1:1]" }
+
+    def ignored(payload)
+      worker = ->(_m, _ids, writer) { writer.puts(JSON.generate({ "status" => "survived", "details" => nil }.merge(payload))) }
+      item = ActiveMutator::WorkItem.new(mutation: mutation_in("/app/foo.rb", line: 1), example_ids: [a1, b1],
+                                         timeout: 5.0, lane: :parallel)
+      described_class.new(jobs: 1, worker: worker).run([item]).first.ignored
+    end
+
+    it "keeps the tagged examples an audit worker reported, if it was given them" do
+      expect(ignored("ignored" => [b1, "./spec/zzz_spec.rb[1:1]", 3, "garbage"])).to eq([b1])
+    end
+
+    it "keeps none when the worker reported none, or not a list" do
+      expect(ignored({})).to eq([])
+      expect(ignored("ignored" => { a1 => "a:1" })).to eq([])
     end
   end
 end

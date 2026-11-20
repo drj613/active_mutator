@@ -33,7 +33,8 @@ module ActiveMutator
         browser_boot_seconds: 15.0, accept_survivors: false, exclude: [],
         max_mutants: nil, debug_plan: false, fail_at: nil, adaptive_timeout: true,
         operators: [], class_level: true, class_level_closure_cap: 10, allow_empty: false,
-        diagnostics: false, events_file: nil, sample_interval: 5.0, max_rss: nil
+        diagnostics: false, events_file: nil, sample_interval: 5.0, max_rss: nil, audit_tests: false,
+        fail_on_no_kills: false
       }
       options.merge!(ConfigFile.load(Dir.pwd))
       paths = OptionParser.new do |o|
@@ -67,6 +68,11 @@ module ActiveMutator
         o.on("--exclude PAT", "Skip files matching glob, relative to root (repeatable)") { |v| options[:exclude] << v }
         o.on("--max-mutants N", Integer, "Deterministically sample the first N mutants") { |v| options[:max_mutants] = v }
         o.on("--debug-plan", "Print the planned mutant list as JSON and exit") { options[:debug_plan] = true }
+        o.on("--audit-tests", "After a full run, find tests that cover killed mutants but never kill one " \
+                              "(slower; meant for nightly runs)") { options[:audit_tests] = true }
+        o.on("--fail-on-no-kills", "Run the audit (--audit-tests) and exit 1 if it flags any test") do
+          options[:audit_tests] = options[:fail_on_no_kills] = true
+        end
         o.on("--allow-empty",
              "Exit 0 when --since/--subject plan no mutants and the --since diff changed no code " \
              "in a mutable source file (default: exit 1)") { options[:allow_empty] = true }

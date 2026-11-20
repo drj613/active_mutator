@@ -2,7 +2,7 @@ require "spec_helper"
 require "tmpdir"
 
 RSpec.describe ActiveMutator::Reporter::StrykerJson do
-  def build_result(status, file:, details: nil)
+  def build_result(status, file:, details: nil, killed_by: [])
     source = File.read(file)
     gt = source.byteindex(">")
     edit = ActiveMutator::Edit.new(range: gt...(gt + 1), replacement: ">=",
@@ -12,7 +12,7 @@ RSpec.describe ActiveMutator::Reporter::StrykerJson do
     mutation = ActiveMutator::Mutation.new(subject: subject, edit: edit, original_snippet: ">",
                                            line: 2, mutated_file_source: "", mutated_def_source: "",
                                            mutated_def_line: 1)
-    ActiveMutator::Result.new(mutation: mutation, status: status, details: details)
+    ActiveMutator::Result.new(mutation: mutation, status: status, details: details, killed_by: killed_by)
   end
 
   around do |ex|
@@ -126,6 +126,41 @@ RSpec.describe ActiveMutator::Reporter::StrykerJson do
     expect(tests).to eq([{ "id" => "./spec/calc_spec.rb[1:1]", "name" => "./spec/calc_spec.rb[1:1]" }])
   end
 
+  describe "killedBy" do
+    let(:a1) { "./spec/calc_spec.rb[1:1]" }
+    let(:a2) { "./spec/calc_spec.rb[1:2]" }
+
+    def mutant_after(result)
+      report = report_after([result])
+      [report.dig("files", "lib/calc.rb", "mutants").first, report]
+    end
+
+    it "lists the examples that killed the mutant, spelled as in coveredBy" do
+      reporter.coverage_map = instance_double(ActiveMutator::CoverageMap, examples_for: [a1, a2])
+      absolute = a2.sub("./", "#{Dir.pwd}/")
+      mutant, = mutant_after(build_result(:killed, file: @file, killed_by: [absolute, a2]))
+      expect(mutant["killedBy"]).to eq([a2])
+    end
+
+    it "adds a killer outside coveredBy to testFiles" do
+      reporter.coverage_map = instance_double(ActiveMutator::CoverageMap, examples_for: [a1])
+      other = "./spec/other_spec.rb[1:1]"
+      mutant, report = mutant_after(build_result(:killed, file: @file, killed_by: [other]))
+      expect(mutant["killedBy"]).to eq([other])
+      expect(report.dig("testFiles", "spec/other_spec.rb", "tests")).to eq([{ "id" => other, "name" => other }])
+    end
+
+    it "keeps the killer as reported without a coverage map" do
+      mutant, = mutant_after(build_result(:killed, file: @file, killed_by: [a1]))
+      expect(mutant["killedBy"]).to eq([a1])
+    end
+
+    it "is left out when no killer is known" do
+      mutant, = mutant_after(build_result(:killed, file: @file))
+      expect(mutant).not_to have_key("killedBy")
+    end
+  end
+
   it "fills class-body coveredBy from examples_covering_file, not per-line coverage" do
     source = File.read(@file)
     subject = ActiveMutator::Subject.new(name: "Calc (class body)", file: @file,
@@ -206,5 +241,11 @@ RSpec.describe ActiveMutator::Reporter::StrykerJson do
     reporter.on_result(build_result(:killed, file: @file))
     reporter.summary([build_result(:killed, file: @file)], invalid_count: 0)
     expect(out.string).to eq(".\n\nStryker report written to .active_mutator/mutation-report.json\n")
+  end
+
+  it "accepts a test audit and leaves it out of the report" do
+    report = ActiveMutator::TestAudit::Report.new(flagged: [], cleared: 0, not_judged: [], kills: {}, mutants_run: 0)
+    reporter.summary([build_result(:killed, file: @file)], invalid_count: 0, test_audit: report)
+    expect(JSON.parse(File.read(report_path))).not_to have_key("test_audit")
   end
 end

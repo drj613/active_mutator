@@ -178,4 +178,43 @@ RSpec.describe ActiveMutator::Reporter::Terminal do
     reporter.summary([survivor], invalid_count: 0)
     expect(out.string).to include("escalated (+3 spec files)")
   end
+
+  describe "the test audit" do
+    let(:report) do
+      ActiveMutator::TestAudit::Report.new(
+        flagged: [ActiveMutator::TestAudit::Flag.new(id: "./spec/a_spec.rb[1:2]", location: "./spec/a_spec.rb:7",
+                                                     killable: 3)],
+        cleared: 12, ignored: %w[./spec/c_spec.rb[1:1] ./spec/c_spec.rb[1:2]],
+        not_judged: ["./spec/b_spec.rb[1:1]"], kills: {}, mutants_run: 9
+      )
+    end
+
+    it "lists each test with no kills observed, then a count line" do
+      reporter.summary([result(:killed)], invalid_count: 0, test_audit: report)
+      expect(out.string).to end_with(<<~TEXT.prepend("\n"))
+
+        Tests with no kills observed (they pass against mutants other tests kill):
+          ./spec/a_spec.rb:7 (./spec/a_spec.rb[1:2])
+            killable mutants covered: 3, kills: 0
+
+        Test audit: 1 with no kills observed, 12 killed a mutant, 2 ignored, 1 not judged (9 audit runs)
+      TEXT
+    end
+
+    it "says when the flags fail the run" do
+      reporter.summary([result(:killed)], invalid_count: 0, test_audit: report.with(fail_on_flags: true))
+      expect(out.string).to end_with("(9 audit runs)\n--fail-on-no-kills: failing the run\n")
+    end
+
+    it "prints only the count line when nothing was flagged" do
+      reporter.summary([result(:killed)], invalid_count: 0, test_audit: report.with(flagged: []))
+      expect(out.string).not_to include("Tests with no kills observed")
+      expect(out.string).to end_with("\n\nTest audit: 0 with no kills observed, 12 killed a mutant, 2 ignored, 1 not judged (9 audit runs)\n")
+    end
+
+    it "prints nothing about an audit that did not run" do
+      reporter.summary([result(:killed)], invalid_count: 0)
+      expect(out.string).not_to include("audit")
+    end
+  end
 end

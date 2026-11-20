@@ -403,6 +403,36 @@ class-body subjects:
   shot. If escalation kills it, the kill wins; if it still survives, the
   result is annotated `escalated (+N spec files)`.
 
+### The test audit (`--audit-tests`)
+
+A worker stops at the first failing example, so a test never named as a
+killer may just never have run first. The audit (`TestAudit`) runs after
+phase 2 on a full run. Its suspects are the examples that covered a killed
+method-level mutant and were never named as a killer. Each killed mutant
+with suspects left runs once more, against those suspects only, on a
+worker with fail-fast off that reports every failing example and every
+passing one. A suspect is cleared the first time it kills anything.
+Mutants go in rounds as wide as `--jobs`, the ones with the most suspects
+first, so each round can clear suspects before the next is built. Each
+mutant runs at most once. A suspect still standing that passed against
+every killed mutant it covers is listed as having no kills observed. One
+with any gap (it was pending or skipped in a fork, or a fork it ran in
+timed out or errored) is not judged.
+
+A passing example tagged `active_mutator: :no_kill_ok` goes in the worker's
+`ignored` list instead of `passed`. The audit then drops it from later
+forks and lists it as ignored. A tagged example that fails still counts as
+a killer, so one that kills in a fork it ran in (its first, or another in
+the same round) is cleared like any other.
+
+`--fail-on-no-kills` sets `fail_on_flags` on the report, and the runner
+exits `1` when that's set and anything is flagged. Survivors and worker
+errors still come first in the JSON `exit_reason`.
+
+Class-body mutants are left out: they run against every spec that loads
+their file, so passing one says nothing about a test. A kill of one still
+clears its killer.
+
 ## 5. Serial lane for browser-covered mutants
 
 System and feature specs boot a browser and an app server per fork. That
@@ -434,12 +464,16 @@ absorbs the fork's own boot cost (spec-file loading plus suite hooks; the
 helper itself is already preloaded).
 
 The **parent**, not the worker, enforces the deadline
-(`Scheduler#reap`), using `Process.kill("KILL", -pid)` against the whole
-process group. Each fork calls `Process.setpgid(0, 0)`, so a kill also
-reaps anything it spawned, such as a browser. This matters for
-correctness, not just cleanliness: a worker-side timeout cannot interrupt
-every possible infinite loop, since the mutated code itself might be the
-thing spinning, with no chance to check a deadline.
+(`Scheduler#reap`). At the deadline it sends SIGTERM to the whole process
+group, so the worker's own `at_exit` hooks run (a test server that stops
+itself there gets to stop). If anything in the group is still there 3
+seconds later, it sends SIGKILL. Each fork calls `Process.setpgid(0, 0)`,
+so the signals also reach anything it spawned, such as a browser. The
+mutant is a `timeout` from the deadline on, and its time is the time at
+the deadline. Enforcing it from the parent matters for correctness, not
+just cleanliness: a worker-side timeout cannot interrupt every possible
+infinite loop, since the mutated code itself might be the thing spinning,
+with no chance to check a deadline.
 
 With `--adaptive-timeout` (the default), a per-lane `TimeoutCalibrator`
 scales the *variable* part of each remaining budget from what workers
