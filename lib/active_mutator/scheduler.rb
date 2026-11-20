@@ -119,7 +119,15 @@ module ActiveMutator
         # shutdown) run, then this one stops before the parent's inherited
         # ones. It exits 0 for the block's normal exit below.
         at_exit { Process.exit!(0) }
-        @worker.call(item.mutation, item.example_ids, writer)
+        begin
+          @worker.call(item.mutation, item.example_ids, writer)
+        rescue Exception => e # rubocop:disable Lint/RescueException
+          # The hook above exits before Ruby prints an uncaught error, so
+          # print it here, message last, where the stderr tail keeps it.
+          $stderr.puts(e.full_message(highlight: false, order: :bottom)) unless e.is_a?(SystemExit)
+          $stderr.flush
+          raise
+        end
         # A second line, after the worker's own report: the worker can exit
         # between two memory samples, so it reports its peak itself.
         writer.puts("", JSON.generate("peak_rss_kb" => MemoryProbe.peak_rss_kb))

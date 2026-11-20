@@ -246,6 +246,13 @@ RSpec.describe ActiveMutator::Scheduler do
     end
   end
 
+  it "keeps the error of a worker that raises in the stderr tail" do
+    worker = ->(_m, _e, _writer) { raise "boom from the worker" }
+    result = scheduler(worker: worker).run([item]).first
+    expect(result.status).to eq(:error)
+    expect(result.details).to include("worker exited without reporting", "boom from the worker (RuntimeError)")
+  end
+
   it "skips at_exit hooks inherited from the parent" do
     Dir.mktmpdir do |dir|
       flag = File.join(dir, "flag")
