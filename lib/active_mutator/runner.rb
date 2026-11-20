@@ -225,6 +225,9 @@ module ActiveMutator
         end
         done
       end
+      # A trip after the report's own check, still inside the block, was
+      # only recorded. From here on a trip raises at once.
+      stop_if_tripped!(results)
       test_audit&.failing? ? 1 : exit_code(results)
     end
 

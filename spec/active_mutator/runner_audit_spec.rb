@@ -170,6 +170,15 @@ RSpec.describe ActiveMutator::Runner do
       expect(summaries.last).to include(:aborted, results: finished)
     end
 
+    it "exits as stopped, with one summary, on a stop after the report but before the run returns" do
+      code = run_with(config.with(fail_on_no_kills: true)) do |runner|
+        allow(runner).to receive(:audit_tests) { |done, *| [done, flagged_report] }
+        allow(runner).to receive(:reporting).and_wrap_original { |original, *args, &block| trip(runner, original.call(*args, &block)) }
+      end
+      expect(code).to eq(143)
+      expect(summaries.size).to eq(1)
+    end
+
     it "hands the audit report to the reporter" do
       run_with(config)
       expect(summaries.last[:test_audit]).to be_a(ActiveMutator::TestAudit::Report)
