@@ -70,7 +70,7 @@ RSpec.describe ActiveMutator::Runner do
 
       expect(ActiveMutator::Scheduler).to have_received(:new)
         .with(jobs: 3, worker: described_class::AUDIT_WORKER, events: bus, first_seq: 3,
-              abort: runner.instance_variable_get(:@abort))
+              abort: runner.instance_variable_get(:@abort), orphaned: runner.instance_variable_get(:@orphaned))
       expect(seen).to eq([[:phase_start, { phase: :auditing }], [:phase_end, { phase: :auditing }]])
     end
 

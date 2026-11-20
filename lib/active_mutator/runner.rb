@@ -28,6 +28,10 @@ module ActiveMutator
     # The traps go in first so boot, planning, and the baseline are covered
     # too, and come out last so the host gets its own handlers back.
     def call
+      # One orphan check for every phase's scheduler, against the parent
+      # seen as the run starts: a scheduler built later would take an
+      # orphaned run's new parent as its baseline and never notice.
+      @orphaned = Scheduler.parent_changed
       previous_traps = trap_signals
       events_file = open_events_file
       sampler = start_sampler
@@ -100,7 +104,8 @@ module ActiveMutator
 
       @escalated = items.size
       # Numbered after phase 1's mutants, so seq stays unique across the run.
-      scheduler ||= Scheduler.new(jobs: @config.jobs, events: @events, first_seq: phase1_ids.size + 1, abort: @abort)
+      scheduler ||= Scheduler.new(jobs: @config.jobs, events: @events, first_seq: phase1_ids.size + 1, abort: @abort,
+                                  orphaned: orphaned)
       escalated = begin
         @events.phase(:escalating, mutants: items.size) do
           scheduler.run(items.values).to_h { |res| [res.mutation, res] }
@@ -137,7 +142,7 @@ module ActiveMutator
     # audit workers, with no on_result: no mutant gets a second status char.
     def audit_tests(results, scheduler, map, phase1_ids:)
       scheduler ||= Scheduler.new(jobs: @config.jobs, worker: AUDIT_WORKER, events: @events,
-                                  first_seq: phase1_ids.size + @escalated + 1, abort: @abort)
+                                  first_seq: phase1_ids.size + @escalated + 1, abort: @abort, orphaned: orphaned)
       audit = TestAudit.new(results: results, example_ids: phase1_ids, width: @config.jobs,
                             build: ->(mutation, ids) { build_work_item(mutation, ids, map) },
                             run: scheduler.method(:run))
@@ -237,7 +242,7 @@ module ActiveMutator
                       { parallel: TimeoutCalibrator.new, serial: TimeoutCalibrator.new }
                     end
       scheduler = Scheduler.new(jobs: @config.jobs, on_result: @reporter.method(:on_result),
-                                calibrators: calibrators, events: @events, abort: @abort)
+                                calibrators: calibrators, events: @events, abort: @abort, orphaned: orphaned)
       scheduler.run(items) + pre_results
     rescue Aborted => e
       raise e.with_results(e.results + pre_results)
@@ -616,6 +621,9 @@ module ActiveMutator
 
       subjects.map { |s| s.file.delete_prefix("#{@config.root}/") }.uniq
     end
+
+    # Set by #call; the phases can also run on their own (specs).
+    def orphaned = @orphaned ||= Scheduler.parent_changed
 
     def narrowing_flags
       flags = []

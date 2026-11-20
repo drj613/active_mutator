@@ -99,7 +99,8 @@ RSpec.describe ActiveMutator::Runner do
     )
 
     expect(ActiveMutator::Scheduler).to have_received(:new)
-      .with(jobs: config.jobs, events: bus, first_seq: 3, abort: runner.instance_variable_get(:@abort))
+      .with(jobs: config.jobs, events: bus, first_seq: 3, abort: runner.instance_variable_get(:@abort),
+            orphaned: runner.instance_variable_get(:@orphaned))
     expect(seen).to eq([[:phase_start, { phase: :escalating, mutants: 1 }], [:phase_end, { phase: :escalating }]])
   end
 
