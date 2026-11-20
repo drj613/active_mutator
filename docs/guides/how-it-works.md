@@ -470,7 +470,14 @@ itself there gets to stop). If anything in the group is still there 3
 seconds later, it sends SIGKILL. Each fork calls `Process.setpgid(0, 0)`,
 so the signals also reach anything it spawned, such as a browser. The
 mutant is a `timeout` from the deadline on, and its time is the time at
-the deadline. Enforcing it from the parent matters for correctness, not
+the deadline.
+
+A worker that has sent its full report is done, whatever is left: its
+`at_exit` hooks, or a process it spawned that still holds the pipe. The
+deadline stops applying. The worker gets 3 seconds to exit, then the
+same SIGTERM and SIGKILL, and the mutant keeps the verdict it reported,
+timed to the report. So a slow hook can cost a few seconds per fork, but
+it can't turn a survivor into a timeout. Enforcing it from the parent matters for correctness, not
 just cleanliness: a worker-side timeout cannot interrupt every possible
 infinite loop, since the mutated code itself might be the thing spinning,
 with no chance to check a deadline.

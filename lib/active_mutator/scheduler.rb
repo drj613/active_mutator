@@ -10,7 +10,8 @@ module ActiveMutator
     OrphanedError = Class.new(Error)
 
     # Long enough for a test server's at_exit shutdown, short enough that a
-    # stuck worker doesn't hold its slot for long.
+    # stuck worker doesn't hold its slot for long. A worker that has
+    # reported gets this long to exit, then the same again after TERM.
     TERM_GRACE = 3.0
 
     # A detached run can start with pid 1 as its parent, so compare against
@@ -72,9 +73,10 @@ module ActiveMutator
     # CI allows only seconds between SIGTERM and SIGKILL, so kill every
     # worker group and move on without waiting for any of them.
     def abort!(running, results)
-      # A worker past its deadline already has its verdict; it isn't in flight.
-      stopping, live = running.partition { |_, entry| entry[:stopping] }
-      stopping.each { |pid, entry| results << complete(pid, entry, timeout_result(entry)) }
+      # A worker that reported, or ran past its deadline, already has its
+      # verdict; it isn't in flight.
+      settled, live = running.partition { |_, entry| entry[:reported_at] || entry[:stopping] }
+      settled.each { |pid, entry| results << complete(pid, entry, settled_result(entry)) }
       in_flight = live.map do |pid, entry|
         m = entry[:item].mutation
         { seq: entry[:seq], pid: pid, subject: m.subject.name, file: m.subject.file, line: m.line,
@@ -173,29 +175,48 @@ module ActiveMutator
         # A descendant may retain the writer after that exit; keep the group
         # tracked until EOF so aborts and the deadline still apply to it.
         chunk = entry[:reader].read_nonblock(65_536, exception: false)
-        entry[:payload] << chunk if chunk.is_a?(String)
+        if chunk.is_a?(String)
+          entry[:payload] << chunk
+          # The report is one line of JSON, and the worker's last word on
+          # the verdict: once its newline is in, the verdict is final.
+          entry[:reported_at] ||= now if chunk.include?("\n")
+        end
         entry[:eof] = true if chunk.nil?
         entry[:exited] ||= Process.waitpid(pid, Process::WNOHANG)
         if entry[:stopping]
           next unless entry[:exited] || now > entry[:stopping][:kill_at]
 
           kill(pid) # whatever is left of the group, a descendant holding the pipe included
-          entry[:reader].close
-          entry[:stderr_file].close!
-          results << complete(pid, entry, timeout_result(entry))
+          results << complete(pid, entry, settled_result(entry))
           running.delete(pid)
         elsif entry[:exited] && entry[:eof]
-          result = finish(entry)
-          calibrator_for(entry[:item])&.record(result.seconds, entry[:budget]) if result.status == :killed
-          results << complete(pid, entry, result)
+          results << complete(pid, entry, reported_result(entry, now - entry[:started]))
           running.delete(pid)
-        elsif now > entry[:deadline]
+        elsif entry[:reported_at] ? now > entry[:reported_at] + @term_grace : now > entry[:deadline]
           # TERM first, so the worker's own cleanup (a test server's
-          # shutdown) runs; the verdict is already a timeout either way.
+          # shutdown) runs. The verdict is already set: the report, or a
+          # timeout if none came. Its at_exit hooks (a coverage report, say)
+          # or a descendant holding the pipe can't change it.
           signal_group(pid, "TERM")
           entry[:stopping] = { seconds: now - entry[:started], kill_at: now + @term_grace }
         end
       end
+    end
+
+    # A stopped worker's verdict: its report, timed to when it came, or a
+    # timeout.
+    def settled_result(entry)
+      return reported_result(entry, entry[:reported_at] - entry[:started]) if entry[:reported_at]
+
+      entry[:reader].close
+      entry[:stderr_file].close!
+      timeout_result(entry)
+    end
+
+    def reported_result(entry, seconds)
+      result = finish(entry, seconds)
+      calibrator_for(entry[:item])&.record(result.seconds, entry[:budget]) if result.status == :killed
+      result
     end
 
     def timeout_result(entry)
@@ -249,8 +270,7 @@ module ActiveMutator
       @killers[item.mutation.subject] = ExampleId.group_key(killer) if killer
     end
 
-    def finish(entry)
-      seconds = now - entry[:started]
+    def finish(entry, seconds)
       report_line, stats_line = entry[:payload].lines.map(&:strip).reject(&:empty?)
       entry[:reader].close
       stderr_tail = stderr_tail(entry[:stderr_file])

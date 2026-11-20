@@ -194,7 +194,7 @@ RSpec.describe ActiveMutator::Scheduler do
     expect(results.first.details).to eq(details)
   end
 
-  it "enforces the deadline after a worker exits with a descendant holding its writer open" do
+  it "keeps the verdict of a worker that exits with a descendant holding its writer open, and stops the descendant" do
     Dir.mktmpdir do |dir|
       pids_path = File.join(dir, "pids")
       worker = lambda do |_m, _e, writer|
@@ -204,17 +204,18 @@ RSpec.describe ActiveMutator::Scheduler do
           sleep 30
           Process.exit!(0)
         end
-        writer.puts(JSON.generate("status" => "killed", "details" => nil))
+        writer.puts(JSON.generate("status" => "survived", "details" => nil))
       end
-      results = run_bounded(scheduler(worker: worker), [item(timeout: 0.3)])
-      expect(results.map(&:status)).to eq([:timeout])
+      sched = described_class.new(jobs: 2, worker: worker, term_grace: 0.3)
+      results = run_bounded(sched, [item(timeout: 30)])
+      expect(results.map(&:status)).to eq([:survived])
       expect_descendant_stopped(File.read(pids_path).split.last.to_i)
     ensure
       kill_test_group(File.read(pids_path).split.first.to_i) if File.exist?(pids_path)
     end
   end
 
-  it "enforces the deadline after a worker reports and closes its writer without exiting" do
+  it "keeps the verdict of a worker that reports and closes its writer without exiting, and stops it" do
     Dir.mktmpdir do |dir|
       pid_path = File.join(dir, "pid")
       worker = lambda do |_m, _e, writer|
@@ -223,8 +224,8 @@ RSpec.describe ActiveMutator::Scheduler do
         writer.close
         sleep 30
       end
-      results = run_bounded(scheduler(worker: worker), [item(timeout: 0.2)])
-      expect(results.map(&:status)).to eq([:timeout])
+      results = run_bounded(described_class.new(jobs: 2, worker: worker, term_grace: 0.3), [item(timeout: 30)])
+      expect(results.map(&:status)).to eq([:killed])
       pid = File.read(pid_path).to_i
       expect_process_gone(pid)
       expect { Process.waitpid(pid, Process::WNOHANG) }.to raise_error(Errno::ECHILD)
@@ -400,10 +401,11 @@ RSpec.describe ActiveMutator::Scheduler do
             run_bounded(described_class.new(jobs: 1, worker: worker, abort: flag), [work])
           end.to raise_error(ActiveMutator::Aborted) { |e| error = e }
           tripper.join
-          worker_pid, descendant = File.read(pids_path).split.map(&:to_i)
+          descendant = File.read(pids_path).split.last.to_i
           expect(error.reason).to eq(reason)
-          expect(error.results).to be_empty
-          expect(error.in_flight).to include(hash_including(pid: worker_pid, seq: 1))
+          # It reported before it exited, so its verdict is final.
+          expect(error.results.map(&:status)).to eq([:killed])
+          expect(error.in_flight).to be_empty
           expect_descendant_stopped(descendant)
         ensure
           tripper&.kill&.join
@@ -570,6 +572,83 @@ RSpec.describe ActiveMutator::Scheduler do
         expect(results.map(&:status)).to eq([:timeout])
         expect(results.first.details).to match(/\Atimed out after 0\.[2-4]s \(budget 0\.2s\)\z/)
         expect_process_gone(File.read(file.path).to_i)
+      end
+    end
+
+    # Once the report line is in, the verdict is final; only at_exit hooks
+    # (a coverage report, a server shutdown) or descendants are left, and
+    # they get the grace, not the rest of the budget.
+    describe "after the worker has reported" do
+      def lingering(status)
+        lambda do |_m, _e, writer|
+          at_exit { sleep 30 }
+          writer.puts(JSON.generate("status" => status, "details" => nil))
+        end
+      end
+
+      it "keeps the reported verdict when the hooks run past the deadline" do
+        sched = described_class.new(jobs: 1, worker: lingering("survived"), term_grace: 0.3)
+        results = run_bounded(sched, [item(timeout: 0.2)])
+        expect(results.map { |r| [r.status, r.details] }).to eq([[:survived, nil]])
+      end
+
+      it "stops the hooks once the grace runs out, whatever budget is left, timing the mutant to its report" do
+        sched = described_class.new(jobs: 1, worker: lingering("killed"), term_grace: 0.5)
+        started = now
+        results = run_bounded(sched, [item(timeout: 30)])
+        expect(now - started).to be_between(0.5, 2.5)
+        expect(results.map(&:status)).to eq([:killed])
+        expect(results.first.seconds).to be < 0.5
+      end
+
+      it "stops a worker that ignores TERM in its hooks, still with its verdict" do
+        worker = lambda do |_m, _e, writer|
+          at_exit do
+            trap("TERM") {}
+            sleep 30
+          end
+          writer.puts(JSON.generate("status" => "survived", "details" => nil))
+        end
+        sched = described_class.new(jobs: 1, worker: worker, term_grace: 0.3)
+        expect(run_bounded(sched, [item(timeout: 30)]).map(&:status)).to eq([:survived])
+      end
+
+      it "does not take a half-written report for a verdict" do
+        worker = lambda do |_m, _e, writer|
+          writer.write('{"status":"survived"')
+          writer.flush
+          sleep 30
+        end
+        sched = described_class.new(jobs: 1, worker: worker, term_grace: 0.3)
+        expect(run_bounded(sched, [item(timeout: 0.6)]).map(&:status)).to eq([:timeout])
+      end
+
+      it "records a reported kill with the calibrator" do
+        calibrator = instance_double(ActiveMutator::TimeoutCalibrator, budget_for: 30.0, scale: 1.0, warmed?: false)
+        allow(calibrator).to receive(:record)
+        sched = described_class.new(jobs: 1, worker: lingering("killed"), term_grace: 0.3,
+                                    calibrators: { parallel: calibrator })
+        run_bounded(sched, [item(timeout: 30)])
+        expect(calibrator).to have_received(:record).with(be < 0.3, 30.0)
+      end
+
+      it "keeps the reported verdict when an abort lands during the grace" do
+        flag = ActiveMutator::AbortFlag.new
+        sched = described_class.new(jobs: 1, worker: lingering("survived"), term_grace: 30, abort: flag)
+        pid = nil
+        allow(sched).to receive(:reap).and_wrap_original do |orig, running, results|
+          pid ||= running.keys.first
+          orig.call(running, results).tap do
+            flag.trip!(:sigterm) if running.values.any? { |entry| entry[:reported_at] }
+          end
+        end
+        error = nil
+        expect { run_bounded(sched, [item(timeout: 30)]) }.to raise_error(ActiveMutator::Aborted) { |e| error = e }
+        expect(error.results.map(&:status)).to eq([:survived])
+        expect(error.in_flight).to eq([])
+      ensure
+        # The abort path killed it without waiting; reap it here.
+        Timeout.timeout(2) { Process.waitpid(pid) } if pid
       end
     end
 

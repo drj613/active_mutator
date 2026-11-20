@@ -32,6 +32,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - A worker that runs past its timeout now gets SIGTERM first, so its
   `at_exit` hooks run, and SIGKILL only if it is still there 3 seconds
   later. It still counts as a timeout, timed at the deadline.
+- A worker that has sent its report keeps that verdict even if its
+  `at_exit` hooks, or a process it spawned, keep it alive. It gets 3
+  seconds to exit, then SIGTERM and SIGKILL, instead of the rest of its
+  timeout. Before, a slow hook could run it past its deadline and turn a
+  survivor into a timeout.
 - A run whose parent is already pid 1 when it starts, such as one started
   detached or under a container's init, no longer aborts at once with
   "parent process died". The run now aborts when its parent changes.
