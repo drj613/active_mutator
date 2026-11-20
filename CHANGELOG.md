@@ -28,7 +28,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   example failing.
 - Workers now run the `at_exit` hooks the tests register, so a test that
   starts a server and stops it in `at_exit` no longer leaves one running per
-  mutant. Hooks inherited from the parent process still never run.
+  mutant. Hooks inherited from the parent process still never run. RSpec's
+  autorun stays off in workers, and a SimpleCov that the spec files start
+  (under `--no-preload-helper`) is disarmed there as it is in the parent.
 - A worker that runs past its timeout now gets SIGTERM first, so its
   `at_exit` hooks run, and SIGKILL only if it is still there 3 seconds
   later. It still counts as a timeout, timed at the deadline.

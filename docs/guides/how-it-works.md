@@ -243,7 +243,10 @@ on a Rails app (not just a gem) is most of the design.
    coverage data with noise, and a `minimum_coverage` setting would
    `exit 1` for a reason that has nothing to do with mutation results.
    After preload, if `defined?(SimpleCov)`, the Runner neutralizes it with
-   `SimpleCov.at_exit {}`. Every active_mutator process (the parent, the
+   `SimpleCov.at_exit {}`. Under `--no-preload-helper` the helper loads in
+   each fork instead, so each worker does the same once its spec files
+   have loaded; otherwise every fork's hook would write its own coverage
+   over the project's. Every active_mutator process (the parent, the
    baseline subprocess, and every fork) also sets
    `ENV["ACTIVE_MUTATOR"] = "1"`. This lets a project's own spec helper
    guard its coverage or profiling setup the same way:

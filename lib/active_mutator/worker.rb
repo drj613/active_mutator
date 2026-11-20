@@ -79,6 +79,10 @@ module ActiveMutator
         require @mutation.subject.file # no-op if already loaded; guarantees the constant exists
         insert_mutation                # AFTER load: nothing left can redefine the method back
       end
+      # Under --no-preload-helper the spec files just started SimpleCov in
+      # this fork, and its at_exit would write this fork's coverage over the
+      # project's. Disarm it as the parent does a preloaded one.
+      SimpleCov.at_exit {} if defined?(SimpleCov)
       # One failure kills the mutant; running the rest of the covering set
       # is pure waste inside the fork. The audit needs every verdict instead.
       RSpec.configuration.fail_fast = @audit ? false : 1

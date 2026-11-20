@@ -84,6 +84,20 @@ RSpec.describe ActiveMutator::Worker do
     expect(calls).to eq(%i[disable_autorun setup])
   end
 
+  # Under --no-preload-helper the helper, and SimpleCov.start with it, loads
+  # in the fork. Its at_exit would write this fork's coverage over the
+  # project's, so it gets the parent's disarm (Runner#disarm_simplecov).
+  it "disarms a SimpleCov that the spec files load" do
+    fake = Class.new do
+      def self.at_exit_calls = @at_exit_calls ||= []
+      def self.at_exit(&blk) = at_exit_calls << blk
+    end
+    allow(rspec_runner).to receive(:setup) { stub_const("SimpleCov", fake) }
+    allow(rspec_runner).to receive(:run_specs).and_return(0)
+    run_worker
+    expect(fake.at_exit_calls.size).to eq(1)
+  end
+
   it "emits error when insertion raises" do
     allow(rspec_runner).to receive(:run_specs).and_return(0)
     allow_any_instance_of(ActiveMutator::Inserter)
