@@ -253,6 +253,11 @@ RSpec.describe ActiveMutator::Scheduler do
     expect(result.details).to include("worker exited without reporting", "boom from the worker (RuntimeError)")
   end
 
+  it "prints nothing for a worker that calls exit" do
+    worker = ->(_m, _e, _writer) { exit(3) }
+    expect(scheduler(worker: worker).run([item]).first.details).to eq("worker exited without reporting")
+  end
+
   it "skips at_exit hooks inherited from the parent" do
     Dir.mktmpdir do |dir|
       flag = File.join(dir, "flag")
