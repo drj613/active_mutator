@@ -73,6 +73,17 @@ RSpec.describe ActiveMutator::Worker do
     expect(calls).to eq(%i[setup require_subject insert run_specs])
   end
 
+  it "turns RSpec's autorun off before loading the spec files" do
+    # A spec file that requires rspec/autorun would otherwise add an at_exit
+    # hook that runs the loaded examples again after the report, mutant in.
+    calls = []
+    allow(RSpec::Core::Runner).to receive(:disable_autorun!) { calls << :disable_autorun }
+    allow(rspec_runner).to receive(:setup) { calls << :setup }
+    allow(rspec_runner).to receive(:run_specs).and_return(0)
+    run_worker
+    expect(calls).to eq(%i[disable_autorun setup])
+  end
+
   it "emits error when insertion raises" do
     allow(rspec_runner).to receive(:run_specs).and_return(0)
     allow_any_instance_of(ActiveMutator::Inserter)

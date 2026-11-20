@@ -62,6 +62,10 @@ module ActiveMutator
       @normalize = ExampleId.method(:normalize)
       @group_keys = @example_ids.filter_map { |id| ExampleId.group_key(id) }
       require "rspec/core"
+      # Workers run the at_exit hooks tests register. A spec file that
+      # requires rspec/autorun registers one that would run the loaded
+      # examples again after the report; the rspec command turns it off too.
+      RSpec::Core::Runner.disable_autorun!
       devnull = File.open(File::NULL, "w")
       # Sorted so spec files load in the same order whatever the run priority:
       # load order decides constant definitions and shared setup.
