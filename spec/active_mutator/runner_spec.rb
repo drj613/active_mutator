@@ -181,6 +181,22 @@ RSpec.describe ActiveMutator::Runner do
       expect(captured[:parallel]).not_to be(captured[:serial])
     end
 
+    # The parent is the one seen when the run starts, not when a later
+    # phase built its scheduler: a parent that dies between phases still
+    # stops the run.
+    it "gives the scheduler an orphan check that compares against the parent seen at start" do
+      runner = stub_runner(config)
+      allow(Process).to receive(:ppid).and_return(4242)
+      # The parent dies during boot, before any scheduler exists.
+      allow(runner).to receive(:preload!) { allow(Process).to receive(:ppid).and_return(1) }
+      expect(ActiveMutator::Scheduler).to receive(:new) do |**kwargs|
+        expect(kwargs[:orphaned]).to be(runner.instance_variable_get(:@orphaned))
+        expect(kwargs[:orphaned].call).to be(true)
+        instance_double(ActiveMutator::Scheduler, run: [])
+      end
+      runner.call
+    end
+
     it "passes no calibrators when adaptive_timeout is off" do
       runner = stub_runner(config.with(adaptive_timeout: false))
       expect(ActiveMutator::Scheduler).to receive(:new)

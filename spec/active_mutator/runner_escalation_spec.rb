@@ -63,6 +63,24 @@ RSpec.describe ActiveMutator::Runner do
     expect(results.first.details).to be_nil
   end
 
+  it "numbers audit mutants after phase 2's" do
+    mutation = mutation_for(user_file)
+    map = instance_double(ActiveMutator::CoverageMap)
+    allow(map).to receive(:examples_for_spec_file).and_return(["./spec/requests/signup_spec.rb[1:1]"])
+    allow(map).to receive(:time_for).and_return(0.1)
+    other = mutation_for(user_file, name: "Other", kind: :instance)
+    phase1_ids = { mutation => ["./spec/models/user_spec.rb[1:1]"], other => [] }
+    runner.escalate_class_body_survivors([result(mutation, :survived)],
+                                         instance_double(ActiveMutator::Scheduler, run: [result(mutation, :killed)]),
+                                         map, phase1_ids: phase1_ids)
+    allow(ActiveMutator::Scheduler).to receive(:new).and_return(instance_double(ActiveMutator::Scheduler, run: []))
+
+    runner.audit_tests([], nil, map, phase1_ids: phase1_ids)
+
+    # Two phase-1 mutants, one escalated: the audit starts at 4.
+    expect(ActiveMutator::Scheduler).to have_received(:new).with(hash_including(first_seq: 4))
+  end
+
   it "runs escalation in its own phase, numbering its mutants after phase 1's" do
     mutation = mutation_for(user_file)
     map = instance_double(ActiveMutator::CoverageMap)
@@ -81,7 +99,8 @@ RSpec.describe ActiveMutator::Runner do
     )
 
     expect(ActiveMutator::Scheduler).to have_received(:new)
-      .with(jobs: config.jobs, events: bus, first_seq: 3, abort: runner.instance_variable_get(:@abort))
+      .with(jobs: config.jobs, events: bus, first_seq: 3, abort: runner.instance_variable_get(:@abort),
+            orphaned: runner.instance_variable_get(:@orphaned))
     expect(seen).to eq([[:phase_start, { phase: :escalating, mutants: 1 }], [:phase_end, { phase: :escalating }]])
   end
 

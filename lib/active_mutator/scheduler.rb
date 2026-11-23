@@ -3,17 +3,31 @@ require "tempfile"
 
 module ActiveMutator
   # Fork pool: one fork per WorkItem, capped at `jobs` concurrent forks.
-  # Parent enforces per-item deadlines with SIGKILL (worker-side timeouts
-  # cannot interrupt all infinite loops).
+  # The parent enforces per-item deadlines (worker-side timeouts cannot
+  # interrupt all infinite loops): SIGTERM to the worker's process group,
+  # then SIGKILL if it is still there after a short grace.
   class Scheduler
     OrphanedError = Class.new(Error)
+
+    # Long enough for a test server's at_exit shutdown, short enough that a
+    # stuck worker doesn't hold its slot for long. A worker that has
+    # reported gets this long to exit, then the same again after TERM.
+    TERM_GRACE = 3.0
+
+    # A detached run can start with pid 1 as its parent, so compare against
+    # the parent seen at start rather than against 1.
+    def self.parent_changed
+      start = Process.ppid
+      -> { Process.ppid != start }
+    end
 
     # first_seq: phase-2 escalation runs on its own scheduler; starting its
     # sequence after phase 1's keeps mutant numbers unique across the run.
     def initialize(jobs:, worker: Worker.method(:run), on_result: nil,
-                   calibrators: nil, orphaned: -> { Process.ppid == 1 },
-                   events: Events.new, first_seq: 1, abort: AbortFlag.new)
+                   calibrators: nil, orphaned: Scheduler.parent_changed,
+                   events: Events.new, first_seq: 1, abort: AbortFlag.new, term_grace: TERM_GRACE)
       @abort = abort
+      @term_grace = term_grace
       @jobs = jobs
       @worker = worker
       @on_result = on_result
@@ -59,7 +73,11 @@ module ActiveMutator
     # CI allows only seconds between SIGTERM and SIGKILL, so kill every
     # worker group and move on without waiting for any of them.
     def abort!(running, results)
-      in_flight = running.map do |pid, entry|
+      # A worker that reported, or ran past its deadline, already has its
+      # verdict; it isn't in flight.
+      settled, live = running.partition { |_, entry| entry[:reported_at] || entry[:stopping] }
+      settled.each { |pid, entry| results << complete(pid, entry, settled_result(entry)) }
+      in_flight = live.map do |pid, entry|
         m = entry[:item].mutation
         { seq: entry[:seq], pid: pid, subject: m.subject.name, file: m.subject.file, line: m.line,
           description: m.description }
@@ -71,7 +89,7 @@ module ActiveMutator
     # SIGKILL on the parent (or a closed terminal, or CI teardown) cannot be
     # trapped, so a killed run would otherwise keep forking through the whole
     # queue with nobody supervising it. Orphaned processes get reparented to
-    # init/launchd (ppid 1); when that happens, stop everything and bail.
+    # init/launchd; when the parent changes, stop everything and bail.
     def abort_if_orphaned!(running)
       return unless @orphaned.call
 
@@ -102,18 +120,32 @@ module ActiveMutator
       pid = fork do
         reader.close
         Process.setpgid(0, 0)          # own process group: deadline kill reaps grandchildren too
+        # Forks inherit the Runner's TERM trap, which only trips the abort
+        # flag. Ruby's own handler raises, so the worker's at_exit hooks run.
+        trap("TERM", "DEFAULT")
         $stdout.reopen(File::NULL)     # app code that prints must not corrupt parent's report
         $stderr.reopen(stderr_file.path, "w") # kept for the crash report, never shown otherwise
         # After fork(), libpq's GSS encryption negotiation touches Apple
         # frameworks and segfaults the child on macOS; disabling it is
         # harmless everywhere else.
         ENV["PGGSSENCMODE"] ||= "disable"
-        @worker.call(item.mutation, item.example_ids, writer)
+        # at_exit hooks run newest first: the worker's own (a test server's
+        # shutdown) run, then this one stops before the parent's inherited
+        # ones. It exits 0 for the block's normal exit below.
+        at_exit { Process.exit!(0) }
+        begin
+          @worker.call(item.mutation, item.example_ids, writer)
+        rescue Exception => e # rubocop:disable Lint/RescueException
+          # The hook above exits before Ruby prints an uncaught error, so
+          # print it here, message last, where the stderr tail keeps it.
+          $stderr.puts(e.full_message(highlight: false, order: :bottom)) unless e.is_a?(SystemExit)
+          $stderr.flush
+          raise
+        end
         # A second line, after the worker's own report: the worker can exit
         # between two memory samples, so it reports its peak itself.
         writer.puts("", JSON.generate("peak_rss_kb" => MemoryProbe.peak_rss_kb))
         writer.close
-        Process.exit!(0)
       end
       writer.close
       started = now
@@ -143,25 +175,54 @@ module ActiveMutator
         # A descendant may retain the writer after that exit; keep the group
         # tracked until EOF so aborts and the deadline still apply to it.
         chunk = entry[:reader].read_nonblock(65_536, exception: false)
-        entry[:payload] << chunk if chunk.is_a?(String)
+        if chunk.is_a?(String)
+          entry[:payload] << chunk
+          # The report is one line of JSON, and the worker's last word on
+          # the verdict: once its newline is in, the verdict is final.
+          entry[:reported_at] ||= now if chunk.include?("\n")
+        end
         entry[:eof] = true if chunk.nil?
         entry[:exited] ||= Process.waitpid(pid, Process::WNOHANG)
-        if entry[:exited] && entry[:eof]
-          result = finish(entry)
-          calibrator_for(entry[:item])&.record(result.seconds, entry[:budget]) if result.status == :killed
-          results << complete(pid, entry, result)
+        if entry[:stopping]
+          next unless entry[:exited] || now > entry[:stopping][:kill_at]
+
+          kill(pid) # whatever is left of the group, a descendant holding the pipe included
+          results << complete(pid, entry, settled_result(entry))
           running.delete(pid)
-        elsif now > entry[:deadline]
-          kill(pid)
-          entry[:reader].close
-          entry[:stderr_file].close!
-          seconds = now - entry[:started]
-          details = format("timed out after %.1fs (budget %.1fs)", seconds, entry[:budget])
-          results << complete(pid, entry, Result.new(mutation: entry[:item].mutation, status: :timeout,
-                                                     details: details, seconds: seconds))
+        elsif entry[:exited] && entry[:eof]
+          results << complete(pid, entry, reported_result(entry, now - entry[:started]))
           running.delete(pid)
+        elsif entry[:reported_at] ? now > entry[:reported_at] + @term_grace : now > entry[:deadline]
+          # TERM first, so the worker's own cleanup (a test server's
+          # shutdown) runs. The verdict is already set: the report, or a
+          # timeout if none came. Its at_exit hooks (a coverage report, say)
+          # or a descendant holding the pipe can't change it.
+          signal_group(pid, "TERM")
+          entry[:stopping] = { seconds: now - entry[:started], kill_at: now + @term_grace }
         end
       end
+    end
+
+    # A stopped worker's verdict: its report, timed to when it came, or a
+    # timeout.
+    def settled_result(entry)
+      return reported_result(entry, entry[:reported_at] - entry[:started]) if entry[:reported_at]
+
+      entry[:reader].close
+      entry[:stderr_file].close!
+      timeout_result(entry)
+    end
+
+    def reported_result(entry, seconds)
+      result = finish(entry, seconds)
+      calibrator_for(entry[:item])&.record(result.seconds, entry[:budget]) if result.status == :killed
+      result
+    end
+
+    def timeout_result(entry)
+      seconds = entry[:stopping][:seconds]
+      details = format("timed out after %.1fs (budget %.1fs)", seconds, entry[:budget])
+      Result.new(mutation: entry[:item].mutation, status: :timeout, details: details, seconds: seconds)
     end
 
     # A sibling mutant of the same subject (the plan is built per mutant, so
@@ -176,19 +237,40 @@ module ActiveMutator
     end
 
     # Only a kill that names one of the examples it was given counts. Anything
-    # else (missing, malformed, foreign, or on another status) leaves the last
-    # killer alone.
-    def learn_killer(item, status, killer)
-      return unless status == :killed
+    # else (missing, malformed, foreign, or on another status) is dropped, and
+    # leaves the last killer alone. An audit worker names every killer.
+    def verified_killers(item, status, data)
+      return [] unless status == :killed
 
-      selected = item.example_ids.filter_map { |id| ExampleId.normalize(id) }
-      return unless selected.include?(ExampleId.normalize(killer))
-
-      @killers[item.mutation.subject] = ExampleId.group_key(killer)
+      selected = selected(item)
+      Array(data["killers"] || data["killer"]).select { |id| selected.include?(ExampleId.normalize(id)) }
     end
 
-    def finish(entry)
-      seconds = now - entry[:started]
+    # An audit worker's passes, held to the same rule: only selected examples.
+    def verified_passes(item, data)
+      passes = data["passed"]
+      return {} unless passes.is_a?(Hash)
+
+      selected = selected(item)
+      passes.select { |id, location| location.is_a?(String) && selected.include?(ExampleId.normalize(id)) }
+    end
+
+    # The tagged examples an audit worker ran, by the same rule.
+    def verified_ignored(item, data)
+      ignored = data["ignored"]
+      return [] unless ignored.is_a?(Array)
+
+      selected = selected(item)
+      ignored.select { |id| selected.include?(ExampleId.normalize(id)) } # normalize: nil for a non-String
+    end
+
+    def selected(item) = item.example_ids.filter_map { |id| ExampleId.normalize(id) }
+
+    def learn_killer(item, killer)
+      @killers[item.mutation.subject] = ExampleId.group_key(killer) if killer
+    end
+
+    def finish(entry, seconds)
       report_line, stats_line = entry[:payload].lines.map(&:strip).reject(&:empty?)
       entry[:reader].close
       stderr_tail = stderr_tail(entry[:stderr_file])
@@ -205,9 +287,12 @@ module ActiveMutator
                  details: "worker emitted unparseable payload", seconds: seconds)
     else
       # Learned only once the whole payload (report and stats) has parsed.
-      learn_killer(entry[:item], status, data["killer"]) if reported
+      killed_by = verified_killers(entry[:item], status, data) # [] unless reported as a kill
+      learn_killer(entry[:item], killed_by.first)
       Result.new(mutation: entry[:item].mutation, status: status, details: details,
-                 seconds: seconds, peak_rss_kb: peak)
+                 seconds: seconds, peak_rss_kb: peak, killed_by: killed_by,
+                 passed: reported ? verified_passes(entry[:item], data) : {},
+                 ignored: reported ? verified_ignored(entry[:item], data) : [])
     end
 
     def complete(pid, entry, result)
@@ -245,12 +330,12 @@ module ActiveMutator
       end
     end
 
-    def signal_group(pid)
-      Process.kill("KILL", -pid) # negative pid = whole process group
+    def signal_group(pid, signal = "KILL")
+      Process.kill(signal, -pid) # negative pid = whole process group
     rescue Errno::ESRCH, Errno::EPERM
       # Group not established yet (setpgid race) or already gone: direct kill.
       begin
-        Process.kill("KILL", pid)
+        Process.kill(signal, pid)
       rescue Errno::ESRCH
         nil
       end

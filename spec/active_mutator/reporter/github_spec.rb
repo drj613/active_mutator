@@ -99,4 +99,10 @@ RSpec.describe ActiveMutator::Reporter::Github do
     expect(out.string).to start_with(".")
     expect(out.string).to include("killed: 1")
   end
+
+  it "passes the test audit through to the terminal section" do
+    report = ActiveMutator::TestAudit::Report.new(flagged: [], cleared: 1, not_judged: [], kills: {}, mutants_run: 2)
+    reporter.summary([build_result(:killed)], invalid_count: 0, test_audit: report)
+    expect(out.string).to include("Test audit: 0 with no kills observed, 1 killed a mutant, 0 ignored, 0 not judged (2 audit runs)")
+  end
 end

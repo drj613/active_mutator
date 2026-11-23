@@ -24,7 +24,8 @@ module ActiveMutator
       # count block still prints, but there is no score to report (#45).
       # `aborted: {reason:, in_flight:, planned:}` means the run stopped early
       # and `results` holds only the mutants that finished.
-      def summary(results, invalid_count:, empty_plan: false, aborted: nil)
+      # `test_audit` is the --audit-tests TestAudit::Report, when one ran.
+      def summary(results, invalid_count:, empty_plan: false, aborted: nil, test_audit: nil)
         counts = self.class.counts(results)
         @out.puts "", ""
         counts.each { |status, count| @out.puts "#{status}: #{count}" }
@@ -42,6 +43,7 @@ module ActiveMutator
         stats = OperatorStats.call(results)
         noisy = stats.select { |_, s| s["survived"].positive? }
         print_operator_stats(noisy) unless noisy.empty?
+        print_test_audit(test_audit) if test_audit
       end
 
       # A timeout is a detection (the mutant changed behavior enough to hang,
@@ -101,6 +103,21 @@ module ActiveMutator
           @out.puts "    + #{m.edit.replacement}"
           @out.puts "    (#{result.details})" if result.details
         end
+      end
+
+      # "No kills observed", not "useless": the example may guard something
+      # no mutant reached, or kill only mutants the audit could not judge.
+      def print_test_audit(report)
+        unless report.flagged.empty?
+          @out.puts "", "Tests with no kills observed (they pass against mutants other tests kill):"
+          report.flagged.each do |flag|
+            @out.puts "  #{flag.location} (#{flag.id})"
+            @out.puts "    killable mutants covered: #{flag.killable}, kills: 0"
+          end
+        end
+        @out.puts "", "Test audit: #{report.flagged.size} with no kills observed, #{report.cleared} killed a mutant, " \
+                      "#{report.ignored.size} ignored, #{report.not_judged.size} not judged (#{report.mutants_run} audit runs)"
+        @out.puts "--fail-on-no-kills: failing the run" if report.failing?
       end
 
       def print_skipped(skipped)

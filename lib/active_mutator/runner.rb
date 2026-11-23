@@ -10,6 +10,9 @@ module ActiveMutator
     # without --since). The last three feed the --allow-empty verdict (#46).
     Discovery = Data.define(:subjects, :scanned_files, :since_candidates, :since_matched_all, :since_filter)
 
+    # --audit-tests runs each killed mutant again with fail-fast off (#54).
+    AUDIT_WORKER = ->(mutation, example_ids, writer) { Worker.run(mutation, example_ids, writer, audit: true) }
+
     SIGNALS = { "INT" => :sigint, "TERM" => :sigterm }.freeze
     # An aborted run never passes, whatever --fail-at says.
     EXIT_CODES = { sigint: 130, sigterm: 143, memory_ceiling: 3 }.freeze
@@ -19,11 +22,16 @@ module ActiveMutator
       @reporter = reporter || build_reporter
       @events = events || build_events
       @abort = AbortFlag.new
+      @escalated = 0 # phase-2 forks, so audit forks number after them
     end
 
     # The traps go in first so boot, planning, and the baseline are covered
     # too, and come out last so the host gets its own handlers back.
     def call
+      # One orphan check for every phase's scheduler, against the parent
+      # seen as the run starts: a scheduler built later would take an
+      # orphaned run's new parent as its baseline and never notice.
+      @orphaned = Scheduler.parent_changed
       previous_traps = trap_signals
       events_file = open_events_file
       sampler = start_sampler
@@ -94,8 +102,10 @@ module ActiveMutator
       end
       return results if items.empty?
 
+      @escalated = items.size
       # Numbered after phase 1's mutants, so seq stays unique across the run.
-      scheduler ||= Scheduler.new(jobs: @config.jobs, events: @events, first_seq: phase1_ids.size + 1, abort: @abort)
+      scheduler ||= Scheduler.new(jobs: @config.jobs, events: @events, first_seq: phase1_ids.size + 1, abort: @abort,
+                                  orphaned: orphaned)
       escalated = begin
         @events.phase(:escalating, mutants: items.size) do
           scheduler.run(items.values).to_h { |res| [res.mutation, res] }
@@ -126,6 +136,31 @@ module ActiveMutator
       end
     end
 
+    # The --audit-tests pass (public for unit testing); returns the results,
+    # with the audit's kills added to killed_by, and the TestAudit::Report.
+    # `scheduler` is injectable like escalation's; nil builds one that runs
+    # audit workers, with no on_result: no mutant gets a second status char.
+    def audit_tests(results, scheduler, map, phase1_ids:)
+      scheduler ||= Scheduler.new(jobs: @config.jobs, worker: AUDIT_WORKER, events: @events,
+                                  first_seq: phase1_ids.size + @escalated + 1, abort: @abort, orphaned: orphaned)
+      audit = TestAudit.new(results: results, example_ids: phase1_ids, width: @config.jobs,
+                            build: ->(mutation, ids) { build_work_item(mutation, ids, map) },
+                            run: scheduler.method(:run))
+      report = @events.phase(:auditing) { audit.call }
+      [with_audit_kills(results, report.kills), report]
+    rescue Aborted => e
+      # The verdicts are final and the kills seen are real; the flags need
+      # a finished audit, so they go.
+      raise e.with_results(with_audit_kills(results, audit.kills))
+    end
+
+    def with_audit_kills(results, kills)
+      results.map do |r|
+        extra = kills[r.mutation]
+        extra ? r.with(killed_by: r.killed_by + extra) : r
+      end
+    end
+
     def exit_code(results)
       undetected = results.count { |r| %i[survived error].include?(r.status) }
       return 0 if undetected.zero?
@@ -149,6 +184,8 @@ module ActiveMutator
       mutations = mutations.first(@config.max_mutants) if @config.max_mutants
       @planned = mutations.size
       @invalid_count = analyses.sum(&:invalid_count)
+      # Before the empty-plan exit, so a scoped run that plans nothing warns too.
+      audit = @config.audit_tests && full_run_for_audit?
       # Decide emptiness before the baseline: a scoped run that plans nothing
       # has no use for a coverage map, and building one spawns the whole spec
       # suite (#47).
@@ -174,20 +211,29 @@ module ActiveMutator
       # land between two steps (the sample as mutating ends, the spec reads
       # before escalation) and drop every finished verdict. Each step checks
       # the flag instead and raises with the results it has.
+      test_audit = nil # read after the block, for the exit code
       results = @abort.deferred do
         done = @events.phase(:mutating, mutants: items.size) { mutate(items, pre_results) }
         stop_if_tripped!(done)
         # Phase 2 runs on its own scheduler (built lazily inside), so pass nil.
         done = escalate_class_body_survivors(done, nil, map, phase1_ids: phase1_ids)
         stop_if_tripped!(done)
+        done, test_audit = audit_tests(done, nil, map, phase1_ids: phase1_ids) if audit
+        stop_if_tripped!(done)
+        test_audit = test_audit&.with(fail_on_flags: @config.fail_on_no_kills)
 
         reporting(done) do
           accept_survivors!(ledger, done, fingerprints, scanned_files) if @config.accept_survivors
-          @reporter.summary(done, invalid_count: @invalid_count)
+          # Only when it ran, so an injected reporter without the keyword still works.
+          extra = test_audit ? { test_audit: test_audit } : {}
+          @reporter.summary(done, invalid_count: @invalid_count, **extra)
         end
         done
       end
-      exit_code(results)
+      # A trip after the report's own check, still inside the block, was
+      # only recorded. From here on a trip raises at once.
+      stop_if_tripped!(results)
+      test_audit&.failing? ? 1 : exit_code(results)
     end
 
     def mutate(items, pre_results)
@@ -196,7 +242,7 @@ module ActiveMutator
                       { parallel: TimeoutCalibrator.new, serial: TimeoutCalibrator.new }
                     end
       scheduler = Scheduler.new(jobs: @config.jobs, on_result: @reporter.method(:on_result),
-                                calibrators: calibrators, events: @events, abort: @abort)
+                                calibrators: calibrators, events: @events, abort: @abort, orphaned: orphaned)
       scheduler.run(items) + pre_results
     rescue Aborted => e
       raise e.with_results(e.results + pre_results)
@@ -571,9 +617,32 @@ module ActiveMutator
     # file's class-body fingerprint is absent even though the file is scanned;
     # without this guard its accepted ledger entry looks stale and gets pruned.
     def prune_scope(subjects)
-      return nil if @config.subject_filter || @config.since || @config.max_mutants || !@config.class_level
+      return nil if narrowing_flags.any? || !@config.class_level
 
       subjects.map { |s| s.file.delete_prefix("#{@config.root}/") }.uniq
+    end
+
+    # Set by #call; the phases can also run on their own (specs).
+    def orphaned = @orphaned ||= Scheduler.parent_changed
+
+    def narrowing_flags
+      flags = []
+      flags << "--since/--changed" if @config.since
+      flags << "--subject" if @config.subject_filter
+      flags << "--max-mutants" if @config.max_mutants
+      flags
+    end
+
+    # The audit judges a test by every mutant it covers, so v1 needs a full
+    # run: prune_scope's narrowing flags, plus path arguments.
+    # --no-class-level is fine, since the audit judges def mutants only.
+    def full_run_for_audit?
+      narrowed = narrowing_flags
+      narrowed << "path arguments" unless @config.paths.empty?
+      return true if narrowed.empty?
+
+      warn "active_mutator: --audit-tests needs a full run; skipping the audit (narrowed by #{narrowed.join(", ")})"
+      false
     end
 
     def accept_survivors!(ledger, results, fingerprints, scanned_files)

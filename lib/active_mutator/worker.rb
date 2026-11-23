@@ -28,15 +28,22 @@ module ActiveMutator
   # $LOADED_FEATURES so it's a no-op, while non-preloaded projects (plain
   # gems whose spec files require the lib themselves, or --no-preload-helper)
   # get it loaded rather than relying on spec-load to define it.
+  #
+  # `audit: true` is the --audit-tests pass: fail-fast goes off so every
+  # selected example runs, and the report adds every fresh failure in the
+  # selection ("killers") and every example that passed ("passed", id =>
+  # location), except that passes tagged `active_mutator: :no_kill_ok` go in
+  # "ignored". Pending and skipped examples are in none of the lists.
   class Worker
-    def self.run(mutation, example_ids, writer)
-      new(mutation, example_ids, writer).run
+    def self.run(mutation, example_ids, writer, audit: false)
+      new(mutation, example_ids, writer, audit: audit).run
     end
 
-    def initialize(mutation, example_ids, writer)
+    def initialize(mutation, example_ids, writer, audit: false)
       @mutation = mutation
       @example_ids = example_ids
       @writer = writer
+      @audit = audit
     end
 
     def run
@@ -47,9 +54,18 @@ module ActiveMutator
       @emit = method(:emit)
       @covering_groups = method(:covering_groups)
       @killer = method(:killer)
+      @no_killer_details = method(:no_killer_details)
+      @in_selection = method(:in_selection)
+      @audit_verdicts = method(:audit_verdicts)
+      @failed_examples = method(:failed_examples)
+      @all_examples = method(:all_examples)
       @normalize = ExampleId.method(:normalize)
       @group_keys = @example_ids.filter_map { |id| ExampleId.group_key(id) }
       require "rspec/core"
+      # Workers run the at_exit hooks tests register. A spec file that
+      # requires rspec/autorun registers one that would run the loaded
+      # examples again after the report; the rspec command turns it off too.
+      RSpec::Core::Runner.disable_autorun!
       devnull = File.open(File::NULL, "w")
       # Sorted so spec files load in the same order whatever the run priority:
       # load order decides constant definitions and shared setup.
@@ -63,16 +79,24 @@ module ActiveMutator
         require @mutation.subject.file # no-op if already loaded; guarantees the constant exists
         insert_mutation                # AFTER load: nothing left can redefine the method back
       end
+      # Under --no-preload-helper the spec files just started SimpleCov in
+      # this fork, and its at_exit would write this fork's coverage over the
+      # project's. Disarm it as the parent does a preloaded one.
+      SimpleCov.at_exit {} if defined?(SimpleCov)
       # One failure kills the mutant; running the rest of the covering set
-      # is pure waste inside the fork.
-      RSpec.configuration.fail_fast = 1
+      # is pure waste inside the fork. The audit needs every verdict instead.
+      RSpec.configuration.fail_fast = @audit ? false : 1
       after_fork_hygiene
-      failed_before = failed_examples.dup
+      failed_before = @failed_examples.call.dup
+      examples_before = @all_examples.call.dup
       code = runner.run_specs(@covering_groups.call)
+      failures = @failed_examples.call - failed_before
+      verdicts = @audit ? @audit_verdicts.call(failures, @all_examples.call - examples_before) : {}
       if code.zero?
-        @emit.call("survived")
+        @emit.call("survived", **verdicts)
       else
-        @emit.call("killed", killer: @killer.call(failed_examples - failed_before))
+        killer = @killer.call(failures)
+        @emit.call("killed", killer: killer, details: (@no_killer_details.call(code) unless killer), **verdicts)
       end
     rescue ClosureReload::Skip => e
       @emit.call("skipped", details: e.message)
@@ -104,9 +128,10 @@ module ActiveMutator
       end
     end
 
-    def emit(status, details: nil, killer: nil)
+    def emit(status, details: nil, killer: nil, **verdicts)
       report = { "status" => status, "details" => details }
       report["killer"] = killer if killer
+      report.merge!(verdicts.transform_keys(&:to_s))
       @writer.puts(JSON.generate(report))
       @writer.flush if @writer.respond_to?(:flush)
     end
@@ -132,11 +157,39 @@ module ActiveMutator
 
     def failed_examples = RSpec.configuration.reporter.failed_examples
 
+    def all_examples = RSpec.configuration.reporter.examples
+
     # The first fresh failure that is one of the examples this mutant ran
     # against, spelled as RSpec reports it; nil when there is none.
-    def killer(failures)
+    def killer(failures) = @in_selection.call(failures).first
+
+    # Why a failed run has no killer. RSpec marks a failure outside any
+    # example, like a spec file that raised on load or a raising suite or
+    # after(:context) hook; anything else just exited nonzero.
+    def no_killer_details(code)
+      return "no covering example failed, but RSpec exited #{code}" unless RSpec.world.non_example_failure
+
+      "no covering example failed; the run failed outside any example " \
+        "(a spec file failed to load, or a suite or context hook raised)"
+    end
+
+    # The ids of `examples` that this mutant ran against, spelled as RSpec
+    # reports them, in run order.
+    def in_selection(examples)
       selected = @example_ids.filter_map { |id| @normalize.call(id) }.to_set
-      failures.map(&:id).find { |id| selected.include?(@normalize.call(id)) }
+      examples.map(&:id).select { |id| selected.include?(@normalize.call(id)) }
+    end
+
+    # A passing example tagged `active_mutator: :no_kill_ok` goes in
+    # "ignored", not "passed": its owner says it is fine that it kills
+    # nothing. A tagged example that fails is still a killer.
+    def audit_verdicts(failures, ran)
+      passed = ran.select { |example| example.execution_result.status == :passed }
+      ignored, passed = passed.partition { |example| example.metadata[:active_mutator] == :no_kill_ok }
+      locations = passed.to_h { |example| [example.id, example.location] }
+      { killers: @in_selection.call(failures),
+        passed: @in_selection.call(passed).to_h { |id| [id, locations.fetch(id)] },
+        ignored: @in_selection.call(ignored) }
     end
   end
 end

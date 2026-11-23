@@ -98,6 +98,8 @@ RSpec.describe ActiveMutator::CLI do
         "Mutate class-level code: macros, constants, DSL lambdas (default: on)",
         "Exit 0 if mutation score >= SCORE even with survivors (default: any survivor fails)",
         "Ignore cached coverage map",
+        "After a full run, find tests that cover killed mutants but never kill one (slower; meant for nightly runs)",
+        "Run the audit (--audit-tests) and exit 1 if it flags any test",
         "Timeout = baseline time * F + floor",
         "Minimum timeout seconds",
         "Spec helper to preload in the parent (default: auto-detect)",
@@ -184,6 +186,17 @@ RSpec.describe ActiveMutator::CLI do
 
     it "defaults exclude to empty" do
       expect(described_class.parse([]).exclude).to eq([])
+    end
+
+    it "parses --audit-tests, off by default" do
+      expect(described_class.parse([]).audit_tests).to be(false)
+      expect(described_class.parse(["--audit-tests"]).audit_tests).to be(true)
+    end
+
+    it "parses --fail-on-no-kills, which turns the audit on" do
+      expect(described_class.parse([]).fail_on_no_kills).to be(false)
+      config = described_class.parse(["--fail-on-no-kills"])
+      expect([config.fail_on_no_kills, config.audit_tests]).to eq([true, true])
     end
 
     it "parses --max-mutants" do
