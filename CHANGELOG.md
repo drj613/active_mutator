@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-11-23
+
 - `--audit-tests` lists tests that cover killed mutants but never kill one,
   such as a test with no `expect`. After a full run, each killed method-level
   mutant runs once more against the covering tests not yet seen to kill,
