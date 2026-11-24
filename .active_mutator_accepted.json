@@ -418,5 +418,40 @@
     "description": "replace `>` with `>=`",
     "original_snippet": ">",
     "ordinal": 2
+  },
+  {
+    "file": "lib/active_mutator/test_audit.rb",
+    "subject": "ActiveMutator::TestAudit#record_ignored",
+    "description": "delete `return if result.ignored.empty?`",
+    "original_snippet": "return if result.ignored.empty?",
+    "ordinal": 0
+  },
+  {
+    "file": "lib/active_mutator/test_audit.rb",
+    "subject": "ActiveMutator::TestAudit#record_ignored",
+    "description": "force condition to `false`",
+    "original_snippet": "result.ignored.empty?",
+    "ordinal": 0
+  },
+  {
+    "file": "lib/active_mutator/test_audit.rb",
+    "subject": "ActiveMutator::TestAudit#record_ignored",
+    "description": "force condition to `true`",
+    "original_snippet": "result.carried",
+    "ordinal": 0
+  },
+  {
+    "file": "lib/active_mutator/verdict_store.rb",
+    "subject": "ActiveMutator::VerdictStore#save",
+    "description": "delete `next unless key`",
+    "original_snippet": "next unless key",
+    "ordinal": 0
+  },
+  {
+    "file": "lib/active_mutator/verdict_store.rb",
+    "subject": "ActiveMutator::VerdictStore#save",
+    "description": "force condition to `true`",
+    "original_snippet": "key",
+    "ordinal": 0
   }
 ]
