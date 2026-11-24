@@ -233,16 +233,27 @@ RSpec.describe ActiveMutator::TestAudit do
     expect(report.cleared).to eq(3)
   end
 
-  it "drops a tagged example from later forks and lists it as ignored, not flagged" do
+  it "keeps checking tagged examples against other mutants without flagging them" do
     results = [result(m1, :killed, killed_by: [a]), result(m2, :killed, killed_by: [a])]
     answers = { m1 => ->(_) { result(m1, :survived, passed: passes(c), ignored: [b]) },
                 m2 => ->(_) { result(m2, :survived, passed: passes(c)) } }
     report = audit(results, { m1 => [a, b, c], m2 => [a, b, c] }, answers, width: 1)
 
-    expect(@rounds.map { |round| round.map(&:last) }).to eq([[[b, c]], [[c]]])
+    expect(@rounds.map { |round| round.map(&:last) }).to eq([[[b, c]], [[b, c]]])
     expect(report.ignored).to eq([b])
     expect(report.flagged.map(&:id)).to eq([c])
     expect(report.not_judged).to eq([])
+  end
+
+  it "checks a cached tagged passer against a fresh mutant it could kill" do
+    cached = result(m1, :killed, killed_by: [a], ignored: [b]).with(carried: true)
+    fresh = result(m2, :killed, killed_by: [a])
+    report = audit([cached, fresh], { m1 => [a, b], m2 => [a, b] },
+                   { m2 => ->(_) { result(m2, :killed, killed_by: [b]) } }, width: 1)
+
+    expect(@rounds).to eq([[[m2, [b]]]])
+    expect(report.cleared).to eq(2)
+    expect(report.ignored).to be_empty
   end
 
   it "lists the ignored examples sorted by id" do

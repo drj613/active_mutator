@@ -22,8 +22,8 @@ module ActiveMutator
   # blame nobody. Pending and skipped examples never count as passes. A
   # suspect is flagged only if it passed against every killed mutant it
   # covers; one gap (an inconclusive fork, a skip) leaves it not judged. A
-  # passing example tagged `active_mutator: :no_kill_ok` drops out of later
-  # forks and is listed as ignored, unless it kills something.
+  # passing example tagged `active_mutator: :no_kill_ok` is listed as
+  # ignored unless it kills a mutant.
   class TestAudit
     # flagged: Flags, by id. cleared: how many examples were seen to kill.
     # ignored: ids of tagged examples that never killed. not_judged: ids
@@ -68,8 +68,9 @@ module ActiveMutator
       @cleared = @results.flat_map(&:killed_by).to_set { |id| key(id) }
       @passes = {}
       @ignored = Set.new
+      @ignored_pairs = {}
       @results.select(&:carried).each do |result|
-        result.ignored.each { |id| @ignored << key(id) }
+        record_ignored(result)
         record_passes(result)
       end
       runs = audit(killable.to_h { |r| [r.mutation, @example_ids.fetch(r.mutation, []).dup] })
@@ -105,13 +106,15 @@ module ActiveMutator
     # forgets mutants with none.
     def next_round(pending)
       pending.each do |mutation, ids|
-        ids.reject! { |id| dropped?(key(id)) || @passes.dig(key(id), 1)&.include?(mutation) }
+        ids.reject! do |id|
+          example = key(id)
+          @cleared.include?(example) || @ignored_pairs[mutation]&.include?(example) ||
+            @passes.dig(example, 1)&.include?(mutation)
+        end
       end
       pending.reject! { |_, suspects| suspects.empty? }
       pending.each_with_index.sort_by { |(_, suspects), i| [-suspects.size, i] }.first(@width).map(&:first)
     end
-
-    def dropped?(key) = @cleared.include?(key) || @ignored.include?(key)
 
     def learn(result)
       # A tag is a fact about the example, whatever the verdict.
@@ -119,13 +122,21 @@ module ActiveMutator
       if @retain_evidence
         @evidence[result.mutation] = conclusive ? result : result.with(passed: {})
       end
-      result.ignored.each { |id| @ignored << key(id) }
+      record_ignored(result)
       return unless conclusive
 
       record_passes(result)
 
       result.killed_by.each { |id| @cleared << key(id) }
       (@kills[result.mutation] ||= []).concat(result.killed_by) if result.killed_by.any?
+    end
+
+    def record_ignored(result)
+      return if result.ignored.empty?
+
+      examples = result.ignored.to_set { |id| key(id) }
+      @ignored.merge(examples)
+      @ignored_pairs[result.mutation] = examples if result.carried
     end
 
     def record_passes(result)

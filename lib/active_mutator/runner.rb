@@ -182,10 +182,13 @@ module ActiveMutator
     private
 
     def run
+      @verdicts = nil
+      inputs = RunInputs.new(@config) if @config.incremental
       @events.phase(:boot) { boot! }
       discovery, analyses = @events.phase(:planning) do
         found = discover
-        [found, found.subjects.map { |s| Engine.new.analyze(s) }]
+        analyses = inputs ? inputs.analyze(found.subjects) : found.subjects.map { |s| Engine.new.analyze(s) }
+        [found, analyses]
       end
       subjects = discovery.subjects
       mutations = analyses.flat_map(&:mutations)
@@ -203,7 +206,8 @@ module ActiveMutator
         return empty_plan_exit(@invalid_count, discovery)
       end
 
-      map = Baseline.new(root: @config.root, spec_paths: @config.spec_paths, events: @events, abort: @abort)
+      map = Baseline.new(root: @config.root, spec_paths: @config.spec_paths, events: @events, abort: @abort,
+                         setup: inputs&.setup)
               .coverage_map(force: @config.force_baseline)
       @reporter.coverage_map = map if @reporter.respond_to?(:coverage_map=)
 
@@ -215,8 +219,8 @@ module ActiveMutator
       items, pre_results, phase1_ids = plan_work(mutations, map, ledger: ledger, fingerprints: fingerprints)
       return debug_plan(items, pre_results) if @config.debug_plan
 
-      if @config.incremental
-        @verdicts = VerdictStore.new(@config, map)
+      if inputs&.stable?(map)
+        @verdicts = VerdictStore.new(@config, map, inputs: inputs)
         items, carried = @verdicts.partition(items)
         pre_results.concat(carried)
       end
@@ -238,9 +242,9 @@ module ActiveMutator
         test_audit = test_audit&.with(fail_on_flags: @config.fail_on_no_kills)
 
         reporting(done) do
-          prune_killers = narrowing_flags.empty? && @config.paths.empty? && @config.exclude.empty? && @config.class_level
-          @killer_memory.save(subjects: prune_killers ? subjects : nil)
-          @verdicts&.save(done)
+          prune_caches = narrowing_flags.empty? && @config.paths.empty? && @config.exclude.empty? && @config.class_level
+          @killer_memory.save(subjects: prune_caches ? subjects : nil)
+          @verdicts.save(done, prune: prune_caches) if @verdicts && inputs.stable?(map)
           accept_survivors!(ledger, done, fingerprints, scanned_files) if @config.accept_survivors
           # Only when it ran, so an injected reporter without the keyword still works.
           extra = test_audit ? { test_audit: test_audit } : {}

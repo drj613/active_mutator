@@ -282,8 +282,11 @@ verdicts in `.active_mutator/verdicts.json`. Restore the file with the coverage
 cache in CI. Each subsequent incremental run refreshes coverage before checking
 the mutant's source file, edit, covering example IDs, and covering spec files.
 Class-body mutants also check the broader spec set used for escalation. Changes
-to the gem, Ruby, operators, or shared test setup invalidate the cache. Entries
-have no age limit.
+to the gem, Ruby, operators, or shared test setup rebuild coverage and invalidate
+verdicts. Shared setup includes RSpec options, required setup files, Rails schema
+files, and data and support files under the configured spec paths. Entries have
+no age limit. A different absolute checkout path rebuilds coverage before
+checking which verdicts can carry forward.
 
 Timeouts, errors, and skipped mutants run again. Coverage and accepted mutants
 are evaluated from the current plan. The summary counts carried verdicts, and
@@ -291,9 +294,10 @@ are evaluated from the current plan. The summary counts carried verdicts, and
 
 An unscoped `--incremental --audit-tests` run uses cached audit evidence and runs
 any remaining checks. Use a run without `--incremental` to reevaluate every
-mutant after changes to indirect dependencies or external test state. A forced
-baseline refresh can be combined with `--incremental` to rebuild coverage and
-still reuse verdicts whose inputs match.
+mutant after changes to indirect dependencies or external test state. Add
+`--force-baseline` when those changes can affect coverage. A forced baseline
+refresh can be combined with `--incremental` to rebuild coverage and still reuse
+verdicts whose inputs match.
 
 ### Tests with no kills observed
 
@@ -339,9 +343,9 @@ end
 
 The tag works on a `describe` or `context` too, since RSpec passes group
 metadata down to its examples. A tagged test is counted as ignored instead
-of flagged, and it drops out after its first audit fork. If it kills a
-mutant in a fork it ran in, it's cleared as usual. The tag lives on the test, not in a file of
-example ids, because ids like `[1:2:3]` shift when tests move.
+of flagged. The audit checks whether it kills any covered mutant and counts
+it as cleared when it does. Tag the example in its spec so the tag stays with
+the example when its ID changes.
 
 ### Empty plans in CI
 
