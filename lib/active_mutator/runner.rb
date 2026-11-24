@@ -105,7 +105,7 @@ module ActiveMutator
       @escalated = items.size
       # Numbered after phase 1's mutants, so seq stays unique across the run.
       scheduler ||= Scheduler.new(jobs: @config.jobs, events: @events, first_seq: phase1_ids.size + 1, abort: @abort,
-                                  orphaned: orphaned, **killer_options)
+                                  orphaned: orphaned)
       escalated = begin
         @events.phase(:escalating, mutants: items.size) do
           scheduler.run(items.values).to_h { |res| [res.mutation, res] }
@@ -224,7 +224,8 @@ module ActiveMutator
         test_audit = test_audit&.with(fail_on_flags: @config.fail_on_no_kills)
 
         reporting(done) do
-          @killer_memory.save
+          prune_killers = narrowing_flags.empty? && @config.paths.empty? && @config.exclude.empty? && @config.class_level
+          @killer_memory.save(subjects: prune_killers ? subjects : nil)
           accept_survivors!(ledger, done, fingerprints, scanned_files) if @config.accept_survivors
           # Only when it ran, so an injected reporter without the keyword still works.
           extra = test_audit ? { test_audit: test_audit } : {}
