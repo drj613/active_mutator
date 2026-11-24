@@ -391,7 +391,22 @@ RSpec.describe ActiveMutator::Baseline do
       baseline.coverage_map(force: true)
 
       expect(baseline.last_refresh).to eq(:full)
-      expect(baseline).to have_received(:run_rspec).with(out_path)
+      expect(baseline).to have_received(:run_rspec).with(a_string_matching(%r{/baseline-[^/]+/coverage.json\z}))
+    end
+
+    it "reads its own subprocess payload when another full baseline completes concurrently" do
+      other = described_class.new(root: @tmp, cache_dir: tmp_cache)
+      allow(other).to receive(:run_rspec) do |path|
+        File.write(path, JSON.generate("version" => 2, "records" => { "./spec/b_spec.rb[1:1]" => a_hit }))
+        true
+      end
+      allow(baseline).to receive(:run_rspec) do |path|
+        File.write(path, JSON.generate("version" => 2, "records" => { "./spec/a_spec.rb[1:1]" => a_hit }))
+        other.coverage_map(force: true)
+        true
+      end
+
+      expect(baseline.coverage_map(force: true).records.keys).to eq(["./spec/a_spec.rb[1:1]"])
     end
 
     it "rebuilds rather than delta-refreshing a pre-v2 cache" do
@@ -401,7 +416,7 @@ RSpec.describe ActiveMutator::Baseline do
       baseline.coverage_map
 
       expect(baseline.last_refresh).to eq(:full)
-      expect(baseline).to have_received(:run_rspec).with(out_path)
+      expect(baseline).to have_received(:run_rspec).with(a_string_matching(%r{/baseline-[^/]+/coverage.json\z}))
     end
 
     it "fails a full rebuild when the suite fails" do
@@ -434,8 +449,9 @@ RSpec.describe ActiveMutator::Baseline do
 
         baseline.coverage_map
 
-        expect(baseline).to have_received(:run_rspec).with(File.join(tmp_cache, "partial.json"), ["spec/b_spec.rb"])
-        expect(File.exist?(File.join(tmp_cache, "partial.json"))).to be(false)
+        expect(baseline).to have_received(:run_rspec).with(a_string_matching(%r{/partial-[^/]+/coverage.json\z}),
+                                                        ["spec/b_spec.rb"])
+        expect(Dir.glob("partial-*", base: tmp_cache)).to be_empty
       end
 
       it "fails when the partial run fails" do

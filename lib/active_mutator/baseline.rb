@@ -1,6 +1,7 @@
 require "digest"
 require "fileutils"
 require "json"
+require "tmpdir"
 
 module ActiveMutator
   # Runs the host suite once, instrumented, in a subprocess. Produces and
@@ -8,8 +9,9 @@ module ActiveMutator
   # {app,lib}/**/*.rb or the configured spec paths triggers a full re-run.
   class Baseline
     def initialize(root:, spec_paths: ["spec"], cache_dir: File.join(root, ".active_mutator"), events: Events.new,
-                   abort: AbortFlag.new)
+                   abort: AbortFlag.new, setup: nil)
       @abort = abort
+      @setup = setup
       @root = root
       @spec_paths = spec_paths
       @cache_dir = cache_dir
@@ -44,6 +46,9 @@ module ActiveMutator
       return unless File.exist?(@out_path)
 
       data = load_payload
+      return if data["setup"] != @setup
+      return if different_root?(data)
+
       map = CoverageMap.new(data)
       # A spec_paths change silently degrades the delta classifier: files
       # under a removed spec path just vanish from the digest scan, so
@@ -70,6 +75,16 @@ module ActiveMutator
       stamp(data, digests)
     end
 
+    def different_root?(data)
+      return data["root"] != @root if data.key?("root")
+
+      # Older maps contain absolute hit paths but have no root marker.
+      prefix = File.join(@root, "")
+      data.fetch("records", {}).each_value.any? do |hits|
+        hits.any? { |path, _| !path.start_with?(prefix) }
+      end
+    end
+
     # The cache is disposable and must never be committed. Host projects
     # rarely gitignore it themselves, so the directory ignores its own
     # contents (the node_modules trick).
@@ -81,13 +96,16 @@ module ActiveMutator
 
     def run_baseline!
       prepare_cache_dir
-      ok = run_rspec(@out_path)
-      raise BaselineFailed, "baseline suite failed, fix the suite before mutating" unless ok
-      raise BaselineFailed, "baseline produced no coverage output" unless File.exist?(@out_path)
+      Dir.mktmpdir("baseline-", @cache_dir) do |dir|
+        path = File.join(dir, "coverage.json")
+        ok = run_rspec(path)
+        raise BaselineFailed, "baseline suite failed, fix the suite before mutating" unless ok
+        raise BaselineFailed, "baseline produced no coverage output" unless File.exist?(path)
 
-      data = load_payload
-      verify_complete!(data)
-      data
+        data = load_payload(path)
+        verify_complete!(data)
+        data
+      end
     end
 
     # Its own phase, apart from the child's run: 0.6.0 died here, in the
@@ -191,23 +209,23 @@ module ActiveMutator
     end
 
     def run_partial!(delta, cache)
-      partial_out = File.join(@cache_dir, "partial.json")
       targets = delta.rerun_spec_files + delta.rerun_example_ids
       part = {}
       if targets.any?
-        ok = run_rspec(partial_out, targets)
-        raise BaselineFailed, "partial baseline run failed, fix the suite before mutating" unless ok
-        raise BaselineFailed, "partial baseline produced no output" unless File.exist?(partial_out)
+        part = Dir.mktmpdir("partial-", @cache_dir) do |dir|
+          path = File.join(dir, "coverage.json")
+          ok = run_rspec(path, targets)
+          raise BaselineFailed, "partial baseline run failed, fix the suite before mutating" unless ok
+          raise BaselineFailed, "partial baseline produced no output" unless File.exist?(path)
 
-        part = load_payload(partial_out)
-        verify_complete!(part)
+          data = load_payload(path)
+          verify_complete!(data)
+          data
+        end
       end
       merge_partial!(cache, part, delta)
-    ensure
-      FileUtils.rm_f(partial_out)
     end
 
-    # Edits `cache` in place; the caller stamps and writes it.
     def merge_partial!(cache, part, delta)
       rerun_prefixes = delta.rerun_spec_files.map { |rel| "#{rel}[" }
       obsolete = lambda do |example_id|
@@ -231,6 +249,8 @@ module ActiveMutator
     def stamp(data, digests)
       data["digests"] = digests
       data["spec_paths"] = @spec_paths
+      data["root"] = @root
+      data["setup"] = @setup if @setup
       AtomicFile.write(@out_path, JSON.generate(data))
       CoverageMap.new(data)
     end
