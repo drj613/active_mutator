@@ -52,6 +52,27 @@ RSpec.describe ActiveMutator::KillerMemory do
     expect(described_class.new(@root).group_for(work)).to eq(ActiveMutator::ExampleId.group_key(example_id))
   end
 
+  it "does not scan a covering set when it has no remembered example" do
+    work = instance_double(ActiveMutator::WorkItem, mutation: item("Counter#count").mutation)
+    expect(described_class.new(@root).group_for(work)).to be_nil
+  end
+
+  it "keeps cache parsing and subject identity private" do
+    expect(described_class.new(@root)).not_to respond_to(:load_entries)
+    expect(described_class.new(@root)).not_to respond_to(:key)
+  end
+
+  it "does not rewrite a warm cache without a new hint or a pruning scope" do
+    memory = described_class.new(@root)
+    memory.remember(item("Counter#count"), example_id)
+    memory.save
+    inode = File.stat(@path).ino
+
+    described_class.new(@root).save
+
+    expect(File.stat(@path).ino).to eq(inode)
+  end
+
   it "does not create a cache file during a cold run with no verified kills" do
     described_class.new(@root).save(subjects: [item("Counter#count").mutation.subject])
 
