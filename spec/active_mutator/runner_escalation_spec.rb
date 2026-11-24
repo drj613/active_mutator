@@ -131,6 +131,9 @@ RSpec.describe ActiveMutator::Runner do
     # Phase 2 times out on the wider spec set. A :timeout counts as detected in
     # exit_code, so blindly taking it would report a real survivor as killed.
     scheduler = instance_double(ActiveMutator::Scheduler, run: [result(mutation, :timeout)])
+    verdicts = instance_double(ActiveMutator::VerdictStore)
+    runner.instance_variable_set(:@verdicts, verdicts)
+    expect(verdicts).to receive(:discard).with(mutation)
 
     results = runner.escalate_class_body_survivors(
       [result(mutation, :survived)], scheduler, map,
@@ -138,6 +141,15 @@ RSpec.describe ActiveMutator::Runner do
     )
     expect(results.first.status).to eq(:survived)
     expect(results.first.details).to be_nil
+  end
+
+  it "skips escalation for a carried class-body survivor" do
+    mutation = mutation_for(user_file)
+    carried = result(mutation, :survived).with(carried: true)
+    map = instance_double(ActiveMutator::CoverageMap)
+    scheduler = instance_double(ActiveMutator::Scheduler)
+
+    expect(runner.escalate_class_body_survivors([carried], scheduler, map, phase1_ids: {})).to eq([carried])
   end
 
   it "annotates a mutant that survives escalation" do

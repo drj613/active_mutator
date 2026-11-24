@@ -14,20 +14,20 @@ RSpec.describe ActiveMutator::VerdictStore do
   let(:spec_digests) { { "spec/counter_spec.rb" => "spec digest" } }
   let(:map) { ActiveMutator::CoverageMap.new("records" => {}) }
 
-  def store(setup: "setup digest", specs: spec_digests)
+  def store(setup: "setup digest", specs: spec_digests, sources: { @file => "source digest" }, coverage: map)
     inputs = instance_double(ActiveMutator::RunInputs, setup: setup,
-                             source_digests: { @file => "source digest" })
-    allow(inputs).to receive(:spec_digests).with(map).and_return(specs)
-    described_class.new(config, map, inputs: inputs)
+                             source_digests: sources)
+    allow(inputs).to receive(:spec_digests).with(coverage).and_return(specs)
+    described_class.new(config, coverage, inputs: inputs)
   end
 
-  def item(replacement = "0")
+  def item(replacement = "0", kind: :instance, ids: ["./spec/counter_spec.rb[1:1]"])
     subject = ActiveMutator::Subject.new(name: "Counter#count", file: @file, byte_range: 0...12,
-                                        line_range: 1..1, constant_scope: "Counter", kind: :instance)
+                                        line_range: 1..1, constant_scope: "Counter", kind: kind)
     edit = ActiveMutator::Edit.new(range: 10...11, replacement: replacement, description: "replace count")
     mutation = ActiveMutator::Mutation.new(subject: subject, edit: edit, original_snippet: "2", line: 1,
                                           mutated_file_source: "", mutated_def_source: "", mutated_def_line: 1)
-    ActiveMutator::WorkItem.new(mutation: mutation, example_ids: ["./spec/counter_spec.rb[1:1]"],
+    ActiveMutator::WorkItem.new(mutation: mutation, example_ids: ids,
                                 timeout: 5, lane: :parallel)
   end
 
@@ -57,6 +57,104 @@ RSpec.describe ActiveMutator::VerdictStore do
     data.fetch("entries").each_value { |entry| entry["ignored"] = nil }
     File.write(@path, JSON.generate(data))
     expect(store.partition([work])).to eq([[work], []])
+  end
+
+  [
+    ["status", "timeout"],
+    ["killed_by", nil],
+    ["killed_by", [42]],
+    ["passed", []],
+    ["passed", { "./spec/counter_spec.rb[1:1]" => 42 }],
+    ["ignored", [42]]
+  ].each do |field, invalid|
+    it "reruns a mutant when its stored #{field} is #{invalid.inspect}" do
+      work = item
+      seed(work)
+      data = JSON.parse(File.read(@path))
+      data.fetch("entries").each_value { |entry| entry[field] = invalid }
+      File.write(@path, JSON.generate(data))
+
+      expect(store.partition([work])).to eq([[work], []])
+    end
+  end
+
+  it "ignores a cache with a malformed envelope" do
+    work = item
+    seed(work)
+    data = JSON.parse(File.read(@path))
+    [42, data.merge("entries" => nil)].each do |invalid|
+      File.write(@path, JSON.generate(invalid))
+      expect(store.partition([work])).to eq([[work], []])
+    end
+  end
+
+  it "only carries a verdict for the same source digest and covering set" do
+    work = item
+    seed(work)
+    expect(store(sources: { @file => "changed" }).partition([work])).to eq([[work], []])
+    expect(store(sources: {}).partition([work])).to eq([[work], []])
+    different = item(ids: ["./spec/counter_spec.rb[1:2]"])
+    expect(store.partition([different])).to eq([[different], []])
+  end
+
+  it "requires every covering spec digest and ignores the order of covering IDs" do
+    ids = ["./spec/counter_spec.rb[1:1]", "./spec/other_spec.rb[1:1]"]
+    work = item(ids: ids)
+    specs = spec_digests.merge("spec/other_spec.rb" => "other digest")
+    cache = store(specs: specs)
+    cache.partition([work])
+    cache.save([result(work, :killed)], prune: false)
+
+    reversed = item(ids: ids.reverse)
+    expect(store(specs: specs).partition([reversed]).last.map(&:status)).to eq([:killed])
+    expect(store.partition([work])).to eq([[work], []])
+    incomplete = store
+    incomplete.partition([work])
+    incomplete.save([result(work, :killed)], prune: false)
+    expect(store.partition([work])).to eq([[work], []])
+  end
+
+  it "checks all candidate spec digests and example IDs for class-body verdicts" do
+    work = item(kind: :class_body)
+    other = "./spec/other_spec.rb[1:1]"
+    another = "./spec/another_spec.rb[1:1]"
+    records = { other => [], another => [] }
+    specs = spec_digests.merge("spec/other_spec.rb" => "other digest", "spec/another_spec.rb" => "another digest")
+    cached = store(specs: specs, coverage: ActiveMutator::CoverageMap.new("records" => records))
+    cached.partition([work])
+    cached.save([result(work, :survived)], prune: false)
+
+    reordered = ActiveMutator::CoverageMap.new("records" => records.to_a.reverse.to_h)
+    expect(store(specs: specs.to_a.reverse.to_h, coverage: reordered).partition([work]).last.map(&:status))
+      .to eq([:survived])
+    expect(store(specs: specs, coverage: ActiveMutator::CoverageMap.new("records" => { another => [] }))
+            .partition([work])).to eq([[work], []])
+    expect(store(specs: specs.merge("spec/other_spec.rb" => "changed"), coverage: reordered).partition([work]))
+      .to eq([[work], []])
+  end
+
+  it "round-trips audit evidence and details with carried kills" do
+    work = item
+    cache = store
+    cache.partition([work])
+    fresh = result(work, :killed).with(details: "worker detail", killed_by: ["./spec/counter_spec.rb[1:1]"],
+                                       passed: { "./spec/counter_spec.rb[1:2]" => "./spec/counter_spec.rb:5" },
+                                       ignored: ["./spec/counter_spec.rb[1:3]"])
+    cache.save([fresh], prune: false)
+
+    expect(store.partition([work])).to eq([[], [fresh.with(carried: true)]])
+  end
+
+  it "prunes entries only when the plan is authoritative" do
+    left, right = item("0"), item("3")
+    seed(left)
+    seed(right)
+    cache = store
+    cache.partition([left])
+    cache.save([result(left, :killed), result(item("4"), :uncovered)], prune: true)
+
+    expect(store.partition([left, right]).first).to eq([right])
+    expect(JSON.parse(File.read(@path)).fetch("entries").size).to eq(1)
   end
 
   it "removes inconclusive verdicts instead of carrying them again" do

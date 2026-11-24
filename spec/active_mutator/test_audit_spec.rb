@@ -245,6 +245,30 @@ RSpec.describe ActiveMutator::TestAudit do
     expect(report.not_judged).to eq([])
   end
 
+  it "reuses passes and tagged examples only for their own carried mutant" do
+    cached = result(m1, :killed, killed_by: [a], passed: passes(b), ignored: [c]).with(carried: true)
+    fresh = result(m2, :killed, killed_by: [a])
+    report = audit([cached, fresh], { m1 => [a, b, c], m2 => [a, b, c] },
+                   { m2 => ->(_) { result(m2, :survived, passed: passes(b), ignored: [c]) } })
+
+    expect(@rounds).to eq([[[m2, [b, c]]]])
+    expect(report.flagged.map(&:id)).to eq([b])
+    expect(report.ignored).to eq([c])
+  end
+
+  it "retains only conclusive passes when asked to keep incremental evidence" do
+    errored = result(m1, :error, passed: passes(b), ignored: [c])
+    [true, false].each do |retain|
+      audit = described_class.new(results: [result(m1, :killed, killed_by: [a])],
+                                   example_ids: { m1 => [a, b, c] }, width: 1,
+                                   build: ->(mutation, ids) { [mutation, ids] }, run: ->(_) { [errored] },
+                                   retain_evidence: retain)
+      audit.call
+
+      expect(audit.evidence).to eq(retain ? { m1 => errored.with(passed: {}) } : {})
+    end
+  end
+
   it "checks a cached tagged passer against a fresh mutant it could kill" do
     cached = result(m1, :killed, killed_by: [a], ignored: [b]).with(carried: true)
     fresh = result(m2, :killed, killed_by: [a])
