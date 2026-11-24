@@ -230,7 +230,7 @@ module ActiveMutator
     # the covering set is the same or close) most likely dies to the same
     # spec: run the group that killed the last one first. The set is unchanged.
     def prioritized(item)
-      key = @killer_memory ? @killer_memory.group_for(item) : @killers[item.mutation.subject]
+      key = @killers[item.mutation.subject] || @killer_memory&.group_for(item)
       return item unless key
 
       first, rest = item.example_ids.partition { |id| ExampleId.group_key(id) == key }
@@ -270,11 +270,8 @@ module ActiveMutator
     def learn_killer(item, killer)
       return unless killer
 
-      if @killer_memory
-        @killer_memory.remember(item, killer)
-      else
-        @killers[item.mutation.subject] = ExampleId.group_key(killer)
-      end
+      @killers[item.mutation.subject] = ExampleId.group_key(killer)
+      @killer_memory&.remember(item, killer)
     end
 
     def finish(entry, seconds)

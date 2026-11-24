@@ -72,6 +72,15 @@ RSpec.describe "tiny_project end-to-end", :e2e do
     end
   end
 
+  it "reports mutations when the warm cache is read-only" do
+    run_json(root)
+    cache = File.join(root, ".active_mutator")
+    File.chmod(0o555, cache)
+    expect(run_json(root).fetch("counts").fetch("killed")).to be_positive
+  ensure
+    File.chmod(0o755, cache) if cache && File.directory?(cache)
+  end
+
   it "kills tested mutants, surfaces the planted survivor and uncovered method" do
     stdout, stderr, status = Bundler.with_unbundled_env do
       Open3.capture3(
