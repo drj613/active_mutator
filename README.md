@@ -275,6 +275,26 @@ Active Mutator saves the last verified killing example for each subject in
 group runs first. The file survives `--force-baseline` and can be restored
 alongside the coverage cache in CI.
 
+### Incremental runs
+
+Run `bundle exec active_mutator --incremental` to save killed and surviving
+verdicts in `.active_mutator/verdicts.json`. Restore the file with the coverage
+cache in CI. Each subsequent incremental run refreshes coverage before checking
+the mutant's source file, edit, covering example IDs, and covering spec files.
+Class-body mutants also check the broader spec set used for escalation. Changes
+to the gem, Ruby, operators, or shared test setup invalidate the cache. Entries
+have no age limit.
+
+Timeouts, errors, and skipped mutants run again. Coverage and accepted mutants
+are evaluated from the current plan. The summary counts carried verdicts, and
+`--format json` marks them with `"carried": true`.
+
+An unscoped `--incremental --audit-tests` run uses cached audit evidence and runs
+any remaining checks. Use a run without `--incremental` to reevaluate every
+mutant after changes to indirect dependencies or external test state. A forced
+baseline refresh can be combined with `--incremental` to rebuild coverage and
+still reuse verdicts whose inputs match.
+
 ### Tests with no kills observed
 
 A test can run a method, pass, and check nothing: a missing `expect`, or a
@@ -367,6 +387,7 @@ projects used to tell a docs-only PR from a broken `--since` range.
 | `--allow-empty` | off | forgive an empty `--since`/`--subject` plan, but only when the `--since` diff changed no code in a candidate source file (default: warn and exit 1) |
 | `--format terminal\|json\|stryker-json\|github` | terminal | report format |
 | `--accept-survivors` | off | record survivors to the acceptance ledger |
+| `--incremental` | off | carry verified verdicts for unchanged mutants |
 | `--force-baseline` | off | ignore cached coverage map |
 | `--audit-tests` | off | after a full run, list tests that cover killed mutants but never kill one (see [Tests with no kills observed](#tests-with-no-kills-observed)) |
 | `--fail-on-no-kills` | off | turns on `--audit-tests` and exits `1` if it flags any test |

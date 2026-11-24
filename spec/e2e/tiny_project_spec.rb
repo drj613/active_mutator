@@ -29,6 +29,49 @@ RSpec.describe "tiny_project end-to-end", :e2e do
     expect(JSON.parse(File.read(path))).not_to be_empty
   end
 
+  it "carries kills and survivors and invalidates only affected work" do
+    with_fixture_copy do |copy|
+      File.write(File.join(copy, "lib", "counter.rb"), <<~RUBY)
+        class Counter
+          def count
+            2
+          end
+        end
+      RUBY
+      File.open(File.join(copy, "spec", "spec_helper.rb"), "a") do |file|
+        file.puts 'require_relative "../lib/counter"'
+      end
+      counter_spec = File.join(copy, "spec", "counter_spec.rb")
+      File.write(counter_spec, <<~RUBY)
+        require_relative "../lib/counter"
+        RSpec.describe Counter do
+          it { expect(Counter.new.count).to eq(2) }
+        end
+      RUBY
+
+      first = run_json(copy, "--incremental")
+      second = run_json(copy, "--incremental", "--events", "events.ndjson")
+      events = File.readlines(File.join(copy, "events.ndjson")).map { |line| JSON.parse(line).fetch("event") }
+      expect(events).not_to include("mutant_start")
+      expect(second.fetch("counts")).to eq(first.fetch("counts"))
+      eligible = second.fetch("results").select { |r| %w[killed survived].include?(r.fetch("status")) }
+      expect(eligible.map { |r| r["carried"] }).to all(be(true))
+      expect(second.fetch("carried")).to eq(eligible.size)
+      expect(eligible.map { |r| r["seconds"] }).to all(be_nil)
+
+      File.open(File.join(copy, "lib", "calculator.rb"), "a") { |file| file.puts "# source edit" }
+      third = run_json(copy, "--incremental")
+      carried_subjects = third.fetch("results").select { |r| r["carried"] }.map { |r| r["subject"] }.uniq
+      expect(carried_subjects).to eq(["Counter#count"]), third.fetch("results").inspect
+
+      File.open(counter_spec, "a") { |file| file.puts "# spec edit" }
+      fourth = run_json(copy, "--incremental")
+      counter = fourth.fetch("results").find { |r| r["subject"] == "Counter#count" }
+      expect(counter["carried"]).to be(false)
+      expect(fourth.fetch("results").any? { |r| r["carried"] }).to be(true)
+    end
+  end
+
   it "kills tested mutants, surfaces the planted survivor and uncovered method" do
     stdout, stderr, status = Bundler.with_unbundled_env do
       Open3.capture3(
@@ -151,6 +194,11 @@ RSpec.describe "tiny_project end-to-end", :e2e do
       expect(flagged.first["killable_mutants"]).to be_positive
       expect(audit["ignored"]).to eq(["./spec/calculator_spec.rb[1:1:5]"]), stderr
       expect(audit["mutants_run"]).to be_positive
+      run_json(copy, "--incremental", "--audit-tests")
+      carried = run_json(copy, "--incremental", "--audit-tests")
+      carried_audit = carried.fetch("test_audit")
+      expect(carried.fetch("carried")).to be_positive
+      expect(carried_audit).to eq(audit.merge("mutants_run" => 0))
       expect(status.exitstatus).to eq(1) # unchanged: the planted survivors still fail the run
     end
   end

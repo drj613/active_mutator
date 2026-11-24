@@ -43,15 +43,20 @@ module ActiveMutator
     # mutation => ids the audit saw kill it so far; on a stop, what to keep.
     attr_reader :kills
 
+    # Worker results with the audit evidence safe to carry to another run.
+    attr_reader :evidence
+
     # example_ids: mutation => the ids it ran against in phase 1.
     # build: ->(mutation, ids) { WorkItem }; run: ->(items) { results }.
-    def initialize(results:, example_ids:, width:, build:, run:)
+    def initialize(results:, example_ids:, width:, build:, run:, retain_evidence: false)
       @results = results
       @example_ids = example_ids
       @width = width
       @build = build
       @run = run
       @kills = {}
+      @retain_evidence = retain_evidence
+      @evidence = {}
       @keys = {}
     end
 
@@ -63,7 +68,11 @@ module ActiveMutator
       @cleared = @results.flat_map(&:killed_by).to_set { |id| key(id) }
       @passes = {}
       @ignored = Set.new
-      runs = audit(killable.to_h { |r| [r.mutation, @example_ids.fetch(r.mutation, [])] })
+      @results.select(&:carried).each do |result|
+        result.ignored.each { |id| @ignored << key(id) }
+        record_passes(result)
+      end
+      runs = audit(killable.to_h { |r| [r.mutation, @example_ids.fetch(r.mutation, []).dup] })
       universe = defs.flat_map { |r| @example_ids.fetch(r.mutation, []) }.uniq { |id| key(id) }
       report(universe, killable, runs)
     end
@@ -95,7 +104,9 @@ module ActiveMutator
     # Suspects only ever drop out, so each round keeps what is left and
     # forgets mutants with none.
     def next_round(pending)
-      pending.transform_values! { |ids| ids.reject { |id| dropped?(key(id)) } }
+      pending.each do |mutation, ids|
+        ids.reject! { |id| dropped?(key(id)) || @passes.dig(key(id), 1)&.include?(mutation) }
+      end
       pending.reject! { |_, suspects| suspects.empty? }
       pending.each_with_index.sort_by { |(_, suspects), i| [-suspects.size, i] }.first(@width).map(&:first)
     end
@@ -104,11 +115,20 @@ module ActiveMutator
 
     def learn(result)
       # A tag is a fact about the example, whatever the verdict.
+      conclusive = conclusive?(result)
+      if @retain_evidence
+        @evidence[result.mutation] = conclusive ? result : result.with(passed: {})
+      end
       result.ignored.each { |id| @ignored << key(id) }
-      return unless conclusive?(result)
+      return unless conclusive
+
+      record_passes(result)
 
       result.killed_by.each { |id| @cleared << key(id) }
       (@kills[result.mutation] ||= []).concat(result.killed_by) if result.killed_by.any?
+    end
+
+    def record_passes(result)
       result.passed.each do |id, location|
         (@passes[key(id)] ||= [location, Set.new]).last << result.mutation
       end

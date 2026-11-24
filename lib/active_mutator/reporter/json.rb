@@ -20,6 +20,7 @@ module ActiveMutator
           "complete" => aborted.nil?,
           "score" => score(results, counts, empty_plan, aborted),
           "counts" => counts.transform_keys(&:to_s),
+          "carried" => results.count(&:carried),
           "invalid" => invalid_count,
           "operators" => OperatorStats.call(results),
           "results" => results.map { |r| serialize(r) },
@@ -72,6 +73,7 @@ module ActiveMutator
           "replacement" => m.edit.replacement,
           "details" => result.details,
           "killed_by" => result.killed_by,
+          "carried" => result.carried,
           "seconds" => result.seconds,
           "peak_rss_kb" => result.peak_rss_kb
         }

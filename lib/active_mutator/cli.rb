@@ -47,6 +47,7 @@ module ActiveMutator
         o.on("--require FILE", "File to require before mutating (repeatable; adds to config-file requires)") { |v| options[:requires] << v }
         o.on("--operator FILE", "Ruby file defining a custom operator, loaded before analysis (repeatable)") { |v| options[:operators] << v }
         o.on("--[no-]class-level", "Mutate class-level code: macros, constants, DSL lambdas (default: on)") { |v| options[:class_level] = v }
+        o.on("--incremental", "Reuse verdicts for unchanged mutants") { options[:incremental] = true }
         o.on("--force-baseline", "Ignore cached coverage map") { options[:force_baseline] = true }
         o.on("--timeout-factor F", Float, "Timeout = baseline time * F + floor") { |v| options[:timeout_factor] = v }
         o.on("--timeout-floor S", Float, "Minimum timeout seconds") { |v| options[:timeout_floor] = v }

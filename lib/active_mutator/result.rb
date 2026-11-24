@@ -8,9 +8,9 @@ module ActiveMutator
   # passed: id => location for each example that passed; only audit workers
   # report it (#54), so it is empty everywhere else. ignored: the ids of
   # passing examples tagged `active_mutator: :no_kill_ok`, also audit-only.
-  Result = Data.define(:mutation, :status, :details, :seconds, :peak_rss_kb, :killed_by, :passed, :ignored) do
+  Result = Data.define(:mutation, :status, :details, :seconds, :peak_rss_kb, :killed_by, :passed, :ignored, :carried) do
     def initialize(mutation:, status:, details:, seconds: nil, peak_rss_kb: nil, killed_by: [], passed: {},
-                   ignored: [])
+                   ignored: [], carried: false)
       super
     end
 
