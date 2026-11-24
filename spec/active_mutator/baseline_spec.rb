@@ -403,7 +403,18 @@ RSpec.describe ActiveMutator::Baseline do
 
       expect(baseline.coverage_map.records).to be_empty
       expect(baseline.last_refresh).to eq(:full)
-      expect(JSON.parse(File.read(out_path)).fetch("root")).to eq(@tmp)
+      payload = JSON.parse(File.read(out_path))
+      expect(payload.fetch("root")).to eq(@tmp)
+      expect(payload).not_to have_key("setup")
+    end
+
+    it "rebuilds a legacy cache whose hits belong to a different checkout" do
+      hits = [[File.join("#{@tmp}-moved", "lib/a.rb"), 1]]
+      write_cache(baseline.send(:current_digests), records: { "./spec/a_spec.rb[1:1]" => hits })
+      fake_child
+
+      expect(baseline.coverage_map.records).to be_empty
+      expect(baseline.last_refresh).to eq(:full)
     end
 
     it "rebuilds coverage when the setup context changes" do

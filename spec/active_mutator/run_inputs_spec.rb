@@ -57,7 +57,7 @@ RSpec.describe ActiveMutator::RunInputs do
   end
   [
     ["--require mode", "lib/mode.rb"],
-    ["--require mode", "spec/mode.rb"],
+    ["--require mode_spec", "spec/mode_spec.rb"],
     ["--default-path test --require mode", "test/mode.rb"],
     ["-I helpers --require mode", "helpers/mode.rb"]
   ].each do |options, path|
@@ -114,5 +114,81 @@ RSpec.describe ActiveMutator::RunInputs do
     inputs = described_class.new(ActiveMutator::CLI.parse(%w[--spec-path test]))
     map = ActiveMutator::CoverageMap.new("digests" => { "test/a_spec.rb" => "test", "testing/b.rb" => "outside" })
     expect(inputs.spec_digests(map)).to eq("test/a_spec.rb" => "test")
+  end
+  it "requires RSpec core before inspecting options" do
+    inputs = described_class.allocate
+    expect(inputs).to receive(:require).with("rspec/core").and_call_original
+
+    inputs.send(:initialize, ActiveMutator::CLI.parse([]))
+  end
+
+  it "keeps fingerprint implementation private" do
+    inputs = described_class.new(ActiveMutator::CLI.parse([]))
+    expect(inputs).not_to respond_to(:setup_fingerprint)
+    expect(inputs).not_to respond_to(:require_files)
+  end
+
+  it "tracks local RSpec options even when their require list stays the same" do
+    make_input(".rspec-local", "--order defined")
+    original = fingerprint
+    make_input(".rspec-local", "--order rand")
+    expect(fingerprint).not_to eq(original)
+  end
+
+  it "ignores load-path lookalikes of explicit RSpec require paths" do
+    make_input(".rspec", "-I helpers --require ./mode.rb")
+    make_input("mode.rb", "MODE = 1")
+    make_input("helpers/mode.rb", "MODE = 2")
+    original = fingerprint
+    make_input("helpers/mode.rb", "MODE = 3")
+    expect(fingerprint).to eq(original)
+  end
+
+  it "tracks the default XDG options file" do
+    config_dir = File.expand_path("user-config")
+    allow(ENV).to receive(:fetch).and_call_original
+    allow(ENV).to receive(:fetch).with("XDG_CONFIG_HOME", anything) { |_key, default| default }
+    allow(File).to receive(:expand_path).and_call_original
+    allow(File).to receive(:expand_path).with("~/.config").and_return(config_dir)
+    original = fingerprint
+    make_input(File.join(config_dir, "rspec/options"), "--order defined")
+    expect(fingerprint).not_to eq(original)
+  end
+
+  it "tracks runtime RSpec options" do
+    allow(ENV).to receive(:[]).and_call_original
+    allow(ENV).to receive(:[]).with("SPEC_OPTS").and_return(nil)
+    original = fingerprint
+    allow(ENV).to receive(:[]).with("SPEC_OPTS").and_return("--order rand")
+    expect(fingerprint).not_to eq(original)
+  end
+
+  it "uses the worker's default Rails environment and tracks overrides" do
+    allow(ENV).to receive(:fetch).and_call_original
+    allow(ENV).to receive(:fetch).with("RAILS_ENV", anything) { |_key, default| default }
+    default = fingerprint
+    allow(ENV).to receive(:fetch).with("RAILS_ENV", anything).and_return("test")
+    expect(fingerprint).to eq(default)
+    allow(ENV).to receive(:fetch).with("RAILS_ENV", anything).and_return("custom")
+    expect(fingerprint).not_to eq(default)
+  end
+
+  it "tracks edits to the installed gem even if its version field stays the same" do
+    file = File.expand_path("../../lib/active_mutator/worker.rb", __dir__)
+    original = fingerprint
+    allow(Digest::SHA256).to receive(:file).and_call_original
+    allow(Digest::SHA256).to receive(:file).with(file).and_return(Digest::SHA256.new.update("changed"))
+    expect(fingerprint).not_to eq(original)
+  end
+  it "keeps the setup fingerprint when file enumeration order changes" do
+    make_input("config/a.rb", "A = 1")
+    make_input("config/b.rb", "B = 2")
+    original = fingerprint
+    allow(Dir).to receive(:glob).and_wrap_original do |glob, pattern, *args, **options|
+      paths = glob.call(pattern, *args, **options)
+      %w[config/**/* **/*.rb].include?(pattern) ? paths.reverse : paths
+    end
+
+    expect(fingerprint).to eq(original)
   end
 end

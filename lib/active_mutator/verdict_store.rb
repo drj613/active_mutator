@@ -12,7 +12,7 @@ module ActiveMutator
       @path = File.join(@root, ".active_mutator", "verdicts.json")
       @source_digests = inputs.source_digests
       @spec_digests = inputs.spec_digests(map)
-      @context = fingerprint([SCHEMA, inputs.setup, Operators::Base::REGISTRY.map(&:name)])
+      @context = fingerprint([inputs.setup, Operators::Base::REGISTRY.filter_map(&:name)])
       @class_body_context = fingerprint([map.records.keys.sort, @spec_digests.sort])
       @entries = read_entries
       @keys = {}.compare_by_identity
@@ -56,7 +56,7 @@ module ActiveMutator
       AtomicFile.write(@path) do
         entries = prune ? {} : read_entries
         updates.each { |key, entry| entry ? entries[key] = entry : entries.delete(key) }
-        JSON.generate(context: @context, entries: entries)
+        JSON.generate(schema: SCHEMA, context: @context, entries: entries)
       end
     rescue SystemCallError
       nil
@@ -84,7 +84,8 @@ module ActiveMutator
 
     def read_entries
       data = JSON.parse(File.read(@path))
-      return {} unless data.is_a?(Hash) && data["context"] == @context && data["entries"].is_a?(Hash)
+      return {} unless data.is_a?(Hash) && data["schema"] == SCHEMA &&
+                       data["context"] == @context && data["entries"].is_a?(Hash)
 
       data["entries"]
     rescue SystemCallError, JSON::ParserError

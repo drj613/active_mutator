@@ -64,4 +64,22 @@ RSpec.describe ActiveMutator::Runner, "incremental cache" do
     expect(File.exist?(File.join(@root, ".active_mutator", "verdicts.json"))).to be(false)
     expect(run_incremental.fetch("carried")).to eq(0)
   end
+  it "leaves previous verdicts intact if a reused runner skips cache reuse" do
+    source = File.read(@source)
+    drift = false
+    bus = ActiveMutator::Events.new.subscribe do |event|
+      if drift && event.type == :phase_end && event.fields[:phase] == :planning
+        File.write(@source, source + "\n# temporary edit")
+      end
+      if drift && event.type == :phase_start && event.fields[:phase] == :mutating
+        File.write(@source, source)
+      end
+    end
+    config = ActiveMutator::CLI.parse(%w[--incremental --jobs 1])
+    runner = described_class.new(config, events: bus, reporter: ActiveMutator::Reporter::Json.new(out: StringIO.new))
+    expect(runner.call).to eq(0)
+    drift = true
+    expect(runner.call).to eq(0)
+    expect(run_incremental.fetch("carried")).to be_positive
+  end
 end

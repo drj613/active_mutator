@@ -41,6 +41,48 @@ RSpec.describe ActiveMutator::VerdictStore do
     cache.save([result(item, :killed)], prune: false)
   end
 
+  it "keeps cache parsing and signatures private" do
+    expect(store).not_to respond_to(:read_entries)
+    expect(store).not_to respond_to(:identity_and_signature)
+  end
+
+  it "rejects an entry claiming a missing signature" do
+    work = item
+    seed(work)
+    data = JSON.parse(File.read(@path))
+    data.fetch("entries").each_value { |entry| entry["signature"] = nil }
+    File.write(@path, JSON.generate(data))
+
+    expect(store(specs: {}).partition([work])).to eq([[work], []])
+  end
+
+  it "does not write verdicts for source files outside the planning snapshot" do
+    work = item
+    seed(work)
+    cache = store(sources: {})
+    cache.partition([work])
+    cache.save([result(work, :killed)], prune: false)
+    expect(JSON.parse(File.read(@path)).fetch("entries")).to be_empty
+  end
+
+  it "carries a method mutant when an unrelated spec changes" do
+    work = item
+    seed(work)
+    unrelated = ActiveMutator::CoverageMap.new("records" => { "./spec/other_spec.rb[1:1]" => [] })
+    changed = spec_digests.merge("spec/other_spec.rb" => "changed")
+    expect(store(specs: changed, coverage: unrelated).partition([work]).last.map(&:status)).to eq([:killed])
+  end
+
+  it "writes version 2 verdicts and rejects an older schema" do
+    work = item
+    seed(work)
+    data = JSON.parse(File.read(@path))
+    expect(data.fetch("schema")).to eq(2)
+
+    File.write(@path, JSON.generate(data.merge("schema" => 1)))
+    expect(store.partition([work])).to eq([[work], []])
+  end
+
   it "ignores results from a different setup" do
     work = item
     seed(work)
@@ -111,6 +153,7 @@ RSpec.describe ActiveMutator::VerdictStore do
     incomplete = store
     incomplete.partition([work])
     incomplete.save([result(work, :killed)], prune: false)
+    expect(JSON.parse(File.read(@path)).fetch("entries")).to be_empty
     expect(store.partition([work])).to eq([[work], []])
   end
 
@@ -167,6 +210,7 @@ RSpec.describe ActiveMutator::VerdictStore do
     cache.save([result(timed_out, :timeout), result(errored, :error), result(inconclusive, :survived),
                 result(skipped, :skipped)], prune: false)
 
+    expect(JSON.parse(File.read(@path)).fetch("entries")).to be_empty
     expect(store.partition(work)).to eq([work, []])
   end
 
