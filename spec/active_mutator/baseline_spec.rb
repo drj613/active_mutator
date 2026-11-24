@@ -394,6 +394,37 @@ RSpec.describe ActiveMutator::Baseline do
       expect(baseline).to have_received(:run_rspec).with(a_string_matching(%r{/baseline-[^/]+/coverage.json\z}))
     end
 
+    it "rebuilds a cache stamped for a different project root" do
+      write_cache(baseline.send(:current_digests))
+      payload = JSON.parse(File.read(out_path))
+      payload["root"] = "#{@tmp}-moved"
+      File.write(out_path, JSON.generate(payload))
+      fake_child
+
+      expect(baseline.coverage_map.records).to be_empty
+      expect(baseline.last_refresh).to eq(:full)
+      expect(JSON.parse(File.read(out_path)).fetch("root")).to eq(@tmp)
+    end
+
+    it "rebuilds coverage when the setup context changes" do
+      dependent = described_class.new(root: @tmp, cache_dir: tmp_cache, setup: "new setup")
+      write_cache(dependent.send(:current_digests))
+      payload = JSON.parse(File.read(out_path))
+      payload["root"] = @tmp
+      payload["setup"] = "old setup"
+      File.write(out_path, JSON.generate(payload))
+      allow(dependent).to receive(:run_rspec) do |path|
+        File.write(path, JSON.generate("version" => 2, "records" => {}))
+        true
+      end
+
+      expect(dependent.coverage_map.records).to be_empty
+      expect(dependent.last_refresh).to eq(:full)
+      expect(JSON.parse(File.read(out_path)).fetch("setup")).to eq("new setup")
+      dependent.coverage_map
+      expect(dependent.last_refresh).to eq(:cached)
+    end
+
     it "reads its own subprocess payload when another full baseline completes concurrently" do
       other = described_class.new(root: @tmp, cache_dir: tmp_cache)
       allow(other).to receive(:run_rspec) do |path|
