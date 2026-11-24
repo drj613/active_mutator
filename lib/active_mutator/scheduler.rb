@@ -25,7 +25,8 @@ module ActiveMutator
     # sequence after phase 1's keeps mutant numbers unique across the run.
     def initialize(jobs:, worker: Worker.method(:run), on_result: nil,
                    calibrators: nil, orphaned: Scheduler.parent_changed,
-                   events: Events.new, first_seq: 1, abort: AbortFlag.new, term_grace: TERM_GRACE)
+                   events: Events.new, first_seq: 1, abort: AbortFlag.new, term_grace: TERM_GRACE, killer_memory: nil)
+      @killer_memory = killer_memory
       @abort = abort
       @term_grace = term_grace
       @jobs = jobs
@@ -229,7 +230,7 @@ module ActiveMutator
     # the covering set is the same or close) most likely dies to the same
     # spec: run the group that killed the last one first. The set is unchanged.
     def prioritized(item)
-      key = @killers[item.mutation.subject]
+      key = @killer_memory ? @killer_memory.group_for(item) : @killers[item.mutation.subject]
       return item unless key
 
       first, rest = item.example_ids.partition { |id| ExampleId.group_key(id) == key }
@@ -267,7 +268,13 @@ module ActiveMutator
     def selected(item) = item.example_ids.filter_map { |id| ExampleId.normalize(id) }
 
     def learn_killer(item, killer)
-      @killers[item.mutation.subject] = ExampleId.group_key(killer) if killer
+      return unless killer
+
+      if @killer_memory
+        @killer_memory.remember(item, killer)
+      else
+        @killers[item.mutation.subject] = ExampleId.group_key(killer)
+      end
     end
 
     def finish(entry, seconds)

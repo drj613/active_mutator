@@ -270,6 +270,11 @@ survivors show inline on the PR diff. Pairs with the CI recipe:
   newly-covering-example case since 0.2). Add `--audit-tests` to also list
   tests that never kill a mutant (below).
 
+Active Mutator saves the last verified killing example for each subject in
+`.active_mutator/killers.json`. When that example still covers a mutant, its
+group runs first. The file survives `--force-baseline` and can be restored
+alongside the coverage cache in CI.
+
 ### Tests with no kills observed
 
 A test can run a method, pass, and check nothing: a missing `expect`, or a

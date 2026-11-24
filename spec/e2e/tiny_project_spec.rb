@@ -9,6 +9,26 @@ RSpec.describe "tiny_project end-to-end", :e2e do
   before { ensure_fixture_bundle! }
   after { FileUtils.rm_rf(File.join(root, ".active_mutator")) }
 
+  def run_json(dir, *flags)
+    stdout, stderr, status = Bundler.with_unbundled_env do
+      Open3.capture3(
+        { "BUNDLE_GEMFILE" => File.join(dir, "Gemfile") },
+        "bundle", "exec", "active_mutator", "--format", "json", "--jobs", "1", *flags,
+        chdir: dir
+      )
+    end
+    raise stderr unless [0, 1].include?(status.exitstatus) && !stdout.empty?
+    JSON.parse(stdout)
+  end
+
+  it "persists verified killers across a forced baseline" do
+    run_json(root)
+    path = File.join(root, ".active_mutator", "killers.json")
+    expect(JSON.parse(File.read(path)).values).to include(a_string_matching(/calculator_spec.rb/))
+    run_json(root, "--force-baseline")
+    expect(JSON.parse(File.read(path))).not_to be_empty
+  end
+
   it "kills tested mutants, surfaces the planted survivor and uncovered method" do
     stdout, stderr, status = Bundler.with_unbundled_env do
       Open3.capture3(
