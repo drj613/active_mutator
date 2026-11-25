@@ -44,6 +44,8 @@ module ActiveMutator
         FileUtils.mkdir_p(File.dirname(path))
         AtomicFile.write(path, JSON.pretty_generate(report))
         @out.puts "", "", "Stryker report written to #{REPORT_PATH}"
+        carried = results.count(&:carried)
+        @out.puts "carried: #{carried}" if carried.positive?
         return unless aborted
 
         @out.puts "Run aborted (#{Terminal::ABORT_LABELS.fetch(aborted[:reason])}): " \
@@ -60,6 +62,7 @@ module ActiveMutator
           "thresholds" => { "high" => 80, "low" => 60 },
           "projectRoot" => @root,
           "config" => { "active_mutator" => { "invalid_discarded" => invalid_count,
+                                              "carried" => results.count(&:carried),
                                               "version" => VERSION } },
           "files" => mutants_by_file.to_h { |file, rs| [relative(file), file_entry(file, rs)] }
         }

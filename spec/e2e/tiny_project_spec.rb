@@ -29,6 +29,89 @@ RSpec.describe "tiny_project end-to-end", :e2e do
     expect(JSON.parse(File.read(path))).not_to be_empty
   end
 
+  it "carries kills and survivors and invalidates only affected work" do
+    with_fixture_copy do |copy|
+      File.write(File.join(copy, "lib", "counter.rb"), <<~RUBY)
+        class Counter
+          def count
+            2
+          end
+        end
+      RUBY
+      File.open(File.join(copy, "spec", "spec_helper.rb"), "a") do |file|
+        file.puts 'require_relative "../lib/counter"'
+      end
+      counter_spec = File.join(copy, "spec", "counter_spec.rb")
+      File.write(counter_spec, <<~RUBY)
+        require_relative "../lib/counter"
+        RSpec.describe Counter do
+          it { expect(Counter.new.count).to eq(2) }
+        end
+      RUBY
+
+      first = run_json(copy, "--incremental")
+      second = run_json(copy, "--incremental", "--events", "events.ndjson")
+      events = File.readlines(File.join(copy, "events.ndjson")).map { |line| JSON.parse(line).fetch("event") }
+      expect(events).not_to include("mutant_start")
+      expect(second.fetch("counts")).to eq(first.fetch("counts"))
+      eligible = second.fetch("results").select { |r| %w[killed survived].include?(r.fetch("status")) }
+      expect(eligible.map { |r| r["carried"] }).to all(be(true))
+      expect(second.fetch("carried")).to eq(eligible.size)
+      expect(eligible.map { |r| r["seconds"] }).to all(be_nil)
+
+      File.open(File.join(copy, "lib", "calculator.rb"), "a") { |file| file.puts "# source edit" }
+      third = run_json(copy, "--incremental")
+      carried_subjects = third.fetch("results").select { |r| r["carried"] }.map { |r| r["subject"] }.uniq
+      expect(carried_subjects).to eq(["Counter#count"]), third.fetch("results").inspect
+
+      File.open(counter_spec, "a") { |file| file.puts "# spec edit" }
+      fourth = run_json(copy, "--incremental")
+      counter = fourth.fetch("results").find { |r| r["subject"] == "Counter#count" }
+      expect(counter["carried"]).to be(false)
+      expect(fourth.fetch("results").any? { |r| r["carried"] }).to be(true)
+    end
+  end
+
+  it "shares coverage between run modes with RSpec status persistence enabled" do
+    with_fixture_copy do |copy|
+      File.open(File.join(copy, "spec/spec_helper.rb"), "a") do |file|
+        file.puts 'RSpec.configure { |config| config.example_status_persistence_file_path = "spec/examples.txt" }'
+      end
+      phases = lambda do |*flags|
+        result = run_json(copy, "--no-preload-helper", "--events", "events.ndjson", *flags)
+        events = File.readlines(File.join(copy, "events.ndjson")).map { |line| JSON.parse(line) }
+        [result, events]
+      end
+
+      phases.call
+      cold, events = phases.call("--incremental")
+      expect(events).not_to include(a_hash_including("event" => "phase_start", "phase" => "baseline"))
+      expect(cold.fetch("carried")).to eq(0)
+      warm, events = phases.call("--incremental")
+      expect(warm.fetch("carried")).to be_positive
+      expect(events).not_to include(a_hash_including("event" => "mutant_start"))
+      plain, events = phases.call
+      expect(plain.fetch("counts")).to eq(warm.fetch("counts"))
+      expect(events).not_to include(a_hash_including("event" => "phase_start", "phase" => "baseline"))
+    end
+  end
+
+  it "reruns a mutant when a covering example's executed helper changes" do
+    with_fixture_copy do |copy|
+      write_limit_fixture(copy)
+      logic = File.join(copy, "lib/calculator.rb")
+      File.write(logic, "require_relative 'limits'\n" + File.read(logic).sub("n > 10", "n > Limits.edge"))
+      limits = File.join(copy, "lib/limits.rb")
+      File.write(limits, "module Limits\n  def self.edge\n    3\n  end\nend\n")
+      write_cases(copy, 3)
+
+      expect(boundary_result(run_json(copy, "--incremental"))).to include("status" => "killed")
+      File.write(limits, File.read(limits).sub("    3", "    10"))
+      expect(boundary_result(run_json(copy, "--incremental")))
+        .to include("status" => "survived", "carried" => false)
+    end
+  end
+
   it "reports mutations when the warm cache is read-only" do
     run_json(root)
     cache = File.join(root, ".active_mutator")
@@ -36,6 +119,140 @@ RSpec.describe "tiny_project end-to-end", :e2e do
     expect(run_json(root).fetch("counts").fetch("killed")).to be_positive
   ensure
     File.chmod(0o755, cache) if cache && File.directory?(cache)
+  end
+
+  def write_limit_fixture(copy)
+    File.write(File.join(copy, "lib/calculator.rb"), <<~RUBY)
+      class Calculator
+        def over?(n)
+          n > 10
+        end
+      end
+    RUBY
+    File.write(File.join(copy, "spec/calculator_spec.rb"), <<~RUBY)
+      require "json"
+      RSpec.describe Calculator do
+        JSON.parse(File.read(File.join(__dir__, "cases.json"))).each do |n, expected|
+          it(n.to_s) { expect(Calculator.new.over?(n)).to eq(expected) }
+        end
+      end
+    RUBY
+    write_cases(copy, 10)
+  end
+
+  def write_cases(copy, boundary_case)
+    File.write(File.join(copy, "spec/cases.json"), JSON.generate([[11, true], [boundary_case, false]]))
+  end
+
+  def boundary_result(report)
+    report.fetch("results").find { |result| result["replacement"] == ">=" }
+  end
+
+  it "invalidates verdicts when a spec data file changes" do
+    with_fixture_copy do |copy|
+      write_limit_fixture(copy)
+      expect(boundary_result(run_json(copy, "--incremental"))).to include("status" => "killed")
+      write_cases(copy, 5)
+      expect(boundary_result(run_json(copy, "--incremental")))
+        .to include("status" => "survived", "carried" => false)
+    end
+  end
+
+  it "invalidates verdicts when an extensionless require changes" do
+    with_fixture_copy do |copy|
+      write_limit_fixture(copy)
+      mode = File.join(copy, "mode.rb")
+      File.write(mode, "LIMIT_EDGE = 10")
+      spec = File.join(copy, "spec/calculator_spec.rb")
+      File.write(spec, <<~RUBY)
+        RSpec.describe Calculator do
+          it { expect(Calculator.new.over?(defined?(LIMIT_EDGE) ? LIMIT_EDGE : 10)).to be(false) }
+        end
+      RUBY
+      flags = %w[--incremental --require mode]
+      expect(boundary_result(run_json(copy, *flags))).to include("status" => "killed")
+      File.write(mode, "LIMIT_EDGE = 5")
+      expect(boundary_result(run_json(copy, *flags))).to include("status" => "survived", "carried" => false)
+    end
+  end
+
+  it "invalidates coverage and verdicts together when RSpec setup changes" do
+    with_fixture_copy do |copy|
+      write_limit_fixture(copy)
+      File.write(File.join(copy, ".rspec-local"), "--require ./mode.rb\n")
+      mode = File.join(copy, "mode.rb")
+      File.write(mode, "CHECK_BOUNDARY = true")
+      File.write(File.join(copy, "spec/calculator_spec.rb"), <<~RUBY)
+        RSpec.describe Calculator do
+          let(:check_boundary) { !defined?(CHECK_BOUNDARY) || CHECK_BOUNDARY }
+          it("exercises the method") { Calculator.new.over?(11) unless check_boundary }
+          it("checks the boundary") { expect(Calculator.new.over?(10)).to be(false) if check_boundary }
+        end
+      RUBY
+      expect(boundary_result(run_json(copy, "--incremental"))).to include("status" => "killed")
+      File.write(mode, "CHECK_BOUNDARY = false")
+      expect(boundary_result(run_json(copy, "--incremental")))
+        .to include("status" => "survived", "carried" => false)
+      File.unlink(File.join(copy, ".rspec-local"))
+      expect(boundary_result(run_json(copy, "--incremental", "--force-baseline")))
+        .to include("status" => "killed", "carried" => false)
+    end
+  end
+
+  it "rebuilds a coverage map restored at a different checkout path" do
+    with_fixture_copy do |copy|
+      first = run_json(copy, "--incremental")
+      relocated = File.join(File.dirname(copy), "relocated")
+      FileUtils.cp_r(copy, relocated)
+      expect(run_json(relocated, "--incremental").fetch("counts")).to eq(first.fetch("counts"))
+    end
+  end
+
+  it "keeps unrelated verdicts after a scoped incremental run" do
+    with_fixture_copy do |copy|
+      run_json(copy, "--incremental")
+      run_json(copy, "--incremental", "--subject", "Calculator#eligible?")
+      full = run_json(copy, "--incremental")
+      eligible = full.fetch("results").select { |r| %w[killed survived].include?(r.fetch("status")) }
+      expect(eligible.map { |r| r["carried"] }).to all(be(true))
+    end
+  end
+
+  it "does not publish a verdict under a source digest newer than its plan" do
+    with_fixture_copy do |copy|
+      File.write(File.join(copy, "lib/calculator.rb"), <<~RUBY)
+        class Calculator
+          def value(n)
+            n > 0 ? 1 : 2
+          end
+        end
+      RUBY
+      File.write(File.join(copy, "spec/calculator_spec.rb"), <<~RUBY)
+        RSpec.describe Calculator do
+          it { expect(Calculator.new.value(1)).to eq(1) }
+        end
+      RUBY
+      hook = <<~'RUBY'
+        require "active_mutator"
+        events = ActiveMutator::Events.new.subscribe do |event|
+          next unless event.type == :phase_end && event.fields[:phase] == :planning
+
+          path = "lib/calculator.rb"
+          File.write(path, File.read(path).sub("? 1 : 2", "? 1 : 1"))
+        end
+        config = ActiveMutator::CLI.parse(%w[--incremental --format json --jobs 1])
+        exit ActiveMutator::Runner.new(config, events: events).call
+      RUBY
+      Bundler.with_unbundled_env do
+        _, stderr, status = Open3.capture3(
+          { "BUNDLE_GEMFILE" => File.join(copy, "Gemfile") },
+          "bundle", "exec", "ruby", "-e", hook, chdir: copy
+        )
+        expect(status.exitstatus).to be_between(0, 1), stderr
+      end
+      condition = run_json(copy, "--incremental").fetch("results").find { |r| r["replacement"] == "false" }
+      expect(condition).to include("status" => "survived", "carried" => false)
+    end
   end
 
   it "kills tested mutants, surfaces the planted survivor and uncovered method" do
@@ -160,6 +377,11 @@ RSpec.describe "tiny_project end-to-end", :e2e do
       expect(flagged.first["killable_mutants"]).to be_positive
       expect(audit["ignored"]).to eq(["./spec/calculator_spec.rb[1:1:5]"]), stderr
       expect(audit["mutants_run"]).to be_positive
+      run_json(copy, "--incremental", "--audit-tests")
+      carried = run_json(copy, "--incremental", "--audit-tests")
+      carried_audit = carried.fetch("test_audit")
+      expect(carried.fetch("carried")).to be_positive
+      expect(carried_audit).to eq(audit.merge("mutants_run" => 0))
       expect(status.exitstatus).to eq(1) # unchanged: the planted survivors still fail the run
     end
   end

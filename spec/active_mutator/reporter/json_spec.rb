@@ -80,6 +80,7 @@ RSpec.describe ActiveMutator::Reporter::Json do
       "score" => nil,
       "counts" => { "killed" => 0, "survived" => 0, "timeout" => 0, "error" => 0,
                     "uncovered" => 0, "accepted" => 0, "skipped" => 0 },
+      "carried" => 0,
       "invalid" => 0,
       "operators" => {},
       "results" => [],

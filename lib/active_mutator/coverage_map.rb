@@ -8,10 +8,11 @@ module ActiveMutator
   class CoverageMap
     def self.load(path) = new(JSON.parse(File.read(path)))
 
-    attr_reader :version, :records, :digests, :spec_paths
+    attr_reader :version, :records, :digests, :spec_paths, :status_file
 
     def initialize(data)
       @version = data["version"]
+      @status_file = data["status_file"]
       @records = data.fetch("records", {})
       @times = data.fetch("times", {})
       @digests = data.fetch("digests", {})

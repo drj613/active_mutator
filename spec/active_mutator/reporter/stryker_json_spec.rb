@@ -43,6 +43,13 @@ RSpec.describe ActiveMutator::Reporter::StrykerJson do
     expect(report["projectRoot"]).to eq(@root)
   end
 
+  it "reports the number of carried verdicts in the tool configuration" do
+    carried = build_result(:killed, file: @file).with(carried: true)
+    fresh = build_result(:survived, file: @file)
+
+    expect(report_after([carried, fresh]).dig("config", "active_mutator", "carried")).to eq(1)
+  end
+
   it "creates the report directory when an empty plan skipped the baseline" do
     FileUtils.rm_rf(File.join(@root, ".active_mutator"))
     expect { reporter.summary([], invalid_count: 0, empty_plan: true) }.not_to raise_error

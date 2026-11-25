@@ -38,12 +38,19 @@ RSpec.describe ActiveMutator::Baseline do
                                        "times" => {}, "digests" => digests, "spec_paths" => ["spec"]))
   end
 
-  def cache_reads
+  def cache_reads(include_full_payload: false)
     reads = 0
     allow(File).to receive(:read).and_call_original
     allow(File).to receive(:read).with(out_path).and_wrap_original do |original, *args|
       reads += 1
       original.call(*args)
+    end
+    if include_full_payload
+      allow(File).to receive(:read).with(a_string_matching(%r{/baseline-[^/]+/coverage.json\z}))
+                                   .and_wrap_original do |original, *args|
+        reads += 1
+        original.call(*args)
+      end
     end
     yield
     reads
@@ -75,7 +82,7 @@ RSpec.describe ActiveMutator::Baseline do
     fake_child("./spec/a_spec.rb[1:1]" => a_hit)
 
     map = nil
-    expect(cache_reads { map = baseline.coverage_map }).to eq(1)
+    expect(cache_reads(include_full_payload: true) { map = baseline.coverage_map }).to eq(1)
     expect(baseline.last_refresh).to eq(:full)
     expect(map.examples_for(File.join(@root, "lib/a.rb"), [1])).to eq(["./spec/a_spec.rb[1:1]"])
     stamped = JSON.parse(File.read(out_path))
@@ -86,7 +93,7 @@ RSpec.describe ActiveMutator::Baseline do
     write_cache("Gemfile.lock" => "old") # a non-.rb change forces a full rebuild
     fake_child("./spec/a_spec.rb[1:1]" => a_hit)
 
-    expect(cache_reads { baseline.coverage_map }).to eq(2)
+    expect(cache_reads(include_full_payload: true) { baseline.coverage_map }).to eq(2)
     expect(baseline.last_refresh).to eq(:full)
   end
 end

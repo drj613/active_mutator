@@ -78,7 +78,7 @@ module ActiveMutator
     # mutant already streamed in phase 1. The final summary reflects the
     # escalated verdicts regardless.
     def escalate_class_body_survivors(results, scheduler, map, phase1_ids:)
-      candidates = results.select { |r| r.status == :survived && r.mutation.subject.class_body? }
+      candidates = results.select { |r| !r.carried && r.status == :survived && r.mutation.subject.class_body? }
       # Perf gate: skip reading the whole spec suite into memory in the common
       # case of no class-body survivors. (Deleting this line is a behavioral
       # no-op — the later `items.empty?` return still guards correctness — so
@@ -131,6 +131,7 @@ module ActiveMutator
           # already survived phase 1, so keep that verdict rather than letting
           # an inconclusive escalation inflate the score (a :timeout counts as
           # detected in exit_code/score).
+          @verdicts&.discard(r.mutation)
           r
         end
       end
@@ -145,9 +146,16 @@ module ActiveMutator
                                   first_seq: phase1_ids.size + @escalated + 1, abort: @abort, orphaned: orphaned, **killer_options)
       audit = TestAudit.new(results: results, example_ids: phase1_ids, width: @config.jobs,
                             build: ->(mutation, ids) { build_work_item(mutation, ids, map) },
-                            run: scheduler.method(:run))
+                            run: scheduler.method(:run), retain_evidence: @config.incremental)
       report = @events.phase(:auditing) { audit.call }
-      [with_audit_kills(results, report.kills), report]
+      audited = with_audit_kills(results, report.kills).map do |result|
+        evidence = audit.evidence[result.mutation]
+        next result unless evidence
+
+        result.with(passed: result.passed.merge(evidence.passed),
+                    ignored: (result.ignored + evidence.ignored).uniq)
+      end
+      [audited, report]
     rescue Aborted => e
       # The verdicts are final and the kills seen are real; the flags need
       # a finished audit, so they go.
@@ -174,10 +182,13 @@ module ActiveMutator
     private
 
     def run
+      inputs = RunInputs.new(@config)
+      inputs.setup if @config.incremental
       @events.phase(:boot) { boot! }
       discovery, analyses = @events.phase(:planning) do
         found = discover
-        [found, found.subjects.map { |s| Engine.new.analyze(s) }]
+        analyses = @config.incremental ? inputs.analyze(found.subjects) : found.subjects.map { |s| Engine.new.analyze(s) }
+        [found, analyses]
       end
       subjects = discovery.subjects
       mutations = analyses.flat_map(&:mutations)
@@ -195,7 +206,8 @@ module ActiveMutator
         return empty_plan_exit(@invalid_count, discovery)
       end
 
-      map = Baseline.new(root: @config.root, spec_paths: @config.spec_paths, events: @events, abort: @abort)
+      map = Baseline.new(root: @config.root, spec_paths: @config.spec_paths, events: @events, abort: @abort,
+                         inputs: inputs)
               .coverage_map(force: @config.force_baseline)
       @reporter.coverage_map = map if @reporter.respond_to?(:coverage_map=)
 
@@ -207,11 +219,19 @@ module ActiveMutator
       items, pre_results, phase1_ids = plan_work(mutations, map, ledger: ledger, fingerprints: fingerprints)
       return debug_plan(items, pre_results) if @config.debug_plan
 
+      @verdicts = if @config.incremental && inputs.stable?(map)
+                    VerdictStore.new(@config, map, inputs: inputs)
+                  end
+      if @verdicts
+        items, carried = @verdicts.partition(items)
+        pre_results.concat(carried)
+      end
+      @killer_memory = KillerMemory.new(@config.root)
+
       # From here on a trip only records its reason. Raised at once, it could
       # land between two steps (the sample as mutating ends, the spec reads
       # before escalation) and drop every finished verdict. Each step checks
       # the flag instead and raises with the results it has.
-      @killer_memory = KillerMemory.new(@config.root)
       test_audit = nil # read after the block, for the exit code
       results = @abort.deferred do
         done = @events.phase(:mutating, mutants: items.size) { mutate(items, pre_results) }
@@ -224,8 +244,9 @@ module ActiveMutator
         test_audit = test_audit&.with(fail_on_flags: @config.fail_on_no_kills)
 
         reporting(done) do
-          prune_killers = narrowing_flags.empty? && @config.paths.empty? && @config.exclude.empty? && @config.class_level
-          @killer_memory.save(subjects: prune_killers ? subjects : nil)
+          prune_caches = narrowing_flags.empty? && @config.paths.empty? && @config.exclude.empty? && @config.class_level
+          @killer_memory.save(subjects: prune_caches ? subjects : nil)
+          @verdicts.save(done, prune: prune_caches) if @verdicts && inputs.stable?(map)
           accept_survivors!(ledger, done, fingerprints, scanned_files) if @config.accept_survivors
           # Only when it ran, so an injected reporter without the keyword still works.
           extra = test_audit ? { test_audit: test_audit } : {}
@@ -641,7 +662,8 @@ module ActiveMutator
     end
 
     # The audit judges a test by every mutant it covers, so v1 needs a full
-    # run: prune_scope's narrowing flags, plus path arguments.
+    # plan: prune_scope's narrowing flags, plus path arguments. An incremental
+    # run supplies the same plan with freshly checked or valid carried results.
     # --no-class-level is fine, since the audit judges def mutants only.
     def full_run_for_audit?
       narrowed = narrowing_flags

@@ -275,6 +275,32 @@ Active Mutator saves the last verified killing example for each subject in
 group runs first. The file survives `--force-baseline` and can be restored
 alongside the coverage cache in CI.
 
+### Incremental runs
+
+Run `bundle exec active_mutator --incremental` to save killed and surviving
+verdicts in `.active_mutator/verdicts.json`. Restore the file with the coverage
+cache in CI. Each subsequent incremental run refreshes coverage before checking
+the mutant's source file, edit, covering example IDs, covering spec files, and
+application files the covering examples executed during baseline. Class-body
+mutants also check the broader set used for escalation. Changes to the gem,
+Ruby, operators, or shared test setup rebuild coverage and invalidate verdicts.
+Shared setup includes RSpec options, required setup files, Rails schema files,
+and data and support files under the configured spec paths. RSpec's example
+status file is excluded when the suite does not use it to select examples.
+Entries have no age limit. Plain and incremental runs share the coverage cache.
+A different absolute checkout path rebuilds coverage before checking verdicts.
+
+Timeouts, errors, and skipped mutants run again. Coverage and accepted mutants
+are evaluated from the current plan. The summary counts carried verdicts, and
+`--format json` marks them with `"carried": true`.
+
+An unscoped `--incremental --audit-tests` run uses cached audit evidence and runs
+any remaining checks. Baseline coverage misses dependencies used only during
+mutation and code Ruby cannot attribute to an example. Keep a fresh run as your
+merge gate, and add `--force-baseline` when changes can affect coverage. A forced baseline
+refresh can be combined with `--incremental` to rebuild coverage and still reuse
+verdicts whose inputs match.
+
 ### Tests with no kills observed
 
 A test can run a method, pass, and check nothing: a missing `expect`, or a
@@ -319,9 +345,9 @@ end
 
 The tag works on a `describe` or `context` too, since RSpec passes group
 metadata down to its examples. A tagged test is counted as ignored instead
-of flagged, and it drops out after its first audit fork. If it kills a
-mutant in a fork it ran in, it's cleared as usual. The tag lives on the test, not in a file of
-example ids, because ids like `[1:2:3]` shift when tests move.
+of flagged. The audit stops scheduling it after observing the tag in a fork.
+A cached tag can skip carried work, and a fresh mutant can still be checked
+against that example. Any observed kill clears the test.
 
 ### Empty plans in CI
 
@@ -367,6 +393,7 @@ projects used to tell a docs-only PR from a broken `--since` range.
 | `--allow-empty` | off | forgive an empty `--since`/`--subject` plan, but only when the `--since` diff changed no code in a candidate source file (default: warn and exit 1) |
 | `--format terminal\|json\|stryker-json\|github` | terminal | report format |
 | `--accept-survivors` | off | record survivors to the acceptance ledger |
+| `--incremental` | off | carry verified verdicts for unchanged mutants |
 | `--force-baseline` | off | ignore cached coverage map |
 | `--audit-tests` | off | after a full run, list tests that cover killed mutants but never kill one (see [Tests with no kills observed](#tests-with-no-kills-observed)) |
 | `--fail-on-no-kills` | off | turns on `--audit-tests` and exits `1` if it flags any test |

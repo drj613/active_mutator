@@ -391,7 +391,122 @@ RSpec.describe ActiveMutator::Baseline do
       baseline.coverage_map(force: true)
 
       expect(baseline.last_refresh).to eq(:full)
-      expect(baseline).to have_received(:run_rspec).with(out_path)
+      expect(baseline).to have_received(:run_rspec).with(a_string_matching(%r{/baseline-[^/]+/coverage.json\z}))
+    end
+
+    it "rebuilds a cache stamped for a different project root" do
+      write_cache(baseline.send(:current_digests))
+      payload = JSON.parse(File.read(out_path))
+      payload["root"] = "#{@tmp}-moved"
+      File.write(out_path, JSON.generate(payload))
+      fake_child
+
+      expect(baseline.coverage_map.records).to be_empty
+      expect(baseline.last_refresh).to eq(:full)
+      payload = JSON.parse(File.read(out_path))
+      expect(payload.fetch("root")).to eq(@tmp)
+      expect(payload).not_to have_key("setup")
+    end
+
+    it "rebuilds a legacy cache whose hits belong to a different checkout" do
+      hits = [[File.join("#{@tmp}-moved", "lib/a.rb"), 1]]
+      write_cache(baseline.send(:current_digests), records: { "./spec/a_spec.rb[1:1]" => hits })
+      fake_child
+
+      expect(baseline.coverage_map.records).to be_empty
+      expect(baseline.last_refresh).to eq(:full)
+    end
+
+    it "stamps the setup captured before the suite can change its inputs" do
+      fixture = File.join(@tmp, "spec/fixture.txt")
+      File.write(fixture, "original")
+      config = ActiveMutator::CLI.parse([]).with(root: @tmp)
+      expected = ActiveMutator::RunInputs.new(config).setup
+      cache = described_class.new(root: @tmp, cache_dir: tmp_cache, inputs: ActiveMutator::RunInputs.new(config))
+      allow(cache).to receive(:run_rspec) do |path|
+        File.write(fixture, "changed by suite")
+        File.write(path, JSON.generate("version" => 2, "records" => {}))
+        true
+      end
+
+      cache.coverage_map
+      expect(JSON.parse(File.read(out_path)).fetch("setup")).to eq(expected)
+    end
+
+    it "updates status metadata only when a partial run reports it" do
+      first = "./spec/a_spec.rb[1:1]"
+      second = "./spec/b_spec.rb[1:1]"
+      file = File.join(@tmp, "spec/b_spec.rb")
+      write_cache(baseline.send(:current_digests), records: { first => a_hit, second => a_hit })
+      payload = JSON.parse(File.read(out_path)).merge("status_file" => "spec/old_status.txt")
+      File.write(out_path, JSON.generate(payload))
+      File.write(file, "RSpec.describe(A) { it { A.new.x } }")
+      fake_child(payload: { "records" => { second => a_hit }, "status_file" => "spec/new_status.txt" })
+
+      expect(baseline.coverage_map.status_file).to eq("spec/new_status.txt")
+      expect(baseline.last_refresh).to eq(:partial)
+
+      File.unlink(file)
+      expect(baseline.coverage_map.status_file).to eq("spec/new_status.txt")
+      expect(baseline.last_refresh).to eq(:partial)
+    end
+
+    it "excludes the baseline's status output from saved input digests and refresh checks" do
+      status_file = "spec/status.rb"
+      status_path = File.join(@tmp, status_file)
+      File.write(status_path, "old status")
+      inputs = instance_double(ActiveMutator::RunInputs)
+      allow(inputs).to receive(:setup).with(no_args).and_return("before discovery")
+      allow(inputs).to receive(:setup).with(status_file: status_file).and_return("setup without status")
+      cache = described_class.new(root: @tmp, cache_dir: tmp_cache, inputs: inputs)
+      allow(cache).to receive(:run_rspec) do |path|
+        File.write(path, JSON.generate("version" => 2, "records" => {}, "status_file" => status_file))
+        File.write(status_path, "new status")
+        true
+      end
+
+      map = cache.coverage_map
+      expect(map.status_file).to eq(status_file)
+      expect(map.digests).not_to have_key(status_file)
+      expect(JSON.parse(File.read(out_path)).fetch("setup")).to eq("setup without status")
+      File.write(status_path, "newer status")
+      expect(cache.coverage_map.digests).to eq(map.digests)
+      expect(cache.last_refresh).to eq(:cached)
+    end
+
+    it "rebuilds coverage when the setup context changes" do
+      inputs = instance_double(ActiveMutator::RunInputs, setup: "new setup")
+      dependent = described_class.new(root: @tmp, cache_dir: tmp_cache, inputs: inputs)
+      write_cache(dependent.send(:current_digests))
+      payload = JSON.parse(File.read(out_path))
+      payload["root"] = @tmp
+      payload["setup"] = "old setup"
+      File.write(out_path, JSON.generate(payload))
+      allow(dependent).to receive(:run_rspec) do |path|
+        File.write(path, JSON.generate("version" => 2, "records" => {}))
+        true
+      end
+
+      expect(dependent.coverage_map.records).to be_empty
+      expect(dependent.last_refresh).to eq(:full)
+      expect(JSON.parse(File.read(out_path)).fetch("setup")).to eq("new setup")
+      dependent.coverage_map
+      expect(dependent.last_refresh).to eq(:cached)
+    end
+
+    it "reads its own subprocess payload when another full baseline completes concurrently" do
+      other = described_class.new(root: @tmp, cache_dir: tmp_cache)
+      allow(other).to receive(:run_rspec) do |path|
+        File.write(path, JSON.generate("version" => 2, "records" => { "./spec/b_spec.rb[1:1]" => a_hit }))
+        true
+      end
+      allow(baseline).to receive(:run_rspec) do |path|
+        File.write(path, JSON.generate("version" => 2, "records" => { "./spec/a_spec.rb[1:1]" => a_hit }))
+        other.coverage_map(force: true)
+        true
+      end
+
+      expect(baseline.coverage_map(force: true).records.keys).to eq(["./spec/a_spec.rb[1:1]"])
     end
 
     it "rebuilds rather than delta-refreshing a pre-v2 cache" do
@@ -401,7 +516,7 @@ RSpec.describe ActiveMutator::Baseline do
       baseline.coverage_map
 
       expect(baseline.last_refresh).to eq(:full)
-      expect(baseline).to have_received(:run_rspec).with(out_path)
+      expect(baseline).to have_received(:run_rspec).with(a_string_matching(%r{/baseline-[^/]+/coverage.json\z}))
     end
 
     it "fails a full rebuild when the suite fails" do
@@ -434,8 +549,9 @@ RSpec.describe ActiveMutator::Baseline do
 
         baseline.coverage_map
 
-        expect(baseline).to have_received(:run_rspec).with(File.join(tmp_cache, "partial.json"), ["spec/b_spec.rb"])
-        expect(File.exist?(File.join(tmp_cache, "partial.json"))).to be(false)
+        expect(baseline).to have_received(:run_rspec).with(a_string_matching(%r{/partial-[^/]+/coverage.json\z}),
+                                                        ["spec/b_spec.rb"])
+        expect(Dir.glob("partial-*", base: tmp_cache)).to be_empty
       end
 
       it "fails when the partial run fails" do

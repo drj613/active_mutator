@@ -10,6 +10,7 @@ RSpec.describe ActiveMutator::CLI do
       expect(config.format).to eq(:terminal)
       expect(config.jobs).to be > 0
       expect(config.force_baseline).to be(false)
+      expect(config.incremental).to be(false)
       expect(config.root).to eq(Dir.pwd)
     end
 
@@ -98,6 +99,7 @@ RSpec.describe ActiveMutator::CLI do
         "Mutate class-level code: macros, constants, DSL lambdas (default: on)",
         "Exit 0 if mutation score >= SCORE even with survivors (default: any survivor fails)",
         "Ignore cached coverage map",
+        "Reuse verdicts for unchanged mutants",
         "After a full run, find tests that cover killed mutants but never kill one (slower; meant for nightly runs)",
         "Run the audit (--audit-tests) and exit 1 if it flags any test",
         "Timeout = baseline time * F + floor",

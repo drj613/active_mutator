@@ -29,6 +29,8 @@ module ActiveMutator
         counts = self.class.counts(results)
         @out.puts "", ""
         counts.each { |status, count| @out.puts "#{status}: #{count}" }
+        carried = results.count(&:carried)
+        @out.puts "carried: #{carried}" if carried.positive?
         @out.puts "invalid (discarded): #{invalid_count}"
         if aborted
           print_aborted(aborted, results)

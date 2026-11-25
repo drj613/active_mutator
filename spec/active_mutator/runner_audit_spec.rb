@@ -45,6 +45,19 @@ RSpec.describe ActiveMutator::Runner do
       expect(report.not_judged).to eq([browser])
     end
 
+    it "retains passes and ignored examples for an incremental audit" do
+      scheduler = instance_double(ActiveMutator::Scheduler)
+      passed = { b => "./spec/a_spec.rb:4" }
+      allow(scheduler).to receive(:run).and_return([result(m1, :survived, passed: passed, ignored: [browser])])
+      runner = described_class.new(config.with(incremental: true))
+      result_with_evidence, report = runner.audit_tests([result(m1, :killed, killed_by: [a])], scheduler, map,
+                                                       phase1_ids: { m1 => [a, b, browser] })
+
+      expect(result_with_evidence.first.passed).to eq(passed)
+      expect(result_with_evidence.first.ignored).to eq([browser])
+      expect(report.flagged.map(&:id)).to eq([b])
+    end
+
     it "builds rounds as wide as --jobs" do
       mutants = (2..5).map { |line| mutation(line) }
       scheduler = instance_double(ActiveMutator::Scheduler)

@@ -233,7 +233,7 @@ RSpec.describe ActiveMutator::TestAudit do
     expect(report.cleared).to eq(3)
   end
 
-  it "drops a tagged example from later forks and lists it as ignored, not flagged" do
+  it "drops newly observed tagged examples from later rounds" do
     results = [result(m1, :killed, killed_by: [a]), result(m2, :killed, killed_by: [a])]
     answers = { m1 => ->(_) { result(m1, :survived, passed: passes(c), ignored: [b]) },
                 m2 => ->(_) { result(m2, :survived, passed: passes(c)) } }
@@ -243,6 +243,59 @@ RSpec.describe ActiveMutator::TestAudit do
     expect(report.ignored).to eq([b])
     expect(report.flagged.map(&:id)).to eq([c])
     expect(report.not_judged).to eq([])
+  end
+
+  it "reuses passes and tagged examples only for their own carried mutant" do
+    cached = result(m1, :killed, killed_by: [a], passed: passes(b), ignored: [c]).with(carried: true)
+    fresh = result(m2, :killed, killed_by: [a])
+    report = audit([cached, fresh], { m1 => [a, b, c], m2 => [a, b, c] },
+                   { m2 => ->(_) { result(m2, :survived, passed: passes(b), ignored: [c]) } })
+
+    expect(@rounds).to eq([[[m2, [b, c]]]])
+    expect(report.flagged.map(&:id)).to eq([b])
+    expect(report.ignored).to eq([c])
+  end
+
+  it "does not revisit already ignored examples in an unchanged carried audit" do
+    cached = result(m1, :killed, killed_by: [a], ignored: [b]).with(carried: true)
+    other = result(m2, :killed, killed_by: [a]).with(carried: true)
+    report = audit([cached, other], { m1 => [a, b], m2 => [a, b] })
+
+    expect(@rounds).to be_empty
+    expect(report.ignored).to eq([b])
+  end
+
+  it "checks missing audit evidence for an untagged example on a carried mutant" do
+    cached = result(m1, :killed, killed_by: [a], ignored: [b]).with(carried: true)
+    report = audit([cached], { m1 => [a, b, c] },
+                   { m1 => ->(_) { result(m1, :survived, passed: passes(c)) } })
+
+    expect(@rounds).to eq([[[m1, [c]]]])
+    expect(report.flagged.map(&:id)).to eq([c])
+  end
+
+  it "retains only conclusive passes when asked to keep incremental evidence" do
+    errored = result(m1, :error, passed: passes(b), ignored: [c])
+    [true, false].each do |retain|
+      audit = described_class.new(results: [result(m1, :killed, killed_by: [a])],
+                                   example_ids: { m1 => [a, b, c] }, width: 1,
+                                   build: ->(mutation, ids) { [mutation, ids] }, run: ->(_) { [errored] },
+                                   retain_evidence: retain)
+      audit.call
+
+      expect(audit.evidence).to eq(retain ? { m1 => errored.with(passed: {}) } : {})
+    end
+  end
+
+  it "checks a cached tagged passer against a fresh mutant it could kill" do
+    cached = result(m1, :killed, killed_by: [a], ignored: [b]).with(carried: true)
+    fresh = result(m2, :killed, killed_by: [a])
+    report = audit([cached, fresh], { m1 => [a, b], m2 => [a, b] },
+                   { m2 => ->(_) { result(m2, :killed, killed_by: [b]) } }, width: 1)
+
+    expect(@rounds).to eq([[[m2, [b]]]])
+    expect(report.cleared).to eq(2)
+    expect(report.ignored).to be_empty
   end
 
   it "lists the ignored examples sorted by id" do
