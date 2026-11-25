@@ -280,22 +280,24 @@ alongside the coverage cache in CI.
 Run `bundle exec active_mutator --incremental` to save killed and surviving
 verdicts in `.active_mutator/verdicts.json`. Restore the file with the coverage
 cache in CI. Each subsequent incremental run refreshes coverage before checking
-the mutant's source file, edit, covering example IDs, and covering spec files.
-Class-body mutants also check the broader spec set used for escalation. Changes
-to the gem, Ruby, operators, or shared test setup rebuild coverage and invalidate
-verdicts. Shared setup includes RSpec options, required setup files, Rails schema
-files, and data and support files under the configured spec paths. Entries have
-no age limit. A different absolute checkout path rebuilds coverage before
-checking which verdicts can carry forward.
+the mutant's source file, edit, covering example IDs, covering spec files, and
+application files the covering examples executed during baseline. Class-body
+mutants also check the broader set used for escalation. Changes to the gem,
+Ruby, operators, or shared test setup rebuild coverage and invalidate verdicts.
+Shared setup includes RSpec options, required setup files, Rails schema files,
+and data and support files under the configured spec paths. RSpec's example
+status file is excluded when the suite does not use it to select examples.
+Entries have no age limit. Plain and incremental runs share the coverage cache.
+A different absolute checkout path rebuilds coverage before checking verdicts.
 
 Timeouts, errors, and skipped mutants run again. Coverage and accepted mutants
 are evaluated from the current plan. The summary counts carried verdicts, and
 `--format json` marks them with `"carried": true`.
 
 An unscoped `--incremental --audit-tests` run uses cached audit evidence and runs
-any remaining checks. Use a run without `--incremental` to reevaluate every
-mutant after changes to indirect dependencies or external test state. Add
-`--force-baseline` when those changes can affect coverage. A forced baseline
+any remaining checks. Baseline coverage misses dependencies used only during
+mutation and code Ruby cannot attribute to an example. Keep a fresh run as your
+merge gate, and add `--force-baseline` when changes can affect coverage. A forced baseline
 refresh can be combined with `--incremental` to rebuild coverage and still reuse
 verdicts whose inputs match.
 
@@ -343,9 +345,9 @@ end
 
 The tag works on a `describe` or `context` too, since RSpec passes group
 metadata down to its examples. A tagged test is counted as ignored instead
-of flagged. The audit checks whether it kills any covered mutant and counts
-it as cleared when it does. Tag the example in its spec so the tag stays with
-the example when its ID changes.
+of flagged. The audit stops scheduling it after observing the tag in a fork.
+A cached tag can skip carried work, and a fresh mutant can still be checked
+against that example. Any observed kill clears the test.
 
 ### Empty plans in CI
 

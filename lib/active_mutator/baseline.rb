@@ -9,9 +9,9 @@ module ActiveMutator
   # {app,lib}/**/*.rb or the configured spec paths triggers a full re-run.
   class Baseline
     def initialize(root:, spec_paths: ["spec"], cache_dir: File.join(root, ".active_mutator"), events: Events.new,
-                   abort: AbortFlag.new, setup: nil)
+                   abort: AbortFlag.new, inputs: nil)
       @abort = abort
-      @setup = setup
+      @inputs = inputs
       @root = root
       @spec_paths = spec_paths
       @cache_dir = cache_dir
@@ -26,6 +26,7 @@ module ActiveMutator
     attr_reader :last_refresh, :child_pid
 
     def coverage_map(force: false)
+      @inputs&.setup
       digests = current_digests
       unless force
         map = reuse_cache(digests)
@@ -46,7 +47,7 @@ module ActiveMutator
       return unless File.exist?(@out_path)
 
       data = load_payload
-      return if data["setup"] != @setup
+      return if data["setup"] != @inputs&.setup(status_file: data["status_file"])
       return if different_root?(data)
 
       map = CoverageMap.new(data)
@@ -58,6 +59,7 @@ module ActiveMutator
       # stamped with.
       return unless map.spec_paths == @spec_paths
 
+      digests = digests.except(data["status_file"])
       if map.fresh?(digests)
         @last_refresh = :cached
         return map
@@ -242,15 +244,16 @@ module ActiveMutator
       end
       cache["records"].merge!(part.fetch("records", {}))
       cache["times"].merge!(part.fetch("times", {}))
+      cache["status_file"] = part["status_file"] if part.key?("status_file")
     end
 
     # Writes the stamped payload once and builds the map from the hash in
     # hand, so the file is never parsed back.
     def stamp(data, digests)
-      data["digests"] = digests
+      data["digests"] = digests.except(data["status_file"])
       data["spec_paths"] = @spec_paths
       data["root"] = @root
-      data["setup"] = @setup if @setup
+      data["setup"] = @inputs.setup(status_file: data["status_file"]) if @inputs
       AtomicFile.write(@out_path, JSON.generate(data))
       CoverageMap.new(data)
     end

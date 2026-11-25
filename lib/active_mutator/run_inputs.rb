@@ -3,14 +3,19 @@ require "json"
 
 module ActiveMutator
   class RunInputs
-    attr_reader :setup, :source_digests
+    attr_reader :source_digests
 
     def initialize(config)
       @config = config
       @root = config.root
       @spec_paths = config.spec_paths.map { |path| File.expand_path(path, @root) + "/" }
       @source_digests = {}
-      @setup = setup_fingerprint
+      @load_path = $LOAD_PATH.dup
+    end
+
+    def setup(status_file: nil)
+      @manifest ||= setup_manifest
+      fingerprint(@manifest, status_file)
     end
 
     def analyze(subjects)
@@ -22,9 +27,9 @@ module ActiveMutator
     end
 
     def stable?(map)
-      setup_fingerprint == @setup &&
+      setup(status_file: map.status_file) == fingerprint(setup_manifest, map.status_file) &&
         @source_digests.all? { |path, digest| file_digest(path) == digest } &&
-        spec_digests(map).all? { |path, digest| file_digest(path) == digest }
+        map.digests.all? { |path, digest| file_digest(path) == digest }
     end
 
     def spec_digests(map)
@@ -37,10 +42,10 @@ module ActiveMutator
       @spec_paths.any? { |prefix| absolute.start_with?(prefix) }
     end
 
-    def setup_fingerprint
+    def setup_manifest
       require "rspec/core"
       options = Dir.chdir(@root) { RSpec::Core::ConfigurationOptions.new([]).options }
-      lib_paths = options.fetch(:libs) + ["lib", options.fetch(:default_path, "spec")] + $LOAD_PATH
+      lib_paths = options.fetch(:libs) + ["lib", options.fetch(:default_path, "spec")] + @load_path
       inputs = [".rspec", ".rspec-local", "Gemfile", "Gemfile.lock", "db/schema.rb", "db/structure.sql"]
       inputs << File.expand_path("~/.rspec")
       inputs << File.join(ENV.fetch("XDG_CONFIG_HOME", File.expand_path("~/.config")), "rspec", "options")
@@ -67,11 +72,18 @@ module ActiveMutator
       gem_files = Dir.glob("**/*.rb", base: gem_dir).sort.to_h do |relative|
         [relative, file_digest(File.join(gem_dir, relative))]
       end
-      Digest::SHA256.hexdigest(JSON.generate([
+      runtime = [
         VERSION, RUBY_DESCRIPTION, ENV["SPEC_OPTS"], ENV.fetch("RAILS_ENV", "test"),
         @config.spec_paths, @config.operators, @config.requires, @config.preload_helper,
-        @config.class_level_closure_cap, files, gem_files
-      ]))
+        @config.class_level_closure_cap
+      ]
+      [runtime, files, gem_files]
+    end
+
+    def fingerprint(manifest, status_file)
+      runtime, files, gem_files = manifest
+      files = files.except(status_file) if status_file
+      Digest::SHA256.hexdigest(JSON.generate([runtime, files, gem_files]))
     end
 
     def require_files(file)

@@ -233,13 +233,13 @@ RSpec.describe ActiveMutator::TestAudit do
     expect(report.cleared).to eq(3)
   end
 
-  it "keeps checking tagged examples against other mutants without flagging them" do
+  it "drops newly observed tagged examples from later rounds" do
     results = [result(m1, :killed, killed_by: [a]), result(m2, :killed, killed_by: [a])]
     answers = { m1 => ->(_) { result(m1, :survived, passed: passes(c), ignored: [b]) },
                 m2 => ->(_) { result(m2, :survived, passed: passes(c)) } }
     report = audit(results, { m1 => [a, b, c], m2 => [a, b, c] }, answers, width: 1)
 
-    expect(@rounds.map { |round| round.map(&:last) }).to eq([[[b, c]], [[b, c]]])
+    expect(@rounds.map { |round| round.map(&:last) }).to eq([[[b, c]], [[c]]])
     expect(report.ignored).to eq([b])
     expect(report.flagged.map(&:id)).to eq([c])
     expect(report.not_judged).to eq([])
@@ -254,6 +254,15 @@ RSpec.describe ActiveMutator::TestAudit do
     expect(@rounds).to eq([[[m2, [b, c]]]])
     expect(report.flagged.map(&:id)).to eq([b])
     expect(report.ignored).to eq([c])
+  end
+
+  it "does not revisit already ignored examples in an unchanged carried audit" do
+    cached = result(m1, :killed, killed_by: [a], ignored: [b]).with(carried: true)
+    other = result(m2, :killed, killed_by: [a]).with(carried: true)
+    report = audit([cached, other], { m1 => [a, b], m2 => [a, b] })
+
+    expect(@rounds).to be_empty
+    expect(report.ignored).to eq([b])
   end
 
   it "retains only conclusive passes when asked to keep incremental evidence" do

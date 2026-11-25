@@ -23,7 +23,8 @@ module ActiveMutator
   # suspect is flagged only if it passed against every killed mutant it
   # covers; one gap (an inconclusive fork, a skip) leaves it not judged. A
   # passing example tagged `active_mutator: :no_kill_ok` is listed as
-  # ignored unless it kills a mutant.
+  # ignored unless it kills a mutant. Tags observed in this audit drop out of
+  # later rounds. Cached tags do not suppress checks against fresh mutants.
   class TestAudit
     # flagged: Flags, by id. cleared: how many examples were seen to kill.
     # ignored: ids of tagged examples that never killed. not_judged: ids
@@ -68,13 +69,16 @@ module ActiveMutator
       @cleared = @results.flat_map(&:killed_by).to_set { |id| key(id) }
       @passes = {}
       @ignored = Set.new
-      @ignored_pairs = {}
-      @results.select(&:carried).each do |result|
-        record_ignored(result)
+      @fresh_ignored = Set.new
+      carried = @results.select(&:carried)
+      @carried_mutants = carried.to_set(&:mutation)
+      carried.each do |result|
+        result.ignored.each { |id| @ignored << key(id) }
         record_passes(result)
       end
       runs = audit(killable.to_h { |r| [r.mutation, @example_ids.fetch(r.mutation, []).dup] })
       universe = defs.flat_map { |r| @example_ids.fetch(r.mutation, []) }.uniq { |id| key(id) }
+      @ignored.merge(@fresh_ignored)
       report(universe, killable, runs)
     end
 
@@ -108,7 +112,8 @@ module ActiveMutator
       pending.each do |mutation, ids|
         ids.reject! do |id|
           example = key(id)
-          @cleared.include?(example) || @ignored_pairs[mutation]&.include?(example) ||
+          @cleared.include?(example) || @fresh_ignored.include?(example) ||
+            (@carried_mutants.include?(mutation) && @ignored.include?(example)) ||
             @passes.dig(example, 1)&.include?(mutation)
         end
       end
@@ -122,21 +127,13 @@ module ActiveMutator
       if @retain_evidence
         @evidence[result.mutation] = conclusive ? result : result.with(passed: {})
       end
-      record_ignored(result)
+      result.ignored.each { |id| @fresh_ignored << key(id) }
       return unless conclusive
 
       record_passes(result)
 
       result.killed_by.each { |id| @cleared << key(id) }
       (@kills[result.mutation] ||= []).concat(result.killed_by) if result.killed_by.any?
-    end
-
-    def record_ignored(result)
-      return if result.ignored.empty?
-
-      examples = result.ignored.to_set { |id| key(id) }
-      @ignored.merge(examples)
-      @ignored_pairs[result.mutation] = examples if result.carried
     end
 
     def record_passes(result)

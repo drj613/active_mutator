@@ -16,9 +16,11 @@ RSpec.describe ActiveMutator::Runner, "incremental cache" do
   end
 
   before do
+    @baseline_runs = 0
     allow(ActiveMutator::Baseline).to receive(:new).and_wrap_original do |original, **options|
       original.call(**options).tap do |baseline|
         allow(baseline).to receive(:run_rspec) do |path|
+          @baseline_runs += 1
           id = "./spec/counter_spec.rb[1:1]"
           File.write(path, JSON.generate("version" => 2, "records" => { id => [[@source, 2]] },
                                          "times" => { id => 0.1 }))
@@ -31,11 +33,13 @@ RSpec.describe ActiveMutator::Runner, "incremental cache" do
     end
   end
 
-  def run_incremental(events: ActiveMutator::Events.new)
+  def run_incremental(events: ActiveMutator::Events.new, incremental: true)
     out = StringIO.new
     reporter = ActiveMutator::Reporter::Json.new(out: out)
-    config = ActiveMutator::CLI.parse(%w[--incremental --jobs 1])
-    expect(config.incremental).to be(true)
+    flags = %w[--jobs 1]
+    flags << "--incremental" if incremental
+    config = ActiveMutator::CLI.parse(flags)
+    expect(config.incremental).to eq(incremental)
     expect(described_class.new(config, events: events, reporter: reporter).call).to eq(0)
     JSON.parse(out.string)
   end
@@ -53,6 +57,14 @@ RSpec.describe ActiveMutator::Runner, "incremental cache" do
     expect(warm.fetch("results")).to all(include("carried" => true, "seconds" => nil,
                                                  "killed_by" => ["./spec/counter_spec.rb[1:1]"]))
     expect(events).not_to include(:mutant_start)
+  end
+
+  it "reuses baseline coverage when toggling verdict reuse in either direction" do
+    plain = run_incremental(incremental: false)
+    expect(run_incremental.fetch("carried")).to eq(0)
+    expect(run_incremental.fetch("carried")).to be_positive
+    expect(run_incremental(incremental: false).fetch("counts")).to eq(plain.fetch("counts"))
+    expect(@baseline_runs).to eq(1)
   end
 
   it "does not save a verdict when execution inputs change after workers start" do

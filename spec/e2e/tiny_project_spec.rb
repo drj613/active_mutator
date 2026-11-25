@@ -72,6 +72,46 @@ RSpec.describe "tiny_project end-to-end", :e2e do
     end
   end
 
+  it "shares coverage between run modes with RSpec status persistence enabled" do
+    with_fixture_copy do |copy|
+      File.open(File.join(copy, "spec/spec_helper.rb"), "a") do |file|
+        file.puts 'RSpec.configure { |config| config.example_status_persistence_file_path = "spec/examples.txt" }'
+      end
+      phases = lambda do |*flags|
+        result = run_json(copy, "--no-preload-helper", "--events", "events.ndjson", *flags)
+        events = File.readlines(File.join(copy, "events.ndjson")).map { |line| JSON.parse(line) }
+        [result, events]
+      end
+
+      phases.call
+      cold, events = phases.call("--incremental")
+      expect(events).not_to include(a_hash_including("event" => "phase_start", "phase" => "baseline"))
+      expect(cold.fetch("carried")).to eq(0)
+      warm, events = phases.call("--incremental")
+      expect(warm.fetch("carried")).to be_positive
+      expect(events).not_to include(a_hash_including("event" => "mutant_start"))
+      plain, events = phases.call
+      expect(plain.fetch("counts")).to eq(warm.fetch("counts"))
+      expect(events).not_to include(a_hash_including("event" => "phase_start", "phase" => "baseline"))
+    end
+  end
+
+  it "reruns a mutant when a covering example's executed helper changes" do
+    with_fixture_copy do |copy|
+      write_limit_fixture(copy)
+      logic = File.join(copy, "lib/calculator.rb")
+      File.write(logic, "require_relative 'limits'\n" + File.read(logic).sub("n > 10", "n > Limits.edge"))
+      limits = File.join(copy, "lib/limits.rb")
+      File.write(limits, "module Limits\n  def self.edge\n    3\n  end\nend\n")
+      write_cases(copy, 3)
+
+      expect(boundary_result(run_json(copy, "--incremental"))).to include("status" => "killed")
+      File.write(limits, File.read(limits).sub("    3", "    10"))
+      expect(boundary_result(run_json(copy, "--incremental")))
+        .to include("status" => "survived", "carried" => false)
+    end
+  end
+
   it "reports mutations when the warm cache is read-only" do
     run_json(root)
     cache = File.join(root, ".active_mutator")

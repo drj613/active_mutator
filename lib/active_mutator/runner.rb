@@ -183,11 +183,12 @@ module ActiveMutator
 
     def run
       @verdicts = nil
-      inputs = RunInputs.new(@config) if @config.incremental
+      inputs = RunInputs.new(@config)
+      inputs.setup if @config.incremental
       @events.phase(:boot) { boot! }
       discovery, analyses = @events.phase(:planning) do
         found = discover
-        analyses = inputs ? inputs.analyze(found.subjects) : found.subjects.map { |s| Engine.new.analyze(s) }
+        analyses = @config.incremental ? inputs.analyze(found.subjects) : found.subjects.map { |s| Engine.new.analyze(s) }
         [found, analyses]
       end
       subjects = discovery.subjects
@@ -207,7 +208,7 @@ module ActiveMutator
       end
 
       map = Baseline.new(root: @config.root, spec_paths: @config.spec_paths, events: @events, abort: @abort,
-                         setup: inputs&.setup)
+                         inputs: inputs)
               .coverage_map(force: @config.force_baseline)
       @reporter.coverage_map = map if @reporter.respond_to?(:coverage_map=)
 
@@ -219,7 +220,7 @@ module ActiveMutator
       items, pre_results, phase1_ids = plan_work(mutations, map, ledger: ledger, fingerprints: fingerprints)
       return debug_plan(items, pre_results) if @config.debug_plan
 
-      if inputs&.stable?(map)
+      if @config.incremental && inputs.stable?(map)
         @verdicts = VerdictStore.new(@config, map, inputs: inputs)
         items, carried = @verdicts.partition(items)
         pre_results.concat(carried)

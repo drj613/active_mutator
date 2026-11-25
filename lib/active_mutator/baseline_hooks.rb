@@ -93,6 +93,12 @@ if ENV["ACTIVE_MUTATOR_BASELINE_OUT"]
         ActiveMutator::BaselineHooks::RECORDS, ActiveMutator::BaselineHooks::TIMES,
         expected_examples: RSpec.world.example_count
       )
+      status_path = config.example_status_persistence_file_path
+      ignored_status_file = if status_path && !config.only_failures?
+                              root = ENV.fetch("ACTIVE_MUTATOR_ROOT")
+                              File.expand_path(status_path, root).delete_prefix("#{root}/")
+                            end
+      payload["status_file"] = ignored_status_file
       File.write(ENV.fetch("ACTIVE_MUTATOR_BASELINE_OUT"), JSON.generate(payload))
     end
   end

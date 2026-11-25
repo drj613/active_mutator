@@ -417,8 +417,32 @@ RSpec.describe ActiveMutator::Baseline do
       expect(baseline.last_refresh).to eq(:full)
     end
 
+    it "excludes the baseline's status output from saved input digests and refresh checks" do
+      status_file = "spec/status.rb"
+      status_path = File.join(@tmp, status_file)
+      File.write(status_path, "old status")
+      inputs = instance_double(ActiveMutator::RunInputs)
+      allow(inputs).to receive(:setup).with(no_args).and_return("before discovery")
+      allow(inputs).to receive(:setup).with(status_file: status_file).and_return("setup without status")
+      cache = described_class.new(root: @tmp, cache_dir: tmp_cache, inputs: inputs)
+      allow(cache).to receive(:run_rspec) do |path|
+        File.write(path, JSON.generate("version" => 2, "records" => {}, "status_file" => status_file))
+        File.write(status_path, "new status")
+        true
+      end
+
+      map = cache.coverage_map
+      expect(map.status_file).to eq(status_file)
+      expect(map.digests).not_to have_key(status_file)
+      expect(JSON.parse(File.read(out_path)).fetch("setup")).to eq("setup without status")
+      File.write(status_path, "newer status")
+      expect(cache.coverage_map.digests).to eq(map.digests)
+      expect(cache.last_refresh).to eq(:cached)
+    end
+
     it "rebuilds coverage when the setup context changes" do
-      dependent = described_class.new(root: @tmp, cache_dir: tmp_cache, setup: "new setup")
+      inputs = instance_double(ActiveMutator::RunInputs, setup: "new setup")
+      dependent = described_class.new(root: @tmp, cache_dir: tmp_cache, inputs: inputs)
       write_cache(dependent.send(:current_digests))
       payload = JSON.parse(File.read(out_path))
       payload["root"] = @tmp

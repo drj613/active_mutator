@@ -12,8 +12,11 @@ module ActiveMutator
       @path = File.join(@root, ".active_mutator", "verdicts.json")
       @source_digests = inputs.source_digests
       @spec_digests = inputs.spec_digests(map)
-      @context = fingerprint([inputs.setup, Operators::Base::REGISTRY.filter_map(&:name)])
-      @class_body_context = fingerprint([map.records.keys.sort, @spec_digests.sort])
+      @context = fingerprint([inputs.setup(status_file: map.status_file), Operators::Base::REGISTRY.filter_map(&:name)])
+      @records = map.records
+      @digests = map.digests
+      @dependencies = {}
+      @class_body_context = fingerprint([@records.keys.sort, @digests.sort, @spec_digests.sort])
       @entries = read_entries
       @keys = {}.compare_by_identity
       @inconclusive = {}.compare_by_identity
@@ -43,14 +46,15 @@ module ActiveMutator
     end
 
     def save(results, prune:)
-      updates = results.each_with_object({}) do |result, saved|
-        key, signature = @keys[result.mutation]
-        next unless key
-
-        saved[key] = if signature && !@inconclusive[result.mutation] && STATUSES.value?(result.status)
-                       { signature: signature, status: result.status, details: result.details,
-                         killed_by: result.killed_by, passed: result.passed, ignored: result.ignored }
-                     end
+      by_mutation = {}.compare_by_identity
+      results.each { |result| by_mutation[result.mutation] = result }
+      updates = @keys.to_h do |mutation, (key, signature)|
+        result = by_mutation.fetch(mutation)
+        entry = if signature && !@inconclusive[mutation] && STATUSES.value?(result.status)
+                  { signature: signature, status: result.status, details: result.details,
+                    killed_by: result.killed_by, passed: result.passed, ignored: result.ignored }
+                end
+        [key, entry]
       end
       FileUtils.mkdir_p(File.dirname(@path))
       AtomicFile.write(@path) do
@@ -77,7 +81,16 @@ module ActiveMutator
       return [key, nil] unless source_digest && spec_digests.all?
 
       scope = @class_body_context if subject.class_body?
-      [key, fingerprint([source_digest, item.example_ids.sort, spec_digests, scope])]
+      ids = item.example_ids.sort
+      dependencies = ids.map { |id| @dependencies[id] ||= dependency_fingerprint(id) }
+      [key, fingerprint([source_digest, ids, spec_digests, scope, dependencies])]
+    end
+
+    def dependency_fingerprint(id)
+      files = @records.fetch(id, []).map do |file, _|
+        file.delete_prefix("#{@root}/")
+      end.uniq.sort
+      fingerprint(@digests.slice(*files))
     end
 
     def fingerprint(value) = Digest::SHA256.hexdigest(JSON.generate(value))

@@ -120,11 +120,12 @@ RSpec.describe ActiveMutator::RunInputs do
     expect(inputs).to receive(:require).with("rspec/core").and_call_original
 
     inputs.send(:initialize, ActiveMutator::CLI.parse([]))
+    inputs.setup
   end
 
   it "keeps fingerprint implementation private" do
     inputs = described_class.new(ActiveMutator::CLI.parse([]))
-    expect(inputs).not_to respond_to(:setup_fingerprint)
+    expect(inputs).not_to respond_to(:setup_manifest)
     expect(inputs).not_to respond_to(:require_files)
   end
 
@@ -190,5 +191,33 @@ RSpec.describe ActiveMutator::RunInputs do
     end
 
     expect(fingerprint).to eq(original)
+  end
+  it "ignores only the configured status output when checking setup" do
+    status_file = "spec/custom_status.txt"
+    make_input(status_file, "earlier results")
+    make_input("spec/fixture.txt", "input")
+    config = ActiveMutator::CLI.parse([])
+    inputs = described_class.new(config)
+    map = ActiveMutator::CoverageMap.new("status_file" => status_file)
+    old = inputs.setup
+    File.write(status_file, "later results")
+
+    expect(inputs.stable?(map)).to be(true)
+    expect(described_class.new(config).setup).not_to eq(old)
+    File.write("spec/fixture.txt", "changed input")
+    expect(inputs.stable?(map)).to be(false)
+  end
+
+  it "detects changes to baseline source dependencies outside the mutation plan" do
+    helper = "lib/limits.rb"
+    make_input(helper, "module Limits; end")
+    config = ActiveMutator::CLI.parse([])
+    map = ActiveMutator::CoverageMap.new("digests" => { helper => Digest::SHA256.file(helper).hexdigest })
+    inputs = described_class.new(config)
+    inputs.setup
+    expect(inputs.stable?(map)).to be(true)
+
+    File.write(helper, "module Limits; CONST = 2; end")
+    expect(inputs.stable?(map)).to be(false)
   end
 end
