@@ -1095,6 +1095,49 @@ RSpec.describe ActiveMutator::Runner do
       allow(ActiveMutator::Baseline).to receive(:new).and_return(baseline)
     end
 
+    it "writes a verified killer from the scheduler through to the cache" do
+      Dir.mktmpdir do |dir|
+        cfg = config.with(root: dir, jobs: 1)
+        reporter = instance_double(ActiveMutator::Reporter::Terminal, on_result: nil, summary: nil)
+        runner = described_class.new(cfg, reporter: reporter)
+        stub_call_collaborators(runner, [mutation])
+        allow(ActiveMutator::Worker).to receive(:run) do |_mutant, ids, writer|
+          writer.puts JSON.generate("status" => "killed", "killer" => ids.first)
+        end
+
+        expect(runner.call).to eq(0)
+        path = File.join(dir, ".active_mutator", "killers.json")
+        expect(JSON.parse(File.read(path)).values).to eq(["./spec/a_spec.rb[1:1]"])
+      end
+    end
+
+    [
+      [{}, false],
+      [{ paths: ["lib"] }, true],
+      [{ subject_filter: "A#x" }, true],
+      [{ exclude: ["lib/skipped.rb"] }, true],
+      [{ class_level: false }, true]
+    ].each do |scope, preserved|
+      it "preserves out-of-plan hints only for a narrowed run with #{scope.inspect}" do
+        Dir.mktmpdir do |dir|
+          cfg = config.with(root: dir, paths: [], **scope)
+          path = File.join(dir, ".active_mutator", "killers.json")
+          FileUtils.mkdir_p(File.dirname(path))
+          entries = { JSON.generate(["lib/other.rb", "Other#x", "instance"]) => "./spec/other_spec.rb[1:1]" }
+          File.write(path, JSON.generate(entries))
+          reporter = instance_double(ActiveMutator::Reporter::Terminal, on_result: nil, summary: nil)
+          runner = described_class.new(cfg, reporter: reporter)
+          stub_call_collaborators(runner, [mutation])
+          allow(ActiveMutator::Worker).to receive(:run) do |_mutant, _ids, writer|
+            writer.puts JSON.generate("status" => "killed")
+          end
+
+          expect(runner.call).to eq(0)
+          expect(JSON.parse(File.read(path))).to eq(preserved ? entries : {})
+        end
+      end
+    end
+
     it "caps mutations at max_mutants before planning" do
       Dir.mktmpdir do |dir|
         mutations = [mutation(line: 1), mutation(line: 2), mutation(line: 3)]

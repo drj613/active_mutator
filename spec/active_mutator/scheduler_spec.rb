@@ -1121,6 +1121,49 @@ RSpec.describe ActiveMutator::Scheduler do
       expect(orders(results)).to match_array([ids, ids])
     end
 
+    it "prioritizes a sibling's group within a run when persistence is enabled" do
+      Dir.mktmpdir do |root|
+        memory = ActiveMutator::KillerMemory.new(root)
+        worker = scripted({ 1 => ["killed", b1], 2 => ["killed", nil] })
+        sibling = b1.sub("1:1", "1:2")
+        results = described_class.new(jobs: 1, worker: worker, killer_memory: memory)
+                                 .run([work(foo, ids), work(foo2, [a1, sibling])])
+        expect(orders(results).last).to eq([sibling, a1])
+      end
+    end
+
+    it "merges disjoint kills from overlapping runs" do
+      Dir.mktmpdir do |root|
+        first = ActiveMutator::KillerMemory.new(root)
+        second = ActiveMutator::KillerMemory.new(root)
+        other = mutation_in("/app/other.rb", line: 1)
+        worker = scripted({ 1 => ["killed", b1] })
+        described_class.new(jobs: 1, worker: worker, killer_memory: first).run([work(foo, ids)])
+        described_class.new(jobs: 1, worker: worker, killer_memory: second).run([work(other, ids)])
+        first.save
+        second.save
+        restored = ActiveMutator::KillerMemory.new(root)
+        expect(restored.group_for(work(foo, ids))).to eq(ActiveMutator::ExampleId.group_key(b1))
+        expect(restored.group_for(work(other, ids))).to eq(ActiveMutator::ExampleId.group_key(b1))
+      end
+    end
+
+    it "seeds the first mutant from a verified killer saved by a previous scheduler" do
+      Dir.mktmpdir do |root|
+        memory = ActiveMutator::KillerMemory.new(root)
+        worker = scripted({ 1 => ["killed", b1], 2 => ["killed", nil] })
+        described_class.new(jobs: 1, worker: worker, killer_memory: memory).run([work(foo, ids)])
+        memory.save
+
+        reloaded = ActiveMutator::KillerMemory.new(root)
+        scheduler = described_class.new(jobs: 1, worker: worker, killer_memory: reloaded)
+        expect(orders(scheduler.run([work(foo2, ids)]))).to eq([[b1, a1, c1]])
+
+        changed_ids = [a1, c1, b1.sub("1:1", "1:2")]
+        expect(orders(scheduler.run([work(foo2, changed_ids)]))).to eq([changed_ids])
+      end
+    end
+
     it "forgets everything between runs of one scheduler" do
       sched = described_class.new(jobs: 1, worker: scripted({ 1 => ["killed", b1], 2 => ["killed", nil] }))
       sched.run([work(foo, ids)])

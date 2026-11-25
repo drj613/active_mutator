@@ -142,7 +142,7 @@ module ActiveMutator
     # audit workers, with no on_result: no mutant gets a second status char.
     def audit_tests(results, scheduler, map, phase1_ids:)
       scheduler ||= Scheduler.new(jobs: @config.jobs, worker: AUDIT_WORKER, events: @events,
-                                  first_seq: phase1_ids.size + @escalated + 1, abort: @abort, orphaned: orphaned)
+                                  first_seq: phase1_ids.size + @escalated + 1, abort: @abort, orphaned: orphaned, **killer_options)
       audit = TestAudit.new(results: results, example_ids: phase1_ids, width: @config.jobs,
                             build: ->(mutation, ids) { build_work_item(mutation, ids, map) },
                             run: scheduler.method(:run))
@@ -211,6 +211,7 @@ module ActiveMutator
       # land between two steps (the sample as mutating ends, the spec reads
       # before escalation) and drop every finished verdict. Each step checks
       # the flag instead and raises with the results it has.
+      @killer_memory = KillerMemory.new(@config.root)
       test_audit = nil # read after the block, for the exit code
       results = @abort.deferred do
         done = @events.phase(:mutating, mutants: items.size) { mutate(items, pre_results) }
@@ -223,6 +224,8 @@ module ActiveMutator
         test_audit = test_audit&.with(fail_on_flags: @config.fail_on_no_kills)
 
         reporting(done) do
+          prune_killers = narrowing_flags.empty? && @config.paths.empty? && @config.exclude.empty? && @config.class_level
+          @killer_memory.save(subjects: prune_killers ? subjects : nil)
           accept_survivors!(ledger, done, fingerprints, scanned_files) if @config.accept_survivors
           # Only when it ran, so an injected reporter without the keyword still works.
           extra = test_audit ? { test_audit: test_audit } : {}
@@ -236,13 +239,17 @@ module ActiveMutator
       test_audit&.failing? ? 1 : exit_code(results)
     end
 
+    def killer_options
+      @killer_memory ? { killer_memory: @killer_memory } : {}
+    end
+
     def mutate(items, pre_results)
       pre_results.each { |r| @reporter.on_result(r) }
       calibrators = if @config.adaptive_timeout
                       { parallel: TimeoutCalibrator.new, serial: TimeoutCalibrator.new }
                     end
       scheduler = Scheduler.new(jobs: @config.jobs, on_result: @reporter.method(:on_result),
-                                calibrators: calibrators, events: @events, abort: @abort, orphaned: orphaned)
+                                calibrators: calibrators, events: @events, abort: @abort, orphaned: orphaned, **killer_options)
       scheduler.run(items) + pre_results
     rescue Aborted => e
       raise e.with_results(e.results + pre_results)
