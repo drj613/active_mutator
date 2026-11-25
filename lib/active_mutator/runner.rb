@@ -182,7 +182,6 @@ module ActiveMutator
     private
 
     def run
-      @verdicts = nil
       inputs = RunInputs.new(@config)
       inputs.setup if @config.incremental
       @events.phase(:boot) { boot! }
@@ -220,8 +219,10 @@ module ActiveMutator
       items, pre_results, phase1_ids = plan_work(mutations, map, ledger: ledger, fingerprints: fingerprints)
       return debug_plan(items, pre_results) if @config.debug_plan
 
-      if @config.incremental && inputs.stable?(map)
-        @verdicts = VerdictStore.new(@config, map, inputs: inputs)
+      @verdicts = if @config.incremental && inputs.stable?(map)
+                    VerdictStore.new(@config, map, inputs: inputs)
+                  end
+      if @verdicts
         items, carried = @verdicts.partition(items)
         pre_results.concat(carried)
       end

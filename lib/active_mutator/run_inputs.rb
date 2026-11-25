@@ -82,8 +82,7 @@ module ActiveMutator
 
     def fingerprint(manifest, status_file)
       runtime, files, gem_files = manifest
-      files = files.except(status_file) if status_file
-      Digest::SHA256.hexdigest(JSON.generate([runtime, files, gem_files]))
+      Digest::SHA256.hexdigest(JSON.generate([runtime, files.except(status_file), gem_files]))
     end
 
     def require_files(file)

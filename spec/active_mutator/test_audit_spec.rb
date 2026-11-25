@@ -265,6 +265,15 @@ RSpec.describe ActiveMutator::TestAudit do
     expect(report.ignored).to eq([b])
   end
 
+  it "checks missing audit evidence for an untagged example on a carried mutant" do
+    cached = result(m1, :killed, killed_by: [a], ignored: [b]).with(carried: true)
+    report = audit([cached], { m1 => [a, b, c] },
+                   { m1 => ->(_) { result(m1, :survived, passed: passes(c)) } })
+
+    expect(@rounds).to eq([[[m1, [c]]]])
+    expect(report.flagged.map(&:id)).to eq([c])
+  end
+
   it "retains only conclusive passes when asked to keep incremental evidence" do
     errored = result(m1, :error, passed: passes(b), ignored: [c])
     [true, false].each do |retain|

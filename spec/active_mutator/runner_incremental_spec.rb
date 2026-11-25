@@ -67,6 +67,30 @@ RSpec.describe ActiveMutator::Runner, "incremental cache" do
     expect(@baseline_runs).to eq(1)
   end
 
+  it "honors the setup snapshot taken before boot" do
+    fixture = File.join(@root, "spec/input.txt")
+    File.write(fixture, "initial setup")
+    bus = ActiveMutator::Events.new.subscribe do |event|
+      if event.type == :phase_end && event.fields[:phase] == :boot
+        File.write(fixture, "changed during boot")
+      end
+    end
+
+    run_incremental(events: bus)
+    expect(File.exist?(File.join(@root, ".active_mutator", "verdicts.json"))).to be(false)
+  end
+
+  it "does not carry verdicts if planning changes a previously cached input" do
+    run_incremental
+    bus = ActiveMutator::Events.new.subscribe do |event|
+      if event.type == :phase_end && event.fields[:phase] == :planning
+        File.open(@source, "a") { |file| file.puts "# changed after planning" }
+      end
+    end
+
+    expect(run_incremental(events: bus).fetch("carried")).to eq(0)
+  end
+
   it "does not save a verdict when execution inputs change after workers start" do
     bus = ActiveMutator::Events.new.subscribe do |event|
       File.open(@source, "a") { |file| file.puts "# changed during mutation" } if event.type == :mutant_start

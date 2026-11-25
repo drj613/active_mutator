@@ -417,6 +417,40 @@ RSpec.describe ActiveMutator::Baseline do
       expect(baseline.last_refresh).to eq(:full)
     end
 
+    it "stamps the setup captured before the suite can change its inputs" do
+      fixture = File.join(@tmp, "spec/fixture.txt")
+      File.write(fixture, "original")
+      config = ActiveMutator::CLI.parse([]).with(root: @tmp)
+      expected = ActiveMutator::RunInputs.new(config).setup
+      cache = described_class.new(root: @tmp, cache_dir: tmp_cache, inputs: ActiveMutator::RunInputs.new(config))
+      allow(cache).to receive(:run_rspec) do |path|
+        File.write(fixture, "changed by suite")
+        File.write(path, JSON.generate("version" => 2, "records" => {}))
+        true
+      end
+
+      cache.coverage_map
+      expect(JSON.parse(File.read(out_path)).fetch("setup")).to eq(expected)
+    end
+
+    it "updates status metadata only when a partial run reports it" do
+      first = "./spec/a_spec.rb[1:1]"
+      second = "./spec/b_spec.rb[1:1]"
+      file = File.join(@tmp, "spec/b_spec.rb")
+      write_cache(baseline.send(:current_digests), records: { first => a_hit, second => a_hit })
+      payload = JSON.parse(File.read(out_path)).merge("status_file" => "spec/old_status.txt")
+      File.write(out_path, JSON.generate(payload))
+      File.write(file, "RSpec.describe(A) { it { A.new.x } }")
+      fake_child(payload: { "records" => { second => a_hit }, "status_file" => "spec/new_status.txt" })
+
+      expect(baseline.coverage_map.status_file).to eq("spec/new_status.txt")
+      expect(baseline.last_refresh).to eq(:partial)
+
+      File.unlink(file)
+      expect(baseline.coverage_map.status_file).to eq("spec/new_status.txt")
+      expect(baseline.last_refresh).to eq(:partial)
+    end
+
     it "excludes the baseline's status output from saved input digests and refresh checks" do
       status_file = "spec/status.rb"
       status_path = File.join(@tmp, status_file)

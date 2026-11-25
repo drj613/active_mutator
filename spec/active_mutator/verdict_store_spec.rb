@@ -160,12 +160,15 @@ RSpec.describe ActiveMutator::VerdictStore do
   it "invalidates only the method verdicts whose examples executed changed dependency files" do
     a, b = %w[./spec/counter_spec.rb[1:1] ./spec/counter_spec.rb[1:2]]
     left, right = item(ids: [a]), item("3", ids: [b])
-    records = { a => [[File.join(@root, "lib/limits.rb"), 2]], b => [[@file, 2]] }
+    records = { a => [[File.join(@root, "lib/limits.rb"), 2], [@file, 2]], b => [[@file, 2]] }
     digests = { "lib/limits.rb" => "previous", "lib/counter.rb" => "source digest" }
     first = ActiveMutator::CoverageMap.new("records" => records, "digests" => digests)
     cache = store(coverage: first)
     cache.partition([left, right])
     cache.save([result(left, :killed), result(right, :killed)], prune: false)
+
+    reordered = ActiveMutator::CoverageMap.new("records" => records.transform_values(&:reverse), "digests" => digests)
+    expect(store(coverage: reordered).partition([left, right]).last.map(&:status)).to eq(%i[killed killed])
 
     changed = ActiveMutator::CoverageMap.new("records" => records, "digests" => digests.merge("lib/limits.rb" => "new"))
     expect(store(coverage: changed).partition([left, right])).to eq([[left], [result(right, :killed).with(carried: true)]])
